@@ -4,7 +4,7 @@
 
 ## Current scope
 
-Initialized on 2026-11-10 with structure, index and gates only; there is no product code yet. The license and whether external contributions are accepted are still undecided - check with the maintainer before opening a PR.
+Initialized on 2026-11-10 with structure, index and gates only; there is no product code yet. Licensed under [MIT](LICENSE); check with the maintainer before opening a PR.
 
 ## Before committing
 

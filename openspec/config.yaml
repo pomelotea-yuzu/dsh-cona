@@ -18,7 +18,7 @@ context: |
 
   环境与未定项：
   - 开发环境 macOS（arm64 / zsh），Node >= 20；CI runner 沿用仓库门禁脚本。
-  - 许可证待定；仓库暂不放 LICENSE。
+  - 许可证 MIT（见根目录 LICENSE）。
   - 插件与 DSH 宿主的接入契约、检查点格式、交付与回退的实现方案均未定。
   - push 与 tag 归用户；远程同步状态只认实时命令。
 

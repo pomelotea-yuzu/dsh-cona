@@ -8,7 +8,7 @@ This repository contains documentation, specs and repository gates only. There i
 
 ## Reporting
 
-If you find credential leaks, unauthorized outbound data, path escapes or bypasses of the repository gates, contact the maintainer privately - **do not open a public issue**. Concrete reporting channels will be added here once the remote repositories are set up.
+If you find credential leaks, unauthorized outbound data, path escapes or bypasses of the repository gates, use [GitHub private vulnerability reporting](https://github.com/pomelotea-yuzu/dsh-cona/security/advisories/new) - **do not open a public issue**.
 
 ## Conventions
 

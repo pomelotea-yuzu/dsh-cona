@@ -10,4 +10,4 @@
 
 ## Scope
 
-Issues, pull requests, reviews and document collaboration in this repository. Whether external contributions are accepted is undecided; the maintainer will clarify how to participate.
+Issues, pull requests, reviews and document collaboration in this repository. Licensed under MIT; the maintainer will clarify how external participation works.

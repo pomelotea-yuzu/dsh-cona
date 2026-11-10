@@ -25,7 +25,7 @@ DSH（DeepSeek Harness）插件方向的新仓库，由已封存仓库 **Cona** 
 
 - 结构仿照 `~/Developer/layress`；门禁脚本、CI、模板与 i18n 清单沿用其骨架并按本仓库改名。
 - 远程：Gitee + GitHub 双端，实际地址以 `git remote -v` 为准；push 与 tag 由用户手动执行。
-- 许可证：**待定**，本仓库暂不放 `LICENSE`。
+- 许可证：[MIT](LICENSE)。
 
 ## 目录
 
