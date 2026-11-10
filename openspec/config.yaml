@@ -1,0 +1,33 @@
+schema: spec-driven
+
+context: |
+  项目：dsh-cona — DeepSeek Harness（DSH）插件，只提供检查点／交付／回退。
+  由封存仓库 Cona 转向而来；最终决定见 docs/product/product-decisions.md §6，
+  仍有效决定速查见 docs/knowledge/decisions.md。本段只是当前状态说明，不新增决定。
+
+  当前阶段（2026-11-10）：本地仓库刚初始化，只有结构、索引与门禁；
+  未编写插件代码、未安装依赖、未建立 workspace、未立活动 change，本轮不 push。
+
+  已定边界：
+  - 不做独立桌面 Agent 产品；不自研沙箱，隔离与执行由 DSH 宿主提供。
+  - 纯 Node ESM，跨平台；不调用平台原生 API，不硬编码盘符与路径分隔符。
+  - 数据落点由插件的 Config.dataRoot 指定，具体取值待定稿。
+  - E 系列与 P 系列验证结论不继承；F01–F08 规范与设计仅作参考，
+    代码移植后须重测路径语义（symlink、APFS 大小写、hardlink、权限位）。
+  - 旧 Windows 原型与运行证据不入库，不作为本插件已验证能力。
+
+  环境与未定项：
+  - 开发环境 macOS（arm64 / zsh），Node >= 20；CI runner 沿用仓库门禁脚本。
+  - 许可证待定；仓库暂不放 LICENSE。
+  - 插件与 DSH 宿主的接入契约、检查点格式、交付与回退的实现方案均未定。
+  - push 与 tag 归用户；远程同步状态只认实时命令。
+
+conventions:
+  language: 默认中文；仅 i18n/docs-manifest.json 登记的对外文档同轮维护英文
+  naming:
+    specs: openspec/specs/<capability>/spec.md
+    changes: openspec/changes/<verb-led-kebab-name>/
+    archive: openspec/changes/archive/<YYYY-MM-DD>-<change-name>/
+  evidence:
+    honesty: 未执行、未测、受阻如实单列；不把机器通过或 Agent 声称完成写成人工验收通过
+  authority: 源码 > changes/archive/ > specs/ > docs/ > AGENTS.md

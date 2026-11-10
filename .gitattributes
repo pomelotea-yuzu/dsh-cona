@@ -1,0 +1,58 @@
+# DSH-Cona · 行尾与二进制属性
+#
+# 为什么强制 LF：Windows 系统级 core.autocrlf=true 会把工作区检出成 CRLF，
+# 于是 Biome/ESLint 的 format 检查在**别人机器上**满屏误报，而仓库 blob 其实是好的。
+# 前置项目就在这条上浪费过一次全仓排查。仓库 blob 恒为 LF，检出恒为 LF。
+#
+# 规则：默认所有文本按 LF 检出；二进制显式标记 -text，禁止任何转换
+#（数据集样本一旦被判成文本改行尾，内容哈希就变了，回放对不上）。
+
+* text=auto eol=lf
+
+# ── 源码与配置 ──
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.mts   text eol=lf
+*.js    text eol=lf
+*.cjs   text eol=lf
+*.mjs   text eol=lf
+*.json  text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+*.sh    text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+.githooks/* text eol=lf
+
+# ── 二进制：禁一切转换 ──
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.zip   binary
+*.gz    binary
+*.tar   binary
+*.msi   binary
+*.exe   binary
+*.dll   binary
+*.node  binary
+
+# ── 测试/数据集夹具：按字节校验，禁一切行尾与空白处理 ──
+# （-text 已足以关掉 eol 转换与文本合并，不要再叠 !eol 造成歧义）
+datasets/** -text
+**/fixtures/** -text
+# 期望文件里的行尾本身就是被测事实，不能被 trim 或改写
+**/*.snap  text eol=lf -whitespace
+
+# GitHub / Gitee 语言统计里排除生成物与快照
+docs/reviews/** linguist-documentation
+*.snap linguist-generated

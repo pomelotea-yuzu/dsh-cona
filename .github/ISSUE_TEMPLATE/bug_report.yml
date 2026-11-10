@@ -1,0 +1,34 @@
+name: Bug report / 缺陷报告
+description: Report a reproducible problem / 报告可复现的问题
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        当前仓库只有文档与门禁，尚无插件代码；若涉及未来实现，请注明版本与环境。
+        This repository currently has no plugin code; include version and environment if relevant.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / 现象
+      description: What did you expect, what happened instead? / 期望什么，实际发生什么
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction / 复现步骤
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment / 环境
+      description: OS, Node version, DSH host version / 系统、Node 版本、DSH 宿主版本
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmations / 确认项
+      options:
+        - label: No credentials or private paths included / 未包含凭据或本机私有路径
+          required: true

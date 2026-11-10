@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "convention": "文档默认中文；本表仅登记当前维护的对外中英版本，内部英文旧版归档到 docs/drafts/，不入库、不参与配对检查。",
+  "notRequired": [
+    "AGENTS.md",
+    "docs/**",
+    "i18n/**",
+    "datasets/**",
+    "openspec/**",
+    ".github/**",
+    ".gitee/**",
+    ".workflow/**"
+  ],
+  "docs": [
+    "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "CHANGELOG.md"
+  ]
+}

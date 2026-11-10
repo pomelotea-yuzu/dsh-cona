@@ -1,0 +1,84 @@
+# DSH-Cona · 入库排除清单
+#
+# 口径（与 AGENTS.md §五 一致，改这里必须同步改那里）：
+#   1. 本文件是**兜底**，不是唯一防线。真正的强制门禁是 `scripts/check-hygiene.mjs`
+#      （pre-commit + CI 双跑）：体积、后缀、路径、密钥形态、忽略泄露五项全查。
+#   2. 每一段都写明「这是什么」和「有价值的东西该去哪」。
+#      凡是"随手一放"的目录，最后都会变成垃圾场 —— 前置项目里 `output/` 就是这么烂掉的，
+#      本仓不给它起名的机会，统一只认 `artifacts/` 与 `.dsh-cona/` 两个垃圾场。
+#   3. 确需入库的二进制/大文件：先放进 `datasets/` 或 `docs/` 的正确位置，
+#      再在 `.git-hygiene-allowlist` 里登记「glob + 一句话理由」，最后 `git add -f`。
+#      没有理由行的豁免 = 门禁失败。
+
+# ── 依赖与构建产物 ──────────────────────────────────────────────
+node_modules/
+dist/
+out/
+build/
+.pnpm-store/
+*.tsbuildinfo
+release/
+release-*/
+
+# ── 运行时数据（便携优先：数据跟着产品走，三端都不落系统用户目录）──
+# .dsh-cona/ = 默认数据根与日志根。扫描 run、探针输出、缓存、临时文件全在这里。
+# 它是本仓唯一允许的"运行期垃圾场"；要留证据先迁进 docs/reviews/ 或 datasets/。
+# data/ = 便携包旁的业务数据目录（口径见不变量 I12–I13：拷贝即迁移，删除即无残留）。
+.dsh-cona/
+data/
+*.jsonl.trace
+
+# ── 一次性产物垃圾场（可重跑生成，默认不入库）──────────────────
+# 规矩：这里只放**脚本重新生成即可复原**的东西。
+# 手写内容、结论、审阅记录一律直接写进 docs/，不要先落 artifacts/ 再说。
+artifacts/
+output/
+.tmp/
+.tmp-*/
+*.log
+*.timestamp-*.mjs
+*.bak
+
+# ── 编辑器 / 智能体的本机配置与本机记忆 ────────────────────────
+# 各工具自行生成、可随时重建，且含机器特定绝对路径 ⇒ 不入库。
+# 注意：本仓的**跨工具共享记忆**不在这里，在 AGENTS.md + docs/knowledge/（入库）。
+# 若你用的智能体只认 CLAUDE.md / .cursorrules，让它指向 AGENTS.md，不要另起一份内容。
+.trae/
+.cursor/
+.claude/
+.vscode/
+.idea/
+.workbuddy/
+.qoder/
+CLAUDE.md
+
+# ── 本机接入配置（含绝对路径与可能的凭据，永不入库）────────────
+.env
+.env.*
+!.env.example
+/.mcp.json
+
+# ── 操作系统噪声 ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── 文档过程资产（有价值的必须先归档再排除）────────────────────
+# 草稿 = 个人工作过程，不外露；也收停止维护的内部译本本地归档，不作为当前依据。
+# 有效结论写进 docs/product/、docs/engineering/ 或 docs/knowledge/；旧版原文可从 Git 历史查。
+docs/drafts/
+# 实机截图默认留本地；验收证据确需对外展示时按第 3 条口径 add -f。
+docs/reviews/**/*.png
+artifacts/**/*.png
+
+# ── 大文件后缀（正常开发根本不该出现在工作区）──────────────────
+# 这一组由 check-hygiene 的后缀黑名单同步，写在这里是为了让 `git status` 也看不见它们。
+*.msi
+*.exe
+*.dll
+*.node
+*.pdb
+*.lib
+*.7z
+*.rar
+*.iso

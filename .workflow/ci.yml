@@ -1,0 +1,45 @@
+# DSH-Cona CI 质量门禁（Gitee Go 流水线）
+#
+# 与 pre-commit 和 .github/workflows/ci.yml 共用 scripts/check-repo.mjs 的门禁链。
+#
+# ⚠️ 沿用前置项目的两条 Gitee Go 实测教训（不是猜测）：
+#   1. build@nodejs 插件对 nodeVersion 的支持清单不可靠，可能**静默跳过**自带 Node 安装，
+#      容器里没有可用 node。因此 Node 由 commands 自行安装，nodeVersion 字段只当必填占位。
+#   2. Gitee Go 的 commands **逐条执行、单条失败不短路** —— 分成多条命令会出现"前面红了整体还绿"。
+#      所以门禁全部用 && 链成一条命令，由最终退出码判败，杜绝假绿。
+#
+# pnpm workspace 落地后把链尾换成：pnpm install --frozen-lockfile && pnpm check:ci && node scripts/check-i18n.mjs
+
+version: '1.0'
+name: ci-gates
+displayName: CI 质量门禁
+
+triggers:
+  push:
+    branches:
+      precise:
+        - main
+  pr:
+    branches:
+      precise:
+        - main
+
+stages:
+  - stage: gates
+    displayName: 校验门禁
+    strategy: fast
+    trigger: auto
+    steps:
+      - step: build@nodejs
+        name: check_gates
+        displayName: '洁净度 + 文档链接 + 双语成对 + 自测'
+        # 占位：插件可能不认识该版本并跳过其安装动作，真正的 Node 由下面命令自装
+        nodeVersion: 20.19.0
+        commands:
+          # ① 自装 Node 20（npmmirror 镜像；curl/wget 二选一，解到 /usr/local 使 node 入 PATH）
+          # 公共入口内部串行执行全部检查，任一步失败即返回非零。
+          - >-
+            (curl -fsSL https://npmmirror.com/mirrors/node/v20.19.0/node-v20.19.0-linux-x64.tar.gz -o /tmp/node.tar.gz
+            || wget -q https://npmmirror.com/mirrors/node/v20.19.0/node-v20.19.0-linux-x64.tar.gz -O /tmp/node.tar.gz)
+            && tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 && node -v
+            && node scripts/check-repo.mjs --all

@@ -1,0 +1,17 @@
+# GitHub Issue 表单入口配置（表单内并列双语，不做中英两份）。
+blank_issues_enabled: false
+
+contact_links:
+  - name: Gitee mirror / Gitee 镜像仓库
+    url: https://gitee.com/yuzu-tea-duck/dsh-cona/issues
+    about: >-
+      Mainland China networks can open issues on Gitee (Chinese-only template) /
+      大陆网络环境可到 Gitee 侧提 issue（纯中文模板，口径与本页等价）
+
+  - name: Documentation / 使用文档
+    url: https://github.com/pomelotea-yuzu/dsh-cona#readme
+    about: Current status and settled decisions / 当前状态与已定决定
+
+  - name: Handoff index / 接手索引
+    url: https://github.com/pomelotea-yuzu/dsh-cona/blob/main/AGENTS.md
+    about: Single entry point for developers and agents / 开发者与智能体的唯一入口

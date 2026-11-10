@@ -1,0 +1,33 @@
+name: Feature request / 功能建议
+description: Propose a capability within the plugin scope / 在插件范围内提出能力建议
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        本仓库方向已定：DSH 插件，只提供检查点／交付／回退，不自研沙箱。
+        已定决定见 docs/knowledge/decisions.md，请勿在 issue 里重开辩论。
+        Scope is settled: a DSH plugin for checkpoints, delivery and rollback; no in-house sandbox.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve / 要解决的问题
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour / 建议行为
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Existing alternatives / 已有解法
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmations / 确认项
+      options:
+        - label: Read the settled decisions / 已读已定决定
+          required: true
