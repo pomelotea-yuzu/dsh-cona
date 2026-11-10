@@ -1,6 +1,6 @@
 # DSH-Cona · 入库排除清单
 #
-# 口径（与 AGENTS.md §五 一致，改这里必须同步改那里）：
+# 口径（强制判定以 scripts/check-hygiene.mjs 为准，改这里必须同步改门禁）：
 #   1. 本文件是**兜底**，不是唯一防线。真正的强制门禁是 `scripts/check-hygiene.mjs`
 #      （pre-commit + CI 双跑）：体积、后缀、路径、密钥形态、忽略泄露五项全查。
 #   2. 每一段都写明「这是什么」和「有价值的东西该去哪」。
@@ -23,7 +23,7 @@ release-*/
 # ── 运行时数据（便携优先：数据跟着产品走，三端都不落系统用户目录）──
 # .dsh-cona/ = 默认数据根与日志根。扫描 run、探针输出、缓存、临时文件全在这里。
 # 它是本仓唯一允许的"运行期垃圾场"；要留证据先迁进 docs/reviews/ 或 datasets/。
-# data/ = 便携包旁的业务数据目录（口径见不变量 I12–I13：拷贝即迁移，删除即无残留）。
+# data/ = 便携包旁的业务数据目录（口径：拷贝即迁移，删除即无残留）。
 .dsh-cona/
 data/
 *.jsonl.trace
@@ -31,7 +31,9 @@ data/
 # ── 一次性产物垃圾场（可重跑生成，默认不入库）──────────────────
 # 规矩：这里只放**脚本重新生成即可复原**的东西。
 # 手写内容、结论、审阅记录一律直接写进 docs/，不要先落 artifacts/ 再说。
-artifacts/
+artifacts/*
+# 占位说明入库，与 apps/ packages/ datasets/ 一致；其余内容仍不入库
+!artifacts/README.md
 output/
 .tmp/
 .tmp-*/
@@ -72,7 +74,8 @@ docs/reviews/**/*.png
 artifacts/**/*.png
 
 # ── 大文件后缀（正常开发根本不该出现在工作区）──────────────────
-# 这一组由 check-hygiene 的后缀黑名单同步，写在这里是为了让 `git status` 也看不见它们。
+# 这一组与 scripts/check-hygiene.mjs 的 FORBIDDEN_EXT 逐项对应，
+# 写在这里是为了让 `git status` 也看不见它们；改一处必须同步改另一处。
 *.msi
 *.exe
 *.dll
@@ -82,3 +85,13 @@ artifacts/**/*.png
 *.7z
 *.rar
 *.iso
+*.zip
+*.gz
+*.tgz
+*.tar
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.mp4
+*.webm

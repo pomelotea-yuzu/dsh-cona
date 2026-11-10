@@ -3,6 +3,7 @@
 //
 // 用法：
 //   node scripts/check-hygiene.mjs            # 检查全部已跟踪文件（CI 用）
+//   node scripts/check-hygiene.mjs --all      # 显式检查全部已跟踪文件（与无参数等价）
 //   node scripts/check-hygiene.mjs --staged   # 单查暂存区有改动的文件
 //   node scripts/check-hygiene.mjs --strict   # 把警告也判为失败
 //   node scripts/check-hygiene.mjs --selftest # 隔离 Git 仓库反证测试
@@ -51,7 +52,7 @@ const SECRET_RULES = [
 // 三端形态都收：Windows 盘符、macOS /Users/<name>、Linux /home/<name>。
 const ABS_PATH = /\b[A-Za-z]:[\\/]{2}(?:Users|home|Program Files)\b|[A-Za-z]:\\\\Users\\\\|\/(?:Users|home)\/[A-Za-z0-9._-]+\//;
 
-// 不变量 I12「便携优先 · 不写系统用户目录」的机器落点：产品代码里出现系统用户目录形态即判红。
+// 「便携优先 · 不写系统用户目录」这条仓库纪律的机器落点：产品代码里出现系统用户目录形态即判红。
 // 三端都要拦（Win 用户目录 / macOS Library / Linux XDG），不能只按当前开发机平台查。
 // 语义（"这是默认值还是用户显式选的"）脚本判不了，所以只拦最典型的写法，其余靠 review。
 const SYSTEM_DIR_RULES = [
@@ -204,7 +205,7 @@ function main() {
     }
     if (isDoc) continue; // 文档里写系统用户目录路径是正当讨论，路径类检查不看文档
 
-    // 策略与模板文本存在的意义就是**禁止**这些路径（openspec 不变量、Issue 表单、门禁规则表自身）。
+    // 策略与模板文本存在的意义就是**禁止**这些路径（规范文本、Issue/PR 表单、门禁规则表自身）。
     // 对它们报警告只会训练贡献者忽略警告，所以本项跳过；凭据扫描仍然照查。
     const isPolicyText = /^(?:openspec\/|\.github\/|\.gitee\/|\.workflow\/|scripts\/check-hygiene\.mjs$)/.test(file);
     if (isPolicyText) continue;
@@ -214,7 +215,7 @@ function main() {
       if (!m) continue;
       const detail = `${file}: ${name} → ${m[0].slice(0, 32)}`;
       if (isProductCode) {
-        add(fails, '系统用户目录', detail, '违反不变量 I12「便携优先 · 不写系统用户目录」：数据/缓存/临时文件必须落在数据根之下；不可写时报错并要求 --data-dir，禁止静默回落');
+        add(fails, '系统用户目录', detail, '违反「便携优先 · 不写系统用户目录」：数据/缓存/临时文件必须落在数据根之下；不可写时报错并要求 --data-dir，禁止静默回落');
       } else {
         add(warns, '系统用户目录', detail, '确认这是测试夹具或脚本临时目录，不是产品默认路径');
       }

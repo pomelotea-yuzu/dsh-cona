@@ -6,7 +6,7 @@ name: CI
 # pnpm workspace 骨架落地后，在 Run gates 之前插入依赖安装步骤，并把 commands 换成：
 #   pnpm install --frozen-lockfile
 #   pnpm check:ci            # 内含 build / typecheck / test / lint / spec
-# （见 docs/development/workflow.md「质量门禁」）
+# （提交前检查口径见 CONTRIBUTING.md）
 
 on:
   push:

@@ -16,7 +16,7 @@
 | D07 | 证据适用范围：归档 change 的 24 通过／1 受阻只在 Windows 原型 driver 下成立；**E 系列与 P 系列结论不随新路线继承** | [§6](../product/product-decisions.md) |
 | D08 | **F01–F08 的规范与设计可作参考**，但代码移植后须重测路径语义（symlink、APFS 大小写、hardlink、权限位） | [§6](../product/product-decisions.md) |
 | D09 | `prototypes/`、`output/` 及 `docs/engineering/`、`docs/research/`、`docs/collab/` 按提交边界仅本机保留；Windows 原型与运行证据不入库、不作为新插件的已验证能力 | [§6](../product/product-decisions.md) |
-| D10 | 原 `openspec/config.yaml` 保留历史原貌，**不再用于生成新提案** | [§6](../product/product-decisions.md) |
+| D10 | 原 Cona 的 `openspec/config.yaml` 保留历史原貌，**不再用于生成新提案**（本仓 `openspec/config.yaml` 为新建文件，不在此列） | [§6](../product/product-decisions.md) |
 
 ## 沿用的工程纪律（来自 Cona `docs/development/workflow.md`，原文未整体迁移）
 

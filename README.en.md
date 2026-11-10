@@ -23,8 +23,8 @@ All four points are settled decisions from section 6 of the former repository an
 
 ## Repository and collaboration
 
-- Structure mirrors `~/Developer/layress`; gates, CI, templates and the i18n manifest follow that skeleton, renamed for this repository.
-- Remotes: Gitee + GitHub; check `git remote -v` for the actual addresses. Push and tags are performed manually by the user.
+- Structure mirrors the layress repository skeleton; gates, CI, templates and the i18n manifest follow that skeleton, renamed for this repository.
+- Remotes: Gitee + GitHub (currently a single `origin` with two push URLs; check `git remote -v` for the actual configuration). Push and tags are performed manually by the user.
 - License: [MIT](LICENSE).
 
 ## Layout
