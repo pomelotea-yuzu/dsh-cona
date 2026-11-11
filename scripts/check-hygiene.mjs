@@ -52,7 +52,8 @@ const SECRET_RULES = [
 // 三端形态都收：Windows 盘符、macOS /Users/<name>、Linux /home/<name>。
 const ABS_PATH = /\b[A-Za-z]:[\\/]{2}(?:Users|home|Program Files)\b|[A-Za-z]:\\\\Users\\\\|\/(?:Users|home)\/[A-Za-z0-9._-]+\//;
 
-// 「便携优先 · 不写系统用户目录」这条仓库纪律的机器落点：产品代码里出现系统用户目录形态即判红。
+// 初始化时继承的系统用户目录检查，当前保留原判据；它不决定插件部署后的存储位置。
+// 项目存储方案确定后再评估具体规则，不以文档方向同步放宽门禁，也不据此宣称便携无残留。
 // 三端都要拦（Win 用户目录 / macOS Library / Linux XDG），不能只按当前开发机平台查。
 // 语义（"这是默认值还是用户显式选的"）脚本判不了，所以只拦最典型的写法，其余靠 review。
 const SYSTEM_DIR_RULES = [
@@ -215,7 +216,7 @@ function main() {
       if (!m) continue;
       const detail = `${file}: ${name} → ${m[0].slice(0, 32)}`;
       if (isProductCode) {
-        add(fails, '系统用户目录', detail, '违反「便携优先 · 不写系统用户目录」：数据/缓存/临时文件必须落在数据根之下；不可写时报错并要求 --data-dir，禁止静默回落');
+        add(fails, '系统用户目录', detail, '命中当前保留的系统用户目录检查；项目存储与部署位置尚未定稿，应先明确数据来源与写入规则，不据此预设便携部署或 --data-dir 接口');
       } else {
         add(warns, '系统用户目录', detail, '确认这是测试夹具或脚本临时目录，不是产品默认路径');
       }

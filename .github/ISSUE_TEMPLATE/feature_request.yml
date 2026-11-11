@@ -5,9 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        本仓库方向已定：DSH 插件，只提供检查点／交付／回退，不自研沙箱。
-        已定决定见 docs/knowledge/decisions.md，请勿在 issue 里重开辩论。
-        Scope is settled: a DSH plugin for checkpoints, delivery and rollback; no in-house sandbox.
+        当前方向：以项目代码开发为主要场景的 DSH 项目管理插件，支持动态项目树、流程与骨架模板、多对多聊天关联和 Agent 自主规划；视频制作等偶发需求可按需加入，不自研沙箱。
+        当前需求与沿用边界见 docs/knowledge/decisions.md；具体使用流程与实现方案仍可讨论。
+        Current direction: a DSH project management plugin primarily for software development, with a dynamic project tree, process and scaffold templates, many-to-many chat links and agent planning. Occasional needs such as video production can be added as needed; no in-house sandbox. Usage flows and implementation remain under discussion.
   - type: textarea
     id: problem
     attributes:

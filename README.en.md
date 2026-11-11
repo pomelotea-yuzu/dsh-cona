@@ -2,24 +2,32 @@
 
 [简体中文](README.md)
 
-New repository for the DSH (DeepSeek Harness) plugin direction, forked from the sealed **Cona** repository after a change of direction.
+A project management plugin primarily for software development, using DSH (DeepSeek Harness) as its agent foundation, following a change of direction from the sealed **Cona** repository.
 
 ## Status
 
-- Initialized on 2026-11-10: repository structure, index and gates only. **No plugin code, no dependencies, no active change.**
-- Final direction and sealing decision: [product-decisions.md section 6](docs/product/product-decisions.md).
-- Quick reference of decisions still in force: [docs/knowledge/decisions.md](docs/knowledge/decisions.md).
-- Reusable behaviour baseline: [workspace recovery spec](openspec/specs/workspace-recovery-prototype/spec.md) (Cona F01-F08, for reference only; path semantics must be retested cross-platform).
+- As of 2026-11-11: a project management design draft, an initial architecture baseline and static DSH integration research are available. **No plugin code, installed dependencies or active change; integration has not been tested at runtime.**
+- Current requirements and proposals: [project management design draft](docs/product/2026-11-11-project-management-design.md). The direction is confirmed; usage flows and implementation remain under discussion.
+- Initial architecture: [project development architecture draft](docs/architecture/2026-11-11-project-development-architecture.md), covering research, ongoing analysis, project trees and chat continuity. Defaults will be refined through practical use.
+- Current direction and retained boundaries: [docs/knowledge/decisions.md](docs/knowledge/decisions.md).
+- Host integration evidence: [DSH project management integration review](docs/research/2026-11-11-dsh-project-management-review.md) (static research).
+- Historical transition and sealing decision: [product-decisions.md section 6](docs/product/product-decisions.md); its restriction to file recovery capabilities has been superseded by the current direction.
+- File recovery reference: [workspace recovery spec](openspec/specs/workspace-recovery-prototype/spec.md) (Cona F01-F08; no commitment to current product scope; cross-platform path semantics must be retested if ported).
 - Sealed state of the former repository: [project-status.md](docs/development/project-status.md).
 
 ## Direction
 
-- Product form: a DSH plugin providing checkpoints, delivery and rollback only; no standalone desktop agent product.
-- No in-house sandbox: isolation and execution are provided by the DSH host.
+- Product form: a DSH project management plugin with a dynamic project tree primarily organizing software development and related documentation. Occasional needs such as video production can be added to a project as needed.
+- The interface and project logic are integrated into DSH, with an internal project entry linked to host chats. No separate website, application or backend deployment is required.
+- Support preset and user-defined processes, file scaffolds applied at creation or later stages, and templates extracted from existing projects.
+- Users can edit the project tree directly, arranging stages and inserting or combining process blocks. Detailed interactions await practical validation.
+- Stages and chats have many-to-many relationships. Agents can adjust plans in response to new information; interaction and authorization policies remain under discussion.
+- Preserve integration boundaries for a future official Super-agent without building an agent scheduler in this round. File recovery does not drive the architecture.
+- No standalone desktop agent product or in-house sandbox. Reuse DSH execution and isolation; a plugin's Host-side file access must not be assumed to inherit session sandbox protection.
 - Cross-platform plugin: plain Node ESM, no platform-native APIs, no hardcoded drive letters or path separators.
-- Development environment: macOS; the data root is set by the plugin's `Config.dataRoot`, value to be decided.
+- Development environment: macOS; project storage and deployment locations remain to be designed, with host domain storage as a candidate.
 
-All four points are settled decisions from section 6 of the former repository and are not reopened here.
+The design draft distinguishes explicit user requirements from proposals. Updating the indexes does not finalize the entire design.
 
 ## Repository and collaboration
 
