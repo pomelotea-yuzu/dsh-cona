@@ -8,13 +8,21 @@
 
 旧 Cona 的完整 Agent 设计作为需求来源。文件版本回溯是后来加入的能力，不作为本次产品定位或架构的前提；此前围绕检查点／交付／回退的[宿主能力复审](2026-11-11-dsh-host-capability-review.md)保留为专题参考。
 
-调研固定至 DSH 最新 Release 条目 `dsh-v0.2.2-rc.1`，对应提交 `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`。该版本为预发布版，本机桌面应用版本一致。下文链接均固定至该提交。
+原始调研（2026-11-11）固定至当时最新 Release 条目 `dsh-v0.2.2-rc.1`，对应提交 `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`；该版本为预发布版，当时本机桌面应用版本一致。
 
-完整 Release 源码包已下载并按用户指定保存在本机 `Developer/tools/deepseek-harness/`，源码不进入本项目仓库。压缩包 40,619,126 字节（约 38.74 MiB），普通文件内容约 135.59 MiB，本机解压目录占用约 186 MiB。
+2026-11-12 版本同步：上游已发布 `dsh-v0.2.2-rc.2`（2026-11-11T11:33:06Z，仍标记为 prerelease），用户已把本机桌面应用更新到该版本，本机完整源码快照也已替换，对应提交 `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`。用户同时明确：**在本插件开发出第一个版本之前不再更新本机 DSH 软件，本阶段以 `0.2.2-rc.2` 为固定基线**，不跟随上游后续预发布版本。下文上游链接已同步固定至 rc.2 提交；本文结论仍按 2026-11-11 的核查范围保留，未因版本更新重做全量审计或运行验证。
 
-已完成 gzip 全量读取校验、归档路径与链接检查，并逐文件对照压缩包校验落盘的 20,273 个普通文件；源码根包版本为 `0.2.2-rc.1`。本次压缩包 SHA-256：`416750920b64272899259c26b2fa0a4341132c9c19b43337da502ab7ebd599f1`。这是一份完整源码快照，不包含 Git 历史或已安装依赖；源码完整下载不代表已逐行审计整个上游。
+源码包按用户指定保存在本机 `Developer/tools/deepseek-harness/`，不进入本项目仓库；此前的 rc.1 快照已移入系统废纸篓。完整归档不包含 Git 历史或已安装依赖；源码完整下载不代表已逐行审计整个上游。
 
 本次不安装依赖、不加载自制插件、不修改个人 DSH profile。静态发现与运行证据分别记录。
+
+## 2026-11-12 源码快照校验与差异复核
+
+- rc.1（2026-11-11 当时记录）：压缩包 40,619,126 字节（约 38.74 MiB），普通文件内容约 135.59 MiB，解压目录约 186 MiB；gzip 全量校验、归档路径与链接检查、逐文件比对落盘的 20,273 个普通文件均完成；根包版本 `0.2.2-rc.1`，压缩包 SHA-256 `416750920b64272899259c26b2fa0a4341132c9c19b43337da502ab7ebd599f1`。
+- rc.2（本次下载）：归档 42,714,449 字节（约 40.73 MiB），普通文件内容 149,508,995 字节（约 142.58 MiB），解压目录约 194 MiB。经 GitHub 归档镜像加速下载，gzip 全量校验通过；归档含 20,996 个普通文件、13 个链接、2,915 个目录，成员路径与链接目标均在归档根内；逐文件对照压缩包校验落盘内容，0 处差异。根包与 CLI 包版本均为 `0.2.2-rc.2`，本次归档 SHA-256 `d376fe64ec4b7c9b5837fb1155ed3a48e7e0e5f5b0aae0b91d9fb836daa8c20e`。归档不含 Git 历史或已安装依赖。
+- 与官方交叉核对：按 rc.2 固定提交从官方 raw 源取回 6 个文件（根包清单、CLI 包清单、`fs-sandbox` 源码、`workspace` 领域声明、组合包安装文档、Agent Team 文档）逐字节比对，全部一致。镜像只用于加速下载，不作为内容依据；未逐行审计整个上游。
+- 两版差异（本机快照逐文件哈希比对）：新增 1,056、移除 334、变更 3,379 条路径（20,286 → 21,008）。对 33 条关键上游路径（含本文、配套复审与设计草案的引用，以及根包／CLI 清单）逐一检查：32 条在 rc.2 仍存在；`packages/experimental/agent-team/README.zh.md` 迁至 `packages/team/agent-team/README.zh.md`，[设计草案](../product/2026-11-11-project-management-design.md)中的对应链接与表述已同步。本文结论所依赖的核心接口源码（`fs/fs-sandbox`、`session/session-checkpoint-policy`、`workspace/workspace/src/spec.ts`、`storage/storage-domain/src/domain.ts`、`client/ui-layout/src/client/index.ts`、`api/gateway/src/client/index.ts`、Todo／Workflow 与组合包安装文档）在两版之间字节未变；部分 README 有更新，已抽查与结论直接相关的语句，未发现推翻本文判断的改动。
+- rc.2 发布说明中与本文相关的条目：Git Worktree 审阅与创建等待放宽；SubAgent 具名／多层协作、AgentTeam 按会话开启；可选插件加载失败不再阻断 Web 页面、未运行插件状态更明确；侧栏插件入口可收纳进「更多」。§2 的 `sidebar.panellist` 注册与 root 作用域 `main` keyed slot 结论在 rc.2 仍成立，新增的 `sidebar.panellist.actions` 只影响入口收纳。这些属于发布说明与静态抽查，不等于「建议的最小接入实验」已通过，表中各项仍为 `untested`。
 
 ## 结论摘要
 
@@ -32,7 +40,7 @@ DSH 的 Workspace、Todo 与 Workflow 分别解决目录分组、会话内待办
 
 还需处理宿主记录生命周期：移除 Workspace 不删除磁盘目录和聊天，重新添加同一目录会产生新 Workspace 身份。插件不应把“路径相同”当成历史关联始终有效。
 
-依据：[Workspace 领域声明](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/workspace/workspace/src/spec.ts)、[服务约定](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/workspace/workspace/README.zh.md)。
+依据：[Workspace 领域声明](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/workspace/workspace/src/spec.ts)、[服务约定](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/workspace/workspace/README.zh.md)。
 
 ## 2. 可视化：主面板已有扩展入口
 
@@ -42,7 +50,7 @@ DSH 的 Workspace、Todo 与 Workflow 分别解决目录分组、会话内待办
 
 建议先采用一个项目管理入口，面板内部呈现树与节点详情；聊天联动复用宿主导航。节点内嵌聊天属于可选增强，需要核查 Session reference 生命周期与同一会话多处编辑的约束。
 
-依据：[布局 slot 声明与注册](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-layout/src/client/index.ts)、[侧边栏入口](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-sidebar/README.zh.md)、[Web Client 架构](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/web-client.zh.md)。
+依据：[布局 slot 声明与注册](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/client/ui-layout/src/client/index.ts)、[侧边栏入口](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/client/ui-sidebar/README.zh.md)、[Web Client 架构](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/docs/subsystems/web-client.zh.md)。
 
 ## 3. 长期状态：可研究复用宿主领域存储
 
@@ -52,7 +60,7 @@ DSH 的 Workspace、Todo 与 Workflow 分别解决目录分组、会话内待办
 
 需要注意：领域写入排队不自动等于任意跨记录事务，也不等于与磁盘骨架创建原子提交。树移动、批量应用流程、文件生成后记账等操作，要选择可核查的提交单位和中断处理规则。Agent 与用户并发更新也需要项目修订号等冲突判断。
 
-依据：[领域运行时](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/storage/storage-domain/src/domain.ts)、[领域服务说明](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/storage/storage-domain/README.zh.md)。
+依据：[领域运行时](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/storage/storage-domain/src/domain.ts)、[领域服务说明](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/storage/storage-domain/README.zh.md)。
 
 ## 4. 界面与 Agent：共同调用项目服务
 
@@ -64,7 +72,7 @@ DSH 使用 Cordis 提供插件服务与生命周期。Host 方法可用 Typert R
 
 完整源码进一步确认：内置 Client assembly 显式挂载自己选用的 Remote contribution，通用 Client Gateway 也公开 `ctx.remote.$mount(contribution)`。因此第三方命名空间需要自己的贡献生成与挂载，不能假定声明一个 Host 方法后浏览器会自动发现它。完整打包与调用链仍需单独实验。
 
-依据：[Remote 协议](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/typert/protocol/README.zh.md)、[Client contribution 挂载](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/api/gateway/src/client/index.ts)、[工具注册](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/core/tools/README.zh.md)、[组合包打包与安装](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/user/develop/basic/publish.zh.md)。
+依据：[Remote 协议](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/typert/protocol/README.zh.md)、[Client contribution 挂载](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/api/gateway/src/client/index.ts)、[工具注册](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/tools/README.zh.md)、[组合包打包与安装](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/docs/user/develop/basic/publish.zh.md)。
 
 ## 5. 聊天与当前节点：支持关联，但要显式绑定
 
@@ -78,7 +86,7 @@ Session Controller 提供创建、恢复、列举、发送、取消与历史等�
 
 发送工作请求成功只代表消息已经准入／入队；某个 Agent 轮次结束也不自动表示项目阶段完成。项目节点的完成条件、成果记录与用户验收仍由插件业务定义。同会话 Goal 服务可作为以后持续执行的候选，它拥有修订号和会话内目标状态，不是跨会话项目调度器；是否接入以及如何激活需要另行设计，初版不必重写 Agent 循环。
 
-依据：[Session Controller](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/api/session-controller/README.zh.md)、[工作区 UI 服务](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-workspace/README.zh.md)、[动态上下文类型与服务](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/core/system-prompt/src/index.ts)。
+依据：[Session Controller](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/api/session-controller/README.zh.md)、[工作区 UI 服务](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/client/ui-workspace/README.zh.md)、[动态上下文类型与服务](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/system-prompt/src/index.ts)。
 
 ## 6. Todo 与 Workflow 的复用边界
 
@@ -90,7 +98,7 @@ Session Controller 提供创建、恢复、列举、发送、取消与历史等�
 
 这里不把“引擎没有重启续跑”误写为“宿主没有工作流历史”：工具与 UI 层已经有持久运行展示。
 
-依据：[Todo 源码](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/todo/tool-todo/src/index.ts)、[Workflow](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/workflow/workflow/README.zh.md)、[运行树视图](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-workflow-run/README.zh.md)。
+依据：[Todo 源码](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/todo/tool-todo/src/index.ts)、[Workflow](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/workflow/workflow/README.zh.md)、[运行树视图](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/client/ui-workflow-run/README.zh.md)。
 
 ## 7. 流程模板与文件骨架需要插件自己的产品语义
 

@@ -1,6 +1,6 @@
 # decisions.md · 关键决策速查
 
-> 默认中文。**本表只是索引，不新增决定**。当前方向来自 2026-11-11 用户明确需求与本轮同步要求，见[项目管理设计草案](../product/2026-11-11-project-management-design.md)；沿用边界来自 Cona `product-decisions.md` §6，工程纪律来自原 Cona `development/workflow.md`。
+> 默认中文。**本表只是索引，不新增决定**。当前方向来自 2026-11-11 用户明确需求、本轮同步要求与 2026-11-12 用户明确的版本基线要求，见[项目管理设计草案](../product/2026-11-11-project-management-design.md)；沿用边界来自 Cona `product-decisions.md` §6，工程纪律来自原 Cona `development/workflow.md`。
 > 设计建议不因写入文档或门禁通过就成为已定决定。被后续方向替代的历史范围见下表。
 
 ## 当前方向（2026-11-11）
@@ -17,6 +17,7 @@
 | N08 | 用户授权 Agent 先形成完整架构和默认项目树颗粒度；探索与实施边界等通过实践优化，用户自身建议也作为可检验的起点，不逐项预先定死 | [设计起点](../product/2026-11-11-project-management-design.md)、[架构草案](../architecture/2026-11-11-project-development-architecture.md) |
 | N09 | 项目界面和功能集成在 DSH 软件内；Host 项目服务为宿主插件逻辑，面板为 DSH 内部界面，不要求另开网站、独立应用或单独部署后端 | [架构目标](../architecture/2026-11-11-project-development-architecture.md) |
 | N10 | 用户可以直接修改项目阶段，像搭积木一样搭建与拼接项目树；拖放、组合、复制等具体交互及依赖处理采用设计基线，待实践优化 | [动态项目树](../product/2026-11-11-project-management-design.md)、[用户搭建与拼接](../architecture/2026-11-11-project-development-architecture.md) |
+| N11 | 在本插件开发出第一个版本之前，用户不再更新本机 DSH 软件；本阶段调研、设计与实现统一以 DSH `0.2.2-rc.2` 为固定基线，不跟随上游后续预发布版本 | 2026-11-12 用户明确要求；[版本同步与复核](../research/2026-11-11-dsh-project-management-review.md) |
 
 具体使用流程、数据模型、存储方案、界面与实施顺序已有[第一版架构基线](../architecture/2026-11-11-project-development-architecture.md)，均待实践检验；没有插件运行验证结论。
 

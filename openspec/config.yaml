@@ -29,10 +29,11 @@ context: |
   - E 系列与 P 系列验证结论不继承；F01–F08 规范与设计仅作参考，
     代码移植后须重测路径语义（symlink、APFS 大小写、hardlink、权限位）。
   - 旧 Windows 原型与运行证据不入库，不作为本插件已验证能力。
+  - 版本基线：本插件开发出第一个版本之前，不再更新本机 DSH 软件；调研、设计与实现统一固定至 DSH 0.2.2-rc.2（提交 ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c），不跟随上游后续预发布版本。
 
   环境与未定项：
   - 开发环境 macOS（arm64 / zsh）；现有仓库 CI 使用 Node 20，不能据此推定插件兼容版本。
-  - 静态调研固定至 DSH 0.2.2-rc.1（预发布），其 CLI 要求 Node >=24.9.0；插件兼容范围待验证。
+  - 2026-11-12 已同步：本机 DSH 应用与 `Developer/tools/deepseek-harness/` 源码快照均为 0.2.2-rc.2（预发布）；其 CLI 要求 Node >=24.9.0，与 rc.1 一致。接入能力未运行验证，插件兼容范围仍待验证。
   - 许可证 MIT（见根目录 LICENSE）。
   - 使用过程、界面、数据模型与变更协议的设计基线见 docs/architecture/2026-11-11-project-development-architecture.md，仍待实践验证；尚未立实施 change。
   - SDD 提醒须提供开关，关闭后不主动催促或自动重开；启用时按变更影响提醒，简单任务跳过。

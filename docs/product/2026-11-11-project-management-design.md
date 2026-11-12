@@ -1,6 +1,6 @@
 # 项目管理插件设计草案
 
-更新：2026-11-11。状态：项目管理方向已由用户确认同步；具体使用流程、数据划分与实现方案仍为讨论草案，尚未立实现 change，未验证运行能力。
+更新：2026-11-12（DSH 调研基线由 `0.2.2-rc.1` 同步至 `0.2.2-rc.2`；用户明确在本插件开发出第一个版本之前不再更新 DSH 软件，本阶段固定以 `0.2.2-rc.2` 为基线；本次仅更新版本口径与上游链接，不新增产品决定）。状态：项目管理方向已由用户确认同步；具体使用流程、数据划分与实现方案仍为讨论草案，尚未立实现 change，未验证运行能力。
 
 第一版完整架构见[项目开发管理架构草案](../architecture/2026-11-11-project-development-architecture.md)。用户要求先形成可实践的架构，自己的建议也需通过使用检验；本文需求描述保留来源，默认流程与架构选择允许依据实践调整。
 
@@ -177,11 +177,11 @@ README 引用技术文章 *Exploring Super-agent Design: Towards a More Autonomo
 
 可以借鉴上述职责与关系。原型面向一个 GitHub 仓库，并可接入飞书；它没有直接提供本项目需要的多层项目树、跨类型创作流程与骨架模板，也不能把每个 Ticket 直接视为我们的一个阶段。
 
-DSH 本身已有可继续的 subagent、一次性 Workflow，以及实验性 Agent Team。Team 的共享任务板与消息可作为执行侧候选，但其持久状态依附 Lead 会话，且文件范围重叠提示不是写锁；项目不应直接等同于一个 Team。
+DSH 本身已有可继续的 subagent（rc.2 起支持具名与多层协作）、一次性 Workflow，以及按会话开启的 Agent Team。Team 在 rc.2 中已从 `packages/experimental/` 迁至 `packages/team/`，为开启该模式的会话树提供持久化共享任务板，成员共享同一检出目录；它不创建隔离工作目录、不跨进程协调，也不提供文件写锁，更不能承载跨会话的项目状态。项目不应直接等同于一个 Team。这属于宿主执行侧能力，不改变「本轮不自研 Super-agent 或多 Agent 调度系统」的边界。
 
 该原型用于理解未来能力的可能边界，不能证明 DSH 已承诺正式集成的时间或最终接口。本轮不移植其执行与调度系统，也不绑定其 GitHub／飞书渠道、目录规则和部署权限。对外发布与消息发送需在后续明确场景下单独设计。
 
-依据：[原型说明](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/README.md)、[理念](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/000-philosophy.md)、[领域模型](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/001-domain.md)、[执行](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/003-execution.md)、[DSH Subagent](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/subagent/subagent/README.zh.md)、[DSH Agent Team](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/experimental/agent-team/README.zh.md)。
+依据：[原型说明](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/README.md)、[理念](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/000-philosophy.md)、[领域模型](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/001-domain.md)、[执行](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/003-execution.md)、[DSH Subagent](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/subagent/subagent/README.zh.md)、[DSH Agent Team](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/team/agent-team/README.zh.md)。
 
 ## 7. 建议的验证顺序
 

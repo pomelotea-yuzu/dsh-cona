@@ -9,13 +9,21 @@
 ## 版本与核查范围
 
 - 上游：[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)。
-- 核查当日 GitHub Release 列表的最新条目：[dsh-v0.2.2-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1)，2026-11-04 发布，标记为 **prerelease**。`releases/latest` 接口返回 404；版本取自 Release 列表，不能据此把它称为正式稳定版。
-- tag 对应提交：`66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`。下文上游链接固定至该提交。
-- 本机已安装的桌面应用：Info.plist 与应用内包清单均为 `0.2.2-rc.1`。随应用交付的运行时元数据声明 Node `24.21.0`、pnpm `11.28.5`；CLI 包声明 Node `>=24.9.0`。
-- 本机开发环境另行核查：当前 shell 实际使用 Node `26.13.0`（arm64）、npm `11.20.0`，与 Node 官方发行列表当日最新 LTS 一致；macOS PKG 安装记录匹配。DSH 随包 Node 的 `--version` 实测为 `24.21.0`。系统开发环境与宿主随包运行时是两套安装。
-- 已读本机发行包内的相关 README、包清单及部分编译后实现；并读取上游文件系统围栏、会话检查点策略、本地子进程提供方的 TypeScript 源码进行交叉核对。未进行发行包与上游源码的完整一致性验证；上游完整目录树下载超时，未完成全仓审计。
+- 核查当日（2026-11-11）GitHub Release 列表的最新条目：[dsh-v0.2.2-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1)，2026-11-04 发布，标记为 **prerelease**。`releases/latest` 接口返回 404；版本取自 Release 列表，不能据此把它称为正式稳定版。2026-11-12 上游已发布 rc.2，见下文「版本同步与复核」。
+- 原始 tag 对应提交：`66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`；rc.2 对应提交：`ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`。下文上游链接已同步固定至 rc.2 提交，正文结论仍按 2026-11-11 的核查范围保留。
+- 复审时本机已安装的桌面应用：Info.plist 与应用内包清单均为 `0.2.2-rc.1`。当时随应用交付的运行时元数据声明 Node `24.21.0`、pnpm `11.28.5`；CLI 包声明 Node `>=24.9.0`（rc.2 源码包复核仍为 `>=24.9.0`）。2026-11-12 实测本机 Info.plist 已为 `0.2.2-rc.2`，未重新读取 rc.2 发行包内的运行时元数据。
+- 本机开发环境另行核查：复审当时 shell 实际使用 Node `26.13.0`（arm64）、npm `11.20.0`，与 Node 官方发行列表当日最新 LTS 一致；macOS PKG 安装记录匹配。DSH 随包 Node 的 `--version` 当时实测为 `24.21.0`。系统开发环境与宿主随包运行时是两套安装。2026-11-12 复核时 shell 中 `node --version` 为 `v22.22.2`，与复审记录不同，属开发环境变化，不改变上述口径区分。
+- 已读当时本机发行包内的相关 README、包清单及部分编译后实现；并读取上游文件系统围栏、会话检查点策略、本地子进程提供方的 TypeScript 源码进行交叉核对。未进行发行包与上游源码的完整一致性验证；上游完整目录树下载超时，未完成全仓审计。2026-11-12 已取得完整 rc.2 源码快照并逐文件校验，仍未做全仓逐行审计。
 - 发行包包含某个插件不代表当前 profile 已启用它；本次未读取个人会话或配置来确定实际启用组合。
 - 未启动 DSH、未加载插件、未修改 DSH 安装或个人配置、未执行破坏性样例。本文所有运行验证项均为 `untested`。
+
+## 版本同步与复核（2026-11-12）
+
+- 上游 [dsh-v0.2.2-rc.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.2) 于 2026-11-11T11:33:06Z 发布，仍标记为 prerelease；用户已更新本机桌面应用（Info.plist 实测 `0.2.2-rc.2`），本机 `Developer/tools/deepseek-harness/` 源码快照也已由 rc.1 替换为 rc.2，旧快照移入系统废纸篓。用户明确在本插件开发出第一个版本之前不再更新本机 DSH 软件，本阶段以 `0.2.2-rc.2` 为固定基线；归档校验数据、逐文件比对与官方 raw 抽样结果见[项目管理接入调研](2026-11-11-dsh-project-management-review.md)的「2026-11-12 源码快照校验与差异复核」。
+- 与本文结论直接相关的 rc.2 复核：`fs/fs-sandbox/src/index.ts`、`session/session-checkpoint-policy/src/index.ts`、`util/home-paths/README.zh.md` 字节未变；CLI 包清单有更新，但 `engines.node` 仍为 `>=24.9.0`；`boot/plugin-manager/README.zh.md` 仍写明「已安装的 Host 代码在宿主进程内运行，不受工作区沙箱限制」，并补充「依赖构建脚本仍需单独批准」；`experimental/worktree/README.zh.md` 仍写明创建「仅限本地提交……不复制未提交文件」。§1、§4、§6 与 §7 的判断未被推翻。
+- `session-controller`、`ui-workspace`、`system-prompt` 的文档或源码有更新，已抽查「复用合格空白会话并返回实际 Session」「保留未发送草稿」「动态 context」等语句，结论仍成立；未逐行复核这些文件的全部改动。
+- rc.2 发布说明中与本文相关的条目：可选插件加载失败不再阻断 Web 页面、未运行插件显示原因；Git Worktree 审阅能力增强与创建等待放宽；停止任务／关闭会话时中止与资源释放的修复。这些是发布说明层面的信息，不构成对子进程停稳、路径竞态或文件恢复能力的运行验证。
+- 本次版本同步没有启动 DSH、没有加载插件、没有复跑任何验证项；本文「建议的讨论与验证顺序」中的项目仍全部为 `untested`。
 
 ## 主要发现
 
@@ -27,7 +35,7 @@ DSH 插件管理文档明确：安装的 Host 代码在宿主进程内运行，�
 
 版本内容与账本是否能被模型调用的命令改写，还取决于存储位置、沙箱模式、额外可写目录及权限升级；仅配置 `dataRoot` 不会产生保护边界。
 
-依据：[插件管理](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/boot/plugin-manager/README.zh.md)、[沙箱约定](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/sandbox/sandbox/README.zh.md)。
+依据：[插件管理](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/boot/plugin-manager/README.zh.md)、[沙箱约定](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/sandbox/sandbox/README.zh.md)。
 
 ### 2. 有工具执行扩展点，但不等于覆盖全部文件写入
 
@@ -37,7 +45,7 @@ DSH 提供 `tools/pre-execute`、`tools/execute`、`tools/post-execute`、`tools
 
 结论仅为：存在接入候选，尚不能承诺“每次文件变化前都有完整检查点”。需要先定义受保护的执行入口、并发范围和快照一致性条件。
 
-依据：[工具约定](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/core/tools/README.zh.md)、[后台任务](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/jobs/jobs/README.zh.md)、[检查点策略源码](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/session/session-checkpoint-policy/src/index.ts)。
+依据：[工具约定](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/tools/README.zh.md)、[后台任务](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/jobs/jobs/README.zh.md)、[检查点策略源码](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/session/session-checkpoint-policy/src/index.ts)。
 
 ### 3. 宿主的会话检查点不等于文件检查点
 
@@ -47,7 +55,7 @@ DSH 提供 `tools/pre-execute`、`tools/execute`、`tools/post-execute`、`tools
 
 插件应明确区分会话恢复与文件恢复，并研究如何关联调用标识、文件版本和交付账本。这里尚未选定格式或存储实现。
 
-依据：[会话检查点策略](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/session/session-checkpoint-policy/README.zh.md)。
+依据：[会话检查点策略](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/session/session-checkpoint-policy/README.zh.md)。
 
 ### 4. 已有 worktree 能力，但与旧 Cona 工作副本并不等价
 
@@ -57,7 +65,7 @@ DSH 提供 `tools/pre-execute`、`tools/execute`、`tools/post-execute`、`tools
 
 此外，工作目录切换保留已有进程的目录；沙箱策略使用会话不可变的工作区 cwd，创建 worktree 不扩大既有写权限。自定义 worktree 目录是否可写、原项目是否仍可写、旧 shell 是否仍写入原项目，都必须分别核查。
 
-依据：[worktree](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/experimental/worktree/README.zh.md)、[工作目录](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/session/working-directory/README.zh.md)、[沙箱策略](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/sandbox/sandbox-policy/README.zh.md)。
+依据：[worktree](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/experimental/worktree/README.zh.md)、[工作目录](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/session/working-directory/README.zh.md)、[沙箱策略](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/sandbox/sandbox-policy/README.zh.md)。
 
 ### 5. macOS 上不能据命令结束宣称全部写进程停止
 
@@ -67,7 +75,7 @@ DSH 提供 `tools/pre-execute`、`tools/execute`、`tools/post-execute`、`tools
 
 需要讨论支持合作式任务还是对抗性任务，以及终态未知时怎样等待、拒绝或由用户处理；当前没有验证结论。
 
-依据：[子进程约定](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/subprocess/subprocess/README.zh.md)、[本地提供方及限制](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/subprocess/subprocess-local/README.zh.md)。
+依据：[子进程约定](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/subprocess/subprocess/README.zh.md)、[本地提供方及限制](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/subprocess/subprocess-local/README.zh.md)。
 
 ### 6. 宿主文件工具没有承诺消除全部路径竞态
 
@@ -75,7 +83,7 @@ DSH 提供 `tools/pre-execute`、`tools/execute`、`tools/post-execute`、`tools
 
 旧规范要求在实际写入时防止目标替换与并发覆盖；直接调用宿主文件服务不足以证明已经满足这一要求。“纯 Node ESM、不调用平台原生 API”与这种强保证能否同时实现，需要结合威胁模型、宿主服务及具体算法验证，不能先宣称可行或不可行。
 
-依据：[文件系统围栏源码](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/fs/fs-sandbox/src/index.ts)。
+依据：[文件系统围栏源码](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/fs/fs-sandbox/src/index.ts)。
 
 ### 7. 数据目录与 Node 版本需要分清插件、宿主和仓库脚本
 
@@ -92,7 +100,7 @@ DSH 主目录解析支持显式配置、`DSH_HOME`、默认 `~/.dsh`。复审时
 
 本仓 OpenSpec 配置与 CI 使用 Node 20 口径，而该版 DSH CLI 要求 Node `>=24.9.0`。**Node 20 是仓库配置口径，不是本机实装版本**：本机当前开发 Node 为 `26.13.0`，DSH 随包 Node 为 `24.21.0`。这不证明仓库脚本不能在 Node 20 运行；它表明以后需分别记录仓库门禁、插件开发及宿主运行时的兼容范围。
 
-依据：[DSH 主目录库](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/util/home-paths/README.zh.md)、[CLI 包清单](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/apps/cli/package.json)、[Node 官方发行列表](https://nodejs.org/dist/index.json)。
+依据：[DSH 主目录库](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/util/home-paths/README.zh.md)、[CLI 包清单](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/apps/cli/package.json)、[Node 官方发行列表](https://nodejs.org/dist/index.json)。
 
 ## 旧文件规范的迁移判断
 
