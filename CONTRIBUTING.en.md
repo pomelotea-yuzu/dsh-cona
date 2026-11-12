@@ -4,12 +4,12 @@
 
 ## Current scope
 
-Initialized on 2026-11-10. As of 2026-11-11, a project management plugin design draft and static DSH integration research are available, with no product code or runtime validation. See the [decision index](docs/knowledge/decisions.md) for the current direction and retained boundaries; specific designs remain under discussion. Licensed under [MIT](LICENSE); check with the maintainer before opening a PR.
+Initialized on 2026-11-10. As of 2026-11-12, project management design, architecture, roadmap, i18n and data collaboration drafts, and static DSH research are available, with no product code or runtime validation. See the [decision index](docs/knowledge/decisions.md) for the current direction and retained boundaries; implementation details await practical refinement. Licensed under [MIT](LICENSE); check with the maintainer before opening a PR.
 
 ## Before committing
 
 - Run `node scripts/check-repo.mjs --all` locally; after a fresh clone run `git config core.hooksPath .githooks` once.
-- Repository-local disposable output goes to `artifacts/`; local experiment runtime data may go to `.dsh-cona/`. Neither is committed. Hand-written conclusions belong in the matching `docs/` subdirectory. These locations do not prescribe deployed plugin project storage, which remains to be designed.
+- Repository-local disposable output goes to `artifacts/`; local experiment runtime data may go to `.dsh-cona/`. Neither is committed. Hand-written conclusions belong in the matching `docs/` subdirectory. These conventions do not prescribe deployment directories. Users can choose among three project material locations; see the [collaboration design](docs/architecture/2026-11-12-project-data-portability.md) for portable versus local data. The format is not yet implemented.
 - Bilingual facade documents are registered in `i18n/docs-manifest.json` and must be updated together.
 
 ## Discipline

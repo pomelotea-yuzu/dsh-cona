@@ -6,7 +6,7 @@ A project management plugin primarily for software development, using DSH (DeepS
 
 ## Status
 
-- As of 2026-11-11: a project management design draft, an initial architecture baseline and static DSH integration research are available. **No plugin code, installed dependencies or active change; integration has not been tested at runtime.**
+- As of 2026-11-12: project management design, revised architecture, development roadmap, i18n and data collaboration drafts, and static DSH research are available, with `0.2.2-rc.2` fixed as the baseline. **No plugin code, installed dependencies or active change; integration has not been tested at runtime.**
 - Current requirements and proposals: [project management design draft](docs/product/2026-11-11-project-management-design.md). The direction is confirmed; usage flows and implementation remain under discussion.
 - Initial architecture: [project development architecture draft](docs/architecture/2026-11-11-project-development-architecture.md), covering research, ongoing analysis, project trees and chat continuity. Defaults will be refined through practical use.
 - Current direction and retained boundaries: [docs/knowledge/decisions.md](docs/knowledge/decisions.md).
@@ -25,7 +25,8 @@ A project management plugin primarily for software development, using DSH (DeepS
 - Preserve integration boundaries for a future official Super-agent without building an agent scheduler in this round. File recovery does not drive the architecture.
 - No standalone desktop agent product or in-house sandbox. Reuse DSH execution and isolation; a plugin's Host-side file access must not be assumed to inherit session sandbox protection.
 - Cross-platform plugin: plain Node ESM, no platform-native APIs, no hardcoded drive letters or path separators.
-- Development environment: macOS; project storage and deployment locations remain to be designed, with host domain storage as a candidate.
+- Development environment: macOS. Users can store project material in the project directory, the DSH data directory, or a custom directory. Requirements include Git collaboration across environments, readability by other agents, and continuation in DSH on another machine. The [separation of portable material and local runtime data](docs/architecture/2026-11-12-project-data-portability.md) awaits implementation and validation.
+- The project tree and goal/time roadmap views share one plan. The first version will fully support Simplified Chinese and English UI, with English fallback for other host languages. The overall direction is confirmed; interaction and format details remain to be refined.
 
 The design draft distinguishes explicit user requirements from proposals. Updating the indexes does not finalize the entire design.
 
