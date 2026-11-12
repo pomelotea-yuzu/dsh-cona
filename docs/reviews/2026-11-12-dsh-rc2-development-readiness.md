@@ -16,12 +16,14 @@
 |---|---|
 | 已安装桌面应用 | `DeepSeek Harness.app` 的 `Info.plist`：`CFBundleShortVersionString = 0.2.2-rc.2` |
 | 本机源码快照 | 根包与 `apps/cli/package.json` 均为 `0.2.2-rc.2`，Node 要求均为 `>=24.9.0` |
-| 系统开发 Node | 当前 shell 的 `node --version`：`v26.13.0`；此前 Agent 记录的 `v22.22.2` 不是本次观察值 |
+| 开工复核所用 shell Node | 该次调用的 `node --version`：`v26.13.0`；其他 Agent 的 `v22.22.2` 是不同调用环境的观察，不能据此推定系统统一版本 |
 | 桌面随包运行时 | `runtime/versions.json` 与 `runtime/primary-runtime/runtime.json` 声明 Node `24.21.0`、pnpm `11.28.5`；直接执行 primary-runtime 的 Node 二进制得到 `v24.21.0` |
 | Git hook 配置 | `core.hooksPath = .githooks` |
 | 仓库门禁 | `node scripts/check-repo.mjs --all` 通过；洁净度、链接、双语检查均为零问题，洁净度及双语自测通过 |
 
 随包运行时的元数据和二进制版本不等于当前桌面 Host 进程实际使用的 Node 版本，本次没有读取运行中进程来作此判断。系统 Node、随包 primary-runtime 与仓库 CI 的 Node 20 也不能互相替代兼容性证据。
+
+2026-11-12 R1 review 修订补记：编写 Agent 的当前 login shell 中 `command -v node` 为 `/usr/local/bin/node`，`node --version` 为 `v26.13.0`；直接运行应用 `Contents/Resources/runtime/primary-runtime/dependencies/node/bin/node --version` 得 `v24.21.0`。外部 review 记录其 shell 为 `v22.22.2`，未附其二进制／PATH，保留为该次独立观察，不覆盖其中任何一方。上述补测只调用版本命令，没有启动 Host；R1 冻结安装、构建和 profile 实验须重新记录实际选用二进制及宿主运行时，低于 `>=24.9.0` 的环境不能直接当合格前置环境。
 
 ## 开发时需要落实的前提
 

@@ -140,3 +140,20 @@ DSH profile 模板用于启动组合和插件配置；Agent preset 用于选择 
 该实验成功后，再细化模板体系、阶段推进、依赖关系、成果组织与用户审批体验。无需先复建完整 Agent，也无需把文件版本系统列为项目树接入的前置条件。
 
 后续形成的[项目开发管理架构草案](../architecture/2026-11-11-project-development-architecture.md)把这些候选接口组织为 DSH 内部插件的第一版设计基线，加入持续项目分析、上下文接续和实践反馈切片。该设计没有新增运行证据，不表示上述实验已通过。
+
+## 2026-11-12 R1 审阅修订：身份与请求边界静态补核
+
+本节为 R1 review A1／C2／C5 补记源码事实，固定 rc.2 提交 `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`；只读取本机已核查快照，没有启动 DSH 或诊断插件。接口存在与可用接入是不同结论，下列运行映射全部为 `untested`。
+
+| 已核对事实 | 固定源码位置 | 实施边界 |
+|---|---|---|
+| principalOf 对 owner 和无 invocation 的进程内调用都返回 undefined | [principal.ts:14](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/typert/protocol/src/principal.ts#L14) | Remote 须另核对真实 invocation／合法 owner peer；不能仅凭空值授权，也不能将工具变为 owner |
+| 宿主 remoteAccess.allows 对无 invocation 有独立分支 | [remote-access/index.ts:236](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/api/remote-access/src/index.ts#L236) | 这是宿主内部方法语义，不等于项目工具可以免 WorkRun；插件必须按 Remote／工具分别准入 |
+| ToolRunContext 继承的 agent 字段可选 | [contracts.ts:188](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/tools/src/contracts.ts#L188) | 从真实 execute 上下文取得 Agent、callId／token／signal；agent 缺失或执行归属不唯一时拒绝新绑定并记 blocked，不信模型补值 |
+| Agent.id 声明为 SessionId | [agent/types.ts:18](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/agent/src/types.ts#L18) | id 只用于会话关联；仍须本进程实际 Agent 对象与活动执行匹配，重启不从 id 恢复权限 |
+| Session prompt 将 requestId 写入 source.rpcId | [session-controller/index.ts:485](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/api/session-controller/src/index.ts#L485) | rpcId 来自 Client，不是授权令牌；要与本机已登记意图、实际消息消费和主体共同核对 |
+| inbox/claimed 带消息和 turn；pre-step 带真实 Agent／turn／step／signal | [runtime-types.ts:329](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/agent/src/runtime-types.ts#L329)、[351](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/agent/src/runtime-types.ts#L351) | queue／steer／同轮输入、结束与取消能否唯一归属仍须真实实验；预告 stopping 不作为已终止证明 |
+| dshHomePath 使用已解析的 DSH home 拼接片段 | [home-paths/index.ts:160](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/util/home-paths/src/index.ts#L160) | 只证明路径工具存在，不预定插件默认位置或证明文件后端可用 |
+| 宿主 DSH 兼容检查使用 semver.satisfies 并 includePrerelease | [plugin-compatibility.ts:52](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/boot/app-boot/src/plugin-compatibility.ts#L52) | 精确 rc.2 范围仍要分别实测包管理器冻结安装与宿主启动，不假定同一判据 |
+
+R1 的两类可信主体、拒绝条件和必须实测项见 [change design](../../openspec/changes/establish-r1-project-plugin/design.md)及 V25。源码抽查不能把 V25 或真实 Agent 闭环改标 pass。

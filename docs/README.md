@@ -4,6 +4,8 @@
 
 ## 当前阅读入口
 
+- [Change 工作流](development/workflow.md)：提案编写后交外部 Agent 审阅，依据 change 内的 `review.md` 修订后再提交。
+- [R1 活动 change](../openspec/changes/establish-r1-project-plugin/proposal.md)：插件贯通实验的 proposal、design、六组能力规范、任务和验证矩阵，第 1 轮外审已完成并按意见修订，尚未实施。
 - [决定索引](knowledge/decisions.md)：当前方向、沿用边界与被替代内容。
 - [项目管理设计草案](product/2026-11-11-project-management-design.md)：用户明确需求与待讨论设计；当前方向已确认，使用流程和实现尚未定稿。
 - [项目开发管理架构草案](architecture/2026-11-11-project-development-architecture.md)：DSH 内部插件的完整设计基线；包含分层、规划指纹与本机版本、公开资料与私有回执恢复、执行身份、快照同步及里程碑，尚未实现。
@@ -19,7 +21,7 @@
 
 - 尚未定稿的设计、讨论、调研与评审文档使用 `yyyy-mm-dd-<english-name>.md`，英文名称用小写单词与连字符连接，例如 `2026-11-11-project-management-design.md`。
 - 内容确定后，再升级为不带日期前缀的定稿文件，并同步更新引用；整理成文或检查通过不等于已经定稿。
-- `README.md` 等目录索引、仓库固定说明、平台约定的模板文件，以及 OpenSpec 的结构性文件名按各自用途保留；无日期不意味着其中引用的草案已获确认。
+- `README.md` 等目录索引、仓库固定说明、平台约定的模板文件，以及 OpenSpec 的结构性文件名按各自用途保留；change 内的 `review.md`／`review-response.md` 和已明确的 `development/workflow.md` 按固定用途命名。无日期不意味着其中引用的草案已获确认。
 - 原样迁移的 Cona 历史记录与规范保留原路径；其适用性以文档说明和后续决定为准，不因文件名无日期而视为新插件定稿。
 
 ## 从 Cona 原样迁移（不改一字）
@@ -51,7 +53,7 @@
 | 目录 | 用途 | 当前 |
 |---|---|---|
 | `architecture/` | 架构说明 | 含总体架构、i18n 接入与数据协作草案 |
-| `development/` | 开发工作流与状态 | 含原仓库封存状态 |
+| `development/` | 开发工作流与状态 | 含 Change 审阅提交工作流与原仓库封存状态 |
 | `engineering/` | 工程计划与过程 | 含插件开发路线图草案 |
 | `guide/` | 使用者文档 | 占位 |
 | `knowledge/` | 决定速查与经验 | 含 `decisions.md` |

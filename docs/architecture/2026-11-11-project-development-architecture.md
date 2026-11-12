@@ -292,7 +292,7 @@ Host 插件代码不自动受会话沙箱保护。工具入口取得的执行身
 
 2026-11-12 已将以下切片展开为[插件开发路线图草案](../engineering/2026-11-12-plugin-development-roadmap.md)，补充 R1–R6 的交付、依赖与完成标准；用户已认可[路线图功能](../product/2026-11-12-project-roadmap-design.md)共用规划、结合目标与时间视图的整体设计。首版中英范围也已明确，接入与验收见[i18n 草案](2026-11-12-plugin-i18n-design.md)；具体实现仍待验证。
 
-这是建议的验证路线，不是已建立的 OpenSpec change。下列均为 `untested`：
+下表是整体切片建议；其中 R1 已形成独立 [OpenSpec change](../../openspec/changes/establish-r1-project-plugin/proposal.md)，当前提案已完成第 1 轮外审并按意见修订，尚未实施。R1 的后端和首版格式选择见该 change，尚未实施；下列运行验证均为 `untested`：
 
 | 切片 | 需要跑通的用户过程 | 关键反例 |
 |---|---|---|

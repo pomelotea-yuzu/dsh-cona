@@ -53,6 +53,8 @@
 
 ## 沿用的工程纪律（来自 Cona `docs/development/workflow.md`，原文未整体迁移）
 
+本仓现行 [Change 审阅提交工作流](../development/workflow.md)由用户于 2026-11-12 明确补充：编写后不立即提交，交其他 Agent 审阅并落 `review.md`，编写 Agent 阅读、修订并复查后再提交。[R1 change](../../openspec/changes/establish-r1-project-plugin/proposal.md) 已完成第 1 轮外部审阅并按意见修订，处理与复查见 change 内的 `review-response.md`；尚未实施，不新增产品能力通过结论。
+
 - 用例状态只有 `pass` / `fail` / `blocked` / `untested`，**未测与受阻不得当作通过**。
 - 不因负例全被拒绝就宣称安全，也不因功能收益或开销小就掩盖失败；不以放宽边界冒充通过。
 - 每个勾选必须有代码、运行证据或明确研究结论；证据本机保留、结论入库，生成物不直接当提案正文。

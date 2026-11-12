@@ -7,7 +7,7 @@ context: |
   Cona 的 product-decisions.md §6 保留为历史原文，“只提供检查点／交付／回退”的范围已被替代。
 
   当前阶段（2026-11-12）：已有项目管理设计草案、第一版架构基线、开发路线图草案与 DSH 接入静态调研；
-  未编写插件代码、未安装依赖、未建立 workspace、未立活动 change；接入能力未运行验证。
+  已建立 R1 change establish-r1-project-plugin，第 1 轮外审已完成并按意见修订；未编写插件代码、未安装依赖、未建立 workspace，接入能力未运行验证。
 
   用户明确的需求：
   - 动态项目树主要组织项目代码开发与相关文档；视频制作为偶发需求，可按需加入。
@@ -38,8 +38,9 @@ context: |
   环境与未定项：
   - 开发环境 macOS（arm64 / zsh）；现有仓库 CI 使用 Node 20，不能据此推定插件兼容版本。
   - 2026-11-12 已同步：本机 DSH 应用与 `Developer/tools/deepseek-harness/` 源码快照均为 0.2.2-rc.2（预发布）；其 CLI 要求 Node >=24.9.0，与 rc.1 一致。接入能力未运行验证，插件兼容范围仍待验证。
+  - R1 提案编写与修订使用本机独立安装的 OpenSpec 1.17.0 做严格校验，命令与输出摘要见 change 的 review-response.md；外部 review 临时使用 2.0.0 的结果单列，不互相替代。
   - 许可证 MIT（见根目录 LICENSE）。
-  - 使用过程、界面、数据模型与变更协议的设计基线见 docs/architecture/2026-11-11-project-development-architecture.md，仍待实践验证；尚未立实施 change。
+  - 使用过程、界面、数据模型与变更协议的设计基线见 docs/architecture/2026-11-11-project-development-architecture.md，仍待实践验证；R1 change 正在提案阶段，尚未实施。
   - 2026-11-12 修订保留领域／应用／接入／界面分层；跨环境以 planVersion 内容指纹核对规划，本机 planRevision／stateRevision 只在资料实例内同步，不比较不同 Git 分支的计数器。
   - 公开 JSON／Markdown 项目资料与本机会话、授权、意图／回执分离；文件适配器支持三种位置，storageDomain 仅为本机运行数据候选。详见 docs/architecture/2026-11-12-project-data-portability.md，尚未实现。
   - 公开资料和私有回执不能假定同一原子头；先保存本机意图，再发布资料，再完成回执。响应丢失先查原回执，发布结果未知则核对不盲重放；Git 回退也不重放历史命令。
@@ -52,6 +53,14 @@ context: |
   - SDD 提醒须提供开关，关闭后不主动催促或自动重开；启用时按变更影响提醒，简单任务跳过。
   - 提醒开关默认值、设置范围及 OpenSpec 工件与项目节点的映射方式待设计；开关不修改仓库已有门禁。
   - push 与 tag 归用户；远程同步状态只认实时命令。
+  - Change 工作流见 docs/development/workflow.md：写完并校验后保持未提交，交用户安排其他 Agent 审阅；review.md 落入 change 后，编写 Agent 阅读并按情况修订，在 review-response.md 逐项记录处理依据，重新校验后再提交；单纯编写提案不自动进入实现，已有实施授权继续有效。
+
+rules:
+  proposal:
+    - 明确所属里程碑与外部审阅前的未提交状态；不把草案或静态核查写成运行通过。
+  tasks:
+    - 每项实现任务写明完成检查；编写提案不勾选实现任务。
+    - 外部审阅、按 review 修订及提案提交列为流程说明，不混入产品实现进度；无 review.md 不立即提交，实施遵循用户实际授权。
 
 conventions:
   language: 默认中文；仅 i18n/docs-manifest.json 登记的对外文档同轮维护英文

@@ -6,7 +6,7 @@
 
 ## 状态
 
-- 2026-11-12：已有项目管理设计、修订架构、开发路线图、i18n 与数据协作草案及 DSH 静态调研，固定以 `0.2.2-rc.2` 为基线；**未编写插件代码、未安装依赖、未立活动 change，接入能力尚未运行验证**。
+- 2026-11-12：固定 DSH `0.2.2-rc.2`，已有设计与静态调研；[R1 change](openspec/changes/establish-r1-project-plugin/proposal.md) 已完成第 1 轮外部审阅并按意见修订，按[工作流](docs/development/workflow.md)复查后提交提案；处理记录见 [review-response](openspec/changes/establish-r1-project-plugin/review-response.md)，待实施。**未编写插件代码、未安装依赖，接入能力尚未运行验证**。
 - 当前需求与设计建议：[项目管理插件设计草案](docs/product/2026-11-11-project-management-design.md)。方向已确认，具体使用流程与实现方案待讨论。
 - 第一版架构：[项目开发管理架构草案](docs/architecture/2026-11-11-project-development-architecture.md)，覆盖调研、持续分析、项目树和聊天接续；默认方式通过实践优化。
 - 当前方向与仍有效边界：[docs/knowledge/decisions.md](docs/knowledge/decisions.md)。

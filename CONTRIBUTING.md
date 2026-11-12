@@ -8,6 +8,7 @@
 
 ## 提交前
 
+- Change 编写后先保持未提交，由用户安排其他 Agent 审阅并在 change 中生成 `review.md`；编写 Agent 阅读、修订并记录处理结果，重新校验后再提交。详细流程见 [Change 工作流](docs/development/workflow.md)。
 - 本地跑 `node scripts/check-repo.mjs --all`；首次克隆后执行一次 `git config core.hooksPath .githooks`。
 - 仓库内的一次性产物进 `artifacts/`，本机实验运行数据可放 `.dsh-cona/`，两者均不入库；手写结论直接写进 `docs/` 对应子目录。这些约定不等于插件部署目录；用户可选三种资料位置，公开资料与本机数据规则见[协作设计](docs/architecture/2026-11-12-project-data-portability.md)，具体格式尚未实现。
 - 中英成对的门面文档以 `i18n/docs-manifest.json` 登记为准，同轮维护。

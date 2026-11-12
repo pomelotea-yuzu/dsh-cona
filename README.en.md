@@ -6,7 +6,7 @@ A project management plugin primarily for software development, using DSH (DeepS
 
 ## Status
 
-- As of 2026-11-12: project management design, revised architecture, development roadmap, i18n and data collaboration drafts, and static DSH research are available, with `0.2.2-rc.2` fixed as the baseline. **No plugin code, installed dependencies or active change; integration has not been tested at runtime.**
+- As of 2026-11-12: design drafts and static research are available, with DSH `0.2.2-rc.2` fixed as the baseline. The [R1 change](openspec/changes/establish-r1-project-plugin/proposal.md) has received its first external review and been revised. The proposal is committed after checks under the [workflow](docs/development/workflow.md); see the [review response](openspec/changes/establish-r1-project-plugin/review-response.md). Implementation is pending. **No plugin code or installed dependencies; integration has not been tested at runtime.**
 - Current requirements and proposals: [project management design draft](docs/product/2026-11-11-project-management-design.md). The direction is confirmed; usage flows and implementation remain under discussion.
 - Initial architecture: [project development architecture draft](docs/architecture/2026-11-11-project-development-architecture.md), covering research, ongoing analysis, project trees and chat continuity. Defaults will be refined through practical use.
 - Current direction and retained boundaries: [docs/knowledge/decisions.md](docs/knowledge/decisions.md).
