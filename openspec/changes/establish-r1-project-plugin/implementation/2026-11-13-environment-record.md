@@ -120,4 +120,5 @@
 - 根 `package.json` 新增 `check:ci`：`node scripts/check-repo.mjs --all && pnpm build && pnpm typecheck && pnpm test:run && pnpm check:plugin && pnpm check:manifest`；插件 `test` 拆出 `test:run`（`tsc -p tsconfig.test.json && node --test lib-test/test/*.test.js`），构建只跑一次。
 - 本地实测（PATH 指向宿主自带 Node）：`node v24.21.0`、`pnpm 12.18.0`；`pnpm install --frozen-lockfile` 通过；`pnpm check:ci` exit 0——洁净度 147 文件 0 问题、链接 68 篇 0 问题、双语 5 对 0 问题、build/typecheck、**79/79 测试**、包边界、协议同步、manifest 全过。
 - CI：`.github/workflows/ci.yml` 改为 pnpm 12.18.0 + Node 24.21.0、`pnpm install --frozen-lockfile` + `pnpm check:ci`；`.workflow/ci.yml`（Gitee Go）自装 Node 24.21.0、`npm i -g pnpm@12.18.0`（npmmirror 源）、install + `check:ci`，保持单条 `&&` 链（沿用 Gitee 单条不短路教训）。
-- 未验证：GitHub Actions 与 Gitee Go 的**远端实跑**本机无法执行；只做了 YAML 语法解析（Ruby YAML 通过）与本地同一命令链验证。远端 runner、镜像源与 pnpm 全局安装行为保持 `untested`，不能记成 CI 已通过。
+- **GitHub Actions 已实跑**：run #4（2026-11-13T11:50:28Z，commit `3d78968`）结论 `success`；Set up pnpm、Set up Node.js（固定 24.21.0）、Install dependencies、Repository and plugin gates 全部 `success`（<https://github.com/pomelotea-yuzu/dsh-cona/actions/runs/43420248561>）。job 日志需认证未逐行抓取，Node 版本以 workflow 固定值与 setup-node 成功推定。
+- **Gitee Go 未触发**：仓库侧尚未创建／启用流水线（不是 YAML 语法失败）；`.workflow/ci.yml` 保持静态接入，状态 `untested`。开通后首次 push main 再补记实际结果。
