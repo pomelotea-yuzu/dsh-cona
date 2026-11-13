@@ -1,14 +1,14 @@
 # R1 实现任务
 
-状态：已收到[第 1 轮外部 review](review.md)并按意见修订，处理见 [review-response](review-response.md)；尚未实施，所有实现与运行验证任务均未完成。以下命令和产品目录属于计划，当前尚不存在插件构建脚本。协议正文和向量是已交付的提案工件，其复算不勾选实现任务；不得把工件齐备或静态校验当成产品已完成。
+状态：已收到[第 1 轮外部 review](review.md)并按意见修订，处理见 [review-response](review-response.md)；2026-11-13 起按用户授权进入实施，第 1 段（格式、领域与无宿主校验）已完成，第 2 段起未开始。以下命令和产品目录属于计划，除第 1 段产物外尚不存在插件构建脚本。协议正文和向量是已交付的提案工件，其复算不勾选实现任务；不得把工件齐备或静态校验当成产品已完成。
 
 ## 1. 格式、领域与无宿主校验
 
-- [ ] 1.1 建立 `packages/project-plugin/` 的领域／应用／适配器／Client／Host 目录及接口边界；以类型检查和导入检查确认领域不依赖 Node、React、Cordis，产出包边界说明。
-- [ ] 1.2 实现 v1 Project／WorkNode schema、稳定 id、顺序和依赖规则；以重复 id、缺失父节点、树环、依赖环、批量拆分整体拒绝测试验证，并交付最小合法资料样例。
-- [ ] 1.3 按已交付的 `formats/v1/plan-canonicalization.md`／`plan-vectors.json` 实现 v1-plan 指纹；主实现与第二份不依赖主序列化函数的独立实现均须复算全部正向向量及拒绝负向向量，覆盖 UTF-16 键序、中文／转义、精确整数、集合白名单、记录追加和业务重排；提案向量核算不代替本项产品实现验证。
-- [ ] 1.4 实现记录索引、正文哈希、完成条件和验证来源校验；以孤立正文不发布、子节点完成不推导父完成、外部验证不冒充本机复测及失效引用测试验证。
-- [ ] 1.5 提供包内 schema、资料 README 模板与独立校验命令，将协议正文／强制一致性向量随包及资料根分发；在无 DSH 服务的进程中校验样例及错误／未知字段资料，确认其他实现仅凭公开协议可复算，不加载宿主、浏览器或模型服务，不执行资料脚本或远程引用。
+- [x] 1.1 建立 `packages/project-plugin/` 的领域／应用／适配器／Client／Host 目录及接口边界；以类型检查和导入检查确认领域不依赖 Node、React、Cordis，产出包边界说明。（`BOUNDARIES.md`、`tsconfig.domain.json`（types: []）、`scripts/check-boundaries.mjs`；application/ports.ts 为草案接口，随第 3–6 段细化）
+- [x] 1.2 实现 v1 Project／WorkNode schema、稳定 id、顺序和依赖规则；以重复 id、缺失父节点、树环、依赖环、批量拆分整体拒绝测试验证，并交付最小合法资料样例。（`formats/v1/sample-project.json`（planVersion 已回填真值）+ `formats/v1/project-v1.schema.json` + `test/domain.test.ts`；协议向量确认 v1 允许多根森林，故未加单根限制）
+- [x] 1.3 按已交付的 `formats/v1/plan-canonicalization.md`／`plan-vectors.json` 实现 v1-plan 指纹；主实现与第二份不依赖主序列化函数的独立实现均须复算全部正向向量及拒绝负向向量，覆盖 UTF-16 键序、中文／转义、精确整数、集合白名单、记录追加和业务重排；提案向量核算不代替本项产品实现验证。（`test/vectors.test.ts`：43 项全部通过，主实现与 `plan-fingerprint-alt.ts` 交叉复算一致；独立性边界记录于 BOUNDARIES.md——共享 strict-json 解析与领域校验，序列化路径完全独立）
+- [x] 1.4 实现记录索引、正文哈希、完成条件和验证来源校验；以孤立正文不发布、子节点完成不推导父完成、外部验证不冒充本机复测及失效引用测试验证。（`validate.ts` 完成条件规则、`records.ts` 孤立正文与验证来源分类、`test/domain.test.ts`、`test/cli.test.ts` 孤立正文端到端）
+- [x] 1.5 提供包内 schema、资料 README 模板与独立校验命令，将协议正文／强制一致性向量随包及资料根分发；在无 DSH 服务的进程中校验样例及错误／未知字段资料，确认其他实现仅凭公开协议可复算，不加载宿主、浏览器或模型服务，不执行资料脚本或远程引用。（`src/cli/validate.ts`（check / check-file / compute-plan-version / init）、`formats/v1/project-README.template.md`、`scripts/check-protocol-sync.mjs`；CLI 已实测：样例通过、10 个错误 fixture 以稳定码拒绝、孤立正文与哈希不符正文拒绝）
 
 ## 2. 构建与接入前置实验
 

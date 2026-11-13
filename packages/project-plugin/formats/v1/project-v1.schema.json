@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dsh-cona:project-v1",
+  "title": "DSH-Cona 公开项目资料 v1（project.json）",
+  "description": "权威校验由插件实现与独立实现按 protocol/plan-canonicalization.md 执行；本 schema 供阅读与辅助校验，不能执行资料根内脚本或获取远程引用。规划指纹规则见 protocol/plan-canonicalization.md。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "project", "plan", "planVersion", "records"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "goal", "constraints", "repositories"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string" },
+        "goal": { "type": "string" },
+        "constraints": { "type": "array", "items": { "type": "string" } },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label"],
+            "properties": {
+              "id": { "$ref": "#/$defs/uuid" },
+              "label": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodes", "dependencies"],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "parentId", "order", "title", "goal", "completionCriteria", "status"],
+            "properties": {
+              "id": { "$ref": "#/$defs/uuid" },
+              "parentId": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/uuid" }] },
+              "order": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+              "title": { "type": "string" },
+              "goal": { "type": "string" },
+              "completionCriteria": { "type": "array", "items": { "type": "string" } },
+              "status": { "enum": ["todo", "in-progress", "blocked", "done", "canceled"] }
+            }
+          }
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["nodeId", "requiresNodeId"],
+            "properties": {
+              "nodeId": { "$ref": "#/$defs/uuid" },
+              "requiresNodeId": { "$ref": "#/$defs/uuid" }
+            }
+          }
+        }
+      }
+    },
+    "planVersion": { "$ref": "#/$defs/sha256Ref" },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "subjectNodeIds", "path", "contentHash", "summary", "sources"],
+        "properties": {
+          "id": { "$ref": "#/$defs/uuid" },
+          "kind": { "enum": ["plan-change", "analysis-note", "execution-note", "verification"] },
+          "subjectNodeIds": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
+          "path": {
+            "type": "string",
+            "pattern": "^records/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[0-9a-f]{64}\\.md$"
+          },
+          "contentHash": { "$ref": "#/$defs/sha256Ref" },
+          "summary": { "type": "string" },
+          "sources": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "$ref": "#/$defs/uuid" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["repositoryId", "relativePath"],
+                  "properties": {
+                    "repositoryId": { "$ref": "#/$defs/uuid" },
+                    "relativePath": { "type": "string" },
+                    "observedHash": { "$ref": "#/$defs/sha256Ref" }
+                  }
+                }
+              ]
+            }
+          },
+          "verification": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "subject"],
+            "properties": {
+              "status": { "enum": ["pass", "fail", "blocked", "untested"] },
+              "subject": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "id"],
+                "properties": {
+                  "kind": { "enum": ["node", "record"] },
+                  "id": { "$ref": "#/$defs/uuid" }
+                }
+              },
+              "subjectVersion": { "$ref": "#/$defs/sha256Ref" },
+              "scope": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "v4 形态小写 UUID（crypto.randomUUID 输出形态）"
+    },
+    "nonNegativeSafeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sha256Ref": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

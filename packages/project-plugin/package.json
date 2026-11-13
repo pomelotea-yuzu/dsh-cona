@@ -1,0 +1,31 @@
+{
+  "name": "dsh-cona-project",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH-Cona 项目管理插件（R1）：领域、公开资料格式与无宿主校验",
+  "type": "module",
+  "packageManager": "pnpm@12.18.0",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "exports": {
+    ".": "./dist/src/index.js",
+    "./cli/validate": "./dist/src/cli/validate.js"
+  },
+  "files": [
+    "dist",
+    "formats"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.domain.json --noEmit",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "check:protocol-sync": "node scripts/check-protocol-sync.mjs",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "validate": "node dist/src/cli/validate.js"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}
