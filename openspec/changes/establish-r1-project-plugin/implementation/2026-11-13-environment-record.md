@@ -81,7 +81,9 @@
 ### 2.3 剩余缺口：cona-r1-test 没有 Web 应用，Client 无法加载
 
 - 自定义 profile 的默认组合是 `DEFAULT_PROFILE_BUNDLES = ["@deepseek-ai/dsh-base"]`（`packages/util/official-bundles/src/bundles.ts:45`）；`cona-r1-test` 的 `dsh.profile.bundles` 只有 base + 插件。`dsh --profile cona-r1-test` 实测只打印 `[dsh-cona-project] host apply; node = v24.21.0`，进程存活但不开 HTTP、无页面——之前的“启动成功、零告警”成立，但这份 profile 从结构上不可能观察 Client。
-- 在独立 home 的 profile 副本加入 `@deepseek-ai/dsh-web-app`（安装自带 bundle，非 npm 依赖）后：`dsh --profile cona-r1-test --port 0 --no-open` 打印 `http://127.0.0.1:65180/?token=…`；`GET /` 跟随 303 后 200；`__DSH_BOOT__` 76 个 entry 中含 `dsh-cona-project`（第二个 application batch，URL `plugins/??dsh-cona-project/client.js&rev=d1d94585a03c`），该 bundle HTTP 200（1433 字节，`__ModuleLoader__.load` 包装完整）。
+- 真实 profile 已按用户授权改动：重装本轮修复版 tarball（47 文件），并把 `@deepseek-ai/dsh-web-app` 加入 `dsh.profile.bundles`（安装自带 bundle，非 npm 依赖；未触碰 desktop）。改动前备份见 `artifacts/r1-2.3-test/profile-backup/`；装好的包内 CLI `init` 已实测可用。
+- 加入 `@deepseek-ai/dsh-web-app` 后：`dsh --profile cona-r1-test --port 0 --no-open` 打印 `http://127.0.0.1:65180/?token=…`；`GET /` 跟随 303 后 200；`__DSH_BOOT__` 76 个 entry 中含 `dsh-cona-project`（第二个 application batch，URL `plugins/??dsh-cona-project/client.js&rev=d1d94585a03c`），该 bundle HTTP 200（1433 字节，`__ModuleLoader__.load` 包装完整）。
+- **真实 profile 复测**：`dsh --profile cona-r1-test --port 0 --no-open` → `dsh web: http://127.0.0.1:65337/?token=…`，页面 200（41314 字节），boot graph 76 entries、`dsh-cona-project` entry `plugins/??dsh-cona-project/client.js&rev=967847feb140`；该 bundle 200（1433 字节）；Remote probe 返回同上（owner、v24.21.0）。启动无告警。
 - 离线按 loader 契约执行服务端下发的 bundle：注册 id=`dsh-cona-project`、`apply` 可调用并输出 `[dsh-cona-project] client factory loaded`。这是产物契约级验证，**不是**浏览器激活证据。
 - Remote 探针（真实 HTTP 调用，非静态）：带浏览器 cookie `POST /api/conaDiagnostic/probe`，body `{"type":"client-request","rpcId":…,"method":"conaDiagnostic/probe","payload":{"args":{}}}` → `{"ok":true,"value":{"hasInvocation":true,"peerPrincipal":{"kind":"owner"},"service":"conaDiagnostic","runtime":{"nodeVersion":"v24.21.0"}}}`。`principalOfResult` 缺省符合协议（`principalOf` 对 owner 返回 undefined，`packages/vendor/dsh-typert-protocol/src/principal.ts:14`）。
 - 共享实例：profile 的 `node_modules` 只有 `dsh-cona-project` 与 `zod`，无 `@deepseek-ai/*` 副本；cordis/dsh-tools/typert-protocol 由宿主注入，工具注册通过宿主 schema 校验。
@@ -90,5 +92,5 @@
 
 ### 仍未验证
 
-- 浏览器内 Client factory 实际激活与 console 日志（无浏览器控制；需要 GUI。前提是给 `cona-r1-test` 的 `dsh.profile.bundles` 加上 `@deepseek-ai/dsh-web-app`，当前真实 profile 未改）。
+- 浏览器内 Client factory 实际激活与 console 日志（无浏览器控制；需要 GUI。`cona-r1-test` 已加 web-app 并起好临时服务，页面与 bundle 均已就绪，只差在真实浏览器 console 看到 `[dsh-cona-project] client factory loaded`）。
 - non-owner principal、无 invocation 的 ToolRunContext、queue/steer/取消/重启映射（2.4）。
