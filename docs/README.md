@@ -7,6 +7,7 @@
 - [Change 工作流](development/workflow.md)：提案编写后交外部 Agent 审阅，依据 change 内的 `review.md` 修订后再提交。
 - [R1 活动 change](../openspec/changes/establish-r1-project-plugin/proposal.md)：插件贯通实验的 proposal、design、六组能力规范、任务和验证矩阵，第 1 轮外审已完成并按意见修订，尚未实施。
 - [决定索引](knowledge/decisions.md)：当前方向、沿用边界与被替代内容。
+- [DSH 插件与 Typert 踩坑契约](knowledge/2026-11-13-dsh-typert-plugin-gotchas.md)：0.2.2-rc.2 插件开发实测经验（源面登记、产物布局、manifest 契约等）。
 - [项目管理设计草案](product/2026-11-11-project-management-design.md)：用户明确需求与待讨论设计；当前方向已确认，使用流程和实现尚未定稿。
 - [项目开发管理架构草案](architecture/2026-11-11-project-development-architecture.md)：DSH 内部插件的完整设计基线；包含分层、规划指纹与本机版本、公开资料与私有回执恢复、执行身份、快照同步及里程碑，尚未实现。
 - [插件开发路线图草案](engineering/2026-11-12-plugin-development-roadmap.md)：本项目从接入实验到首版试用的 R1–R6 里程碑、依赖与完成标准，尚未实施。
@@ -56,7 +57,7 @@
 | `development/` | 开发工作流与状态 | 含 Change 审阅提交工作流与原仓库封存状态 |
 | `engineering/` | 工程计划与过程 | 含插件开发路线图草案 |
 | `guide/` | 使用者文档 | 占位 |
-| `knowledge/` | 决定速查与经验 | 含 `decisions.md` |
+| `knowledge/` | 决定速查与经验 | 含 `decisions.md` 与实测踩坑契约 |
 | `product/` | 产品设计与决定 | 含原 Cona 决定记录、项目管理设计与路线图功能讨论草案 |
 | `research/` | 调研 | 含项目管理插件接入调研与宿主能力专题复审 |
 | `reviews/` | 评审记录 | 含 DSH rc.2 插件开工前复核 |
