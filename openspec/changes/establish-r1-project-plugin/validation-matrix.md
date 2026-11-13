@@ -1,6 +1,6 @@
 # R1 验证矩阵
 
-日期：2026-11-12。当前为验证计划，无插件代码或业务运行证据；下表全部 `untested`。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
+日期：2026-11-12（2026-11-13 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前仅 V25a `pass`、V25b `blocked`，其余未动）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
 
 方法：`A` 为自动业务／Client 测试，`F` 为实际文件后端与中断注入，`H` 为独立 profile 的真实 DSH 检查，`E` 为真实 Agent 端到端。含多种方法的条目须分别记录观察；替身通过不代替真实宿主。运行时追加实际版本、步骤、预期／观察、证据定位与限制，状态仅 `pass / fail / blocked / untested`。
 
@@ -30,7 +30,8 @@
 | V22 | project-command-commit：通知失败和发布中取消 | F、H | 已提交事实仍可查，发布中取消按实际结果核对，不回滚或重复应用 | untested |
 | V23 | project-conversation-context：多对多、空会话 | H | 双向关系可查，实际返回 Session id 被记录，复用不误绑，创建未知不再盲建 | untested |
 | V24 | project-conversation-context：浏览与授权分离 | A、H | A 运行时浏览 B／增加 B 关联不改执行目标，不自动扩大写权限 | untested |
-| V25 | project-conversation-context：Remote／工具分别准入 | H、E | Remote 核对真实 invocation＋owner，非 owner／伪造主体拒绝；工具无 invocation 但实际 Agent／turn／绑定有效可有限准入，不能凭 principalOf 为空取 owner，agent 缺失／归属不唯一拒绝新绑定并记 blocked | untested |
+| V25a | project-conversation-context：owner Remote 与工具上下文映射 | H、E | UI Remote 由宿主生成 owner invocation（`principalOf` 为空不单独授权）；工具 ToolRunContext 无 invocation 但 agent／callId／signal 有效；queue／steer／迟到工具／cancel／重启的 turn 映射可对照 | pass（2026-11-13，见 2.4 映射记录） |
+| V25b | project-conversation-context：绑定准入与 non-owner 边界 | H、E | （i）工具无 invocation 但绑定有效按有限范围准入；agent 缺失／归属不唯一拒绝新绑定——第 6 段实现绑定层后复测，计入 R1；（ii）non-owner／伪造主体拒绝——R1 已声明边界 | blocked（i 待 6.2／6.5 复测，不享完成例外；ii 因 R1 无真实多身份部署，不阻 R1 完成，随归档带入 R2+ 边界记录） |
 | V26 | project-conversation-context：queue／steer／旧调用 | H、E | 待执行 B 不覆盖 A，同轮不明确归属拒绝，旧绑定不借新范围；续接和新基线有记录 | untested |
 | V27 | project-conversation-context：终态及重启 | H | 结束／取消后拒绝新写，未知停止保持未知，Host 恢复历史不激活授权，Client 断线不取消 Host | untested |
 | V28 | project-conversation-context：来源与动态上下文 | A、H、E | 背景与实际绑定一致，决定／建议／未核查区分，新材料不静默改目标，授权内调整记录原因 | untested |
@@ -55,7 +56,7 @@
 | 三种位置且私有数据不混入 | V05、V10、V12 |
 | 正文／公开头／回执之间中断 | V17、V18、V19 |
 | 文件未知或本机 unknown-state | V20、V33 |
-| 伪造身份、旧绑定和排队请求 | V24、V25、V26 |
+| 伪造身份、旧绑定和排队请求 | V24、V25a、V25b、V26 |
 | 结束／取消及 Host 重启后的 WorkRun | V27 |
 | 初读新变更、乱序和旧连接 | V30、V31；R1 第二投影为规划摘要，未验收路线图 UI，R2 再补实际路线图一致性 |
 | 重连、通知失败和旧回执 | V22、V31、V32 |
@@ -64,4 +65,4 @@
 
 ## 完成判据
 
-必须场景 fail／blocked／untested 时，R1 不标完成；保留问题、影响和下一步，不能通过删除必需场景缩小口径。每项 pass 绑定实际对象与版本，实际代码变化后按影响复核。路线图原“树与路线图一致”的 R1 核查明确以树／规划摘要代替，路线图 UI 一致性留 R2，不因 V30 pass 宣称已验收路线图。外部 v1 基础接入在 V38 验证；新机器／Git 完整协作属于 R2，真实跨环境试用属于 R6，本机双目录不冒充它们已完成。
+必须场景 fail／blocked／untested 时，R1 不标完成；保留问题、影响和下一步，不能通过删除必需场景缩小口径。**V25b 例外**：仅其 non-owner 部分（ii）因 R1 无真实多身份部署而 `blocked`，不阻 R1 完成；该边界须随 change 归档写入 R2+ 记录，且不得改为 `pass`。其绑定准入与 agent 缺失／归属不唯一部分（i）不享此例外，必须在 6.2／6.5 实现后复测并按实际结果更新。每项 pass 绑定实际对象与版本，实际代码变化后按影响复核。路线图原“树与路线图一致”的 R1 核查明确以树／规划摘要代替，路线图 UI 一致性留 R2，不因 V30 pass 宣称已验收路线图。外部 v1 基础接入在 V38 验证；新机器／Git 完整协作属于 R2，真实跨环境试用属于 R6，本机双目录不冒充它们已完成。

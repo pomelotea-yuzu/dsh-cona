@@ -176,7 +176,24 @@ Agent 工具为 `project_read / project_apply / project_record / project_receipt
 
 取消请求立即停止新写准入并观察真实终态，已进入文件发布的命令按第 6 节完成核对；UI 断线不取消 Host 工作。Host 重启只恢复历史及未决意图，所有活动绑定失效，需新的真实请求边界重新建立。工具从 R1 起按独占方式注册，不主动加入并行工具执行，但仍测试排队与迟到调用。
 
-源码依据（固定提交）：[可选工具 Agent](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/tools/src/contracts.ts#L188)、[Agent.id 声明](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/agent/src/types.ts#L18)、[消息消费](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/agent/src/runtime-types.ts#L329)、[pre-step](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/agent/src/runtime-types.ts#L351)、[会话请求来源](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/api/session-controller/src/index.ts#L485)、[principalOf](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/typert/protocol/src/principal.ts#L14)。只读源码事实已回写[接入调研](../../../docs/research/2026-11-11-dsh-project-management-review.md)，上述运行链路仍未验证。
+源码依据（固定提交）：[可选工具 Agent](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/tools/src/contracts.ts#L188)、[Agent.id 声明](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/agent/src/types.ts#L18)、[消息消费](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/agent/src/runtime-types.ts#L329)、[pre-step](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/core/agent/src/runtime-types.ts#L351)、[会话请求来源](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/api/session-controller/src/index.ts#L485)、[principalOf](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/typert/protocol/src/principal.ts#L14)。只读源码事实已回写[接入调研](../../../docs/research/2026-11-11-dsh-project-management-review.md)。其中 owner Remote、工具上下文与 turn 映射已由 2026-11-13 实测覆盖；非 owner 与绑定准入仍未验证（见下表）。
+
+#### DSH 行为前提与验证状态（2026-11-13 实测）
+
+| 前提 | 状态 | 证据 |
+|---|---|---|
+| 单用户部署的调用主体只有 owner；`PrincipalMap` 仅 `owner` | 已核对源码＋实测 | `packages/typert/protocol/src/types.ts:455`；2.4 记录 |
+| 非 owner 仅 liveshare `share-viewer`，需独立部署的 Liveshare 服务（owner host + gateway worker + Relay；浏览器 OAuth 契约由部署方实现） | 已核对源码 | `liveshare-protocol/README.md:29`、`identity/types.ts:35`；本机无该服务 |
+| UI Remote（浏览器/API cookie）是真实 owner invocation；`principalOf` 对 owner 为 undefined | 已实测 | 2.4 记录 |
+| 工具路径无 invocation；ToolRunContext 只有 callId/rootCallId/agent/signal | 源码＋实测 | `packages/core/tools/src/contracts.ts:175-203`；2.4 记录 |
+| queue 投递到 next-turn，不打断当前 turn | 已实测 | 2.4 记录 |
+| steer 在 step 边界注入，不 abort 在飞工具；迟到结果仍进入本 turn | 已实测 | 2.4 记录 |
+| cancel 使工具 signal abort，宿主把结果替换为错误，`turn/end` 为 aborted/user | 已实测 | 2.4 记录 |
+| `Agent.id`＝SessionId 跨重启稳定；callId 每次执行换代 | 已实测 | 2.4 记录 |
+| 自定义 profile 默认不含 Web 应用；需显式加入 `@deepseek-ai/dsh-web-app` 才能观察 Client | 已实测 | 环境记录第二轮 |
+| R1 没有绑定/准入层；绑定与“有限范围准入”属第 6 段 | 设计事实 | tasks 6.2／6.5 |
+
+非 owner 与绑定准入保持 `blocked`，不以进程内伪造 principal 补测；复测条件见 [范围修订](scope-amendment.md)。
 
 ### 8. 快照与面板同步
 

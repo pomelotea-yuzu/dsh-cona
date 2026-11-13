@@ -55,3 +55,32 @@ git diff --cached --check
 本轮已运行 OpenSpec 1.17.0 严格校验，输出 `valid: true`、`issues: []`，1 项通过／0 失败。全部本轮工件已纳入实际 Git 索引，`node scripts/check-repo.mjs --all` 检查 77 个文件：洁净度 0 失败／0 警告、32 项自测通过，i18n 自测通过、链接 56 篇 0 问题、双语 5 对 0 问题；`git diff --cached --check` 通过。提交 hook 另对最终暂存快照重跑仓库门禁。
 
 静态结构复核为 6 个能力、31 个 Requirement、74 个 Scenario；34 项实现任务均未勾选，38 个运行矩阵条目全为 untested。原 review 的 SHA-256 保持 `39e07a8ea73c4416960f447ce6071d9990cb3caeed585ecfcbad4ade8a8c19ba`，未篡改外部评审。此次提交包含审阅工作流、原提案、外部 review、本响应及修订工件，未发现仍需延期处理的提案级阻塞项；运行可行性仍按任务前置实验检验。
+
+# 第 2 轮 review 处理（2026-11-13）
+
+外部审阅原文见 [review.md](review.md) 第 2 轮（保留不改）。本轮对象：[scope-amendment.md](scope-amendment.md) 及其落点（tasks 2.3／2.4a／2.4b、validation-matrix V25a／V25b 与完成判据、design §7 表）。审阅性质为纸面／源码／门禁核对，未重跑 2.4 实测；该边界在下面“校验与可复现”如实保留。
+
+## 总体处理
+
+- 接受审阅意见与三项裁决：non-owner 与绑定准入移出 2.4 验收、R1 不依赖真实 Liveshare 部署；V25a 足够覆盖原 V25 可测核心；2.4a 放行后勾选、2.4b 保持 `blocked`。
+- 按 R2-A1 拆清口径后，2.4b 不再有“永久阻塞”与“豁免”两种读法；R1 完成判定可执行。
+- 未开展第 3 轮：本轮改动属审阅意见内的口径与引用修正，按更新后的工作流微小修豁免；审阅者也明确“改完即可提交，无需第 3 轮”。
+
+## 逐项处理
+
+| 编号 | 处理结果与位置 | 边界 |
+|---|---|---|
+| R2-A1 | `validation-matrix.md` V25b 行拆为（i）绑定准入／agent 缺失归属拒绝与（ii）non-owner 两段；完成判据新增“V25b 例外”：仅（ii）不阻 R1 完成并随归档带入 R2+，（i）不享例外、须在 6.2／6.5 复测并计入 R1；`tasks.md` 6.2／6.5 显式承接（i）；`scope-amendment.md` 修订内容表与“第 2 轮审阅后状态”同步。 | （i）仍需运行证据，当前 `blocked` 不是完成；不影响 2.4a 的实测结论。 |
+| R2-C1 | 删去未核到的“数据库、路由”：`scope-amendment.md` 触发事实 1 与依据、`design.md` §7 表第 2 行改为“owner host + gateway worker + Relay；浏览器 OAuth 契约由部署方实现”，引 `liveshare-protocol/README.md:29`、`identity/types.ts:35`。 | 结论不变：本机无该服务，non-owner 不可得。 |
+| R2-C2 | `validation-matrix.md` 反例映射行改为 `V24、V25a、V25b、V26`；完成判据的 V25b 例外与行内（i）／（ii）一致。 | 无其他引用遗漏。 |
+| 2.4a | `tasks.md` 2.4a 勾选，理由：第 2 轮 review 在 R2-A1／C1／C2 处理后放行；证据为 [2.4 映射记录](implementation/2026-11-13-2.4-mapping-record.md)。 | 审阅者未独立复跑 2.4；V25a `pass` 的依据是记录与 rc.2 源码交叉核对，不是第三方复测。 |
+
+## 校验与可复现
+
+| 工具 | 版本 | 命令 | 结果 |
+|---|---|---|---|
+| OpenSpec | 1.17.0（`/Users/yangzhicheng/Developer/tools/openspec/node_modules/@fission-ai/openspec/bin/openspec.js`） | `node "$OS117" validate establish-r1-project-plugin --type change --strict --no-interactive` | `Change 'establish-r1-project-plugin' is valid` |
+| OpenSpec | 2.0.0（本会话补跑，独立性单列） | `"$OS20" validate establish-r1-project-plugin --strict` | `Change 'establish-r1-project-plugin' is valid` |
+| 仓库门禁 | 当前工作区 | `node scripts/check-repo.mjs --all` | 洁净度 146 文件 0 问题；链接 67 篇 0 问题；双语 5 对 0 问题 |
+
+本轮命令环境为 `/usr/local/bin/node`；插件侧的 79 项测试／构建结论沿用 [环境记录](implementation/2026-11-13-environment-record.md) 与 2.4 映射记录，不在本轮重跑。

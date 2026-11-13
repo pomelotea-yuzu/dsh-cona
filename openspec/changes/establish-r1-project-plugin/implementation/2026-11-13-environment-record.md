@@ -112,3 +112,4 @@
 - **重启**：kill 后重启宿主（pid 17719→17882），resume 同一会话：历史保留，`agentId` 不变，`callId` 换代。
 - **blocked**：non-owner principal（`PrincipalMap` 仅 owner；唯一非 owner 面是需独立服务与 OAuth 的 liveshare `share-viewer`）；agent 缺失／归属不唯一的绑定拒绝（R1 无绑定层，属第 6 段）。
 - 上轮提交的 Client 自动探针已回退：洁净构建 `TS2307`（tsc 先于 generate）＋运行时 `require("@deepseek-ai/dsh-typert-protocol/remote-info")` 未在模块表而 `dsh.client.inject=[]`；2.4 的 Remote 证据改用真实 `/api` 载体。
+- 由此触发 [R1 范围修订](../scope-amendment.md)（2.4→2.4a/2.4b、V25→V25a/V25b、design 增 DSH 行为前提表），已按工作流交第 2 轮 review；通过前 2.4a 不勾选、2.4b 保持 blocked。

@@ -141,3 +141,88 @@ A1、A2 属于 `docs/development/workflow.md` 第 11 条「仍影响目标、契
 ## 七、复审说明
 
 按 `docs/development/workflow.md` 第 14 条，若需复审应在本文件追加明确的轮次／范围，并同步更新 `review-response.md`；实质性新增问题不得被本轮结论掩盖。本轮结论只覆盖上述 11 个工件及所列依据，不覆盖后续修订稿、实现代码或运行结果。
+
+---
+
+# R1 change 外部审阅 · 第 2 轮（范围修订专审）
+
+日期：2026-11-13
+审阅对象：[scope-amendment.md](scope-amendment.md) 及其对应修订——`tasks.md` 2.3／2.4a／2.4b、`validation-matrix.md` V25a／V25b 与矩阵头、`design.md` §7「DSH 行为前提与验证状态」表；对照证据为 [2.4 映射记录](implementation/2026-11-13-2.4-mapping-record.md)与[环境记录第二轮](implementation/2026-11-13-environment-record.md)。
+审阅执行：用户本轮指定的外部审阅 Agent（独立新会话），非编写／实施 Agent 自查；`review-response.md` 本轮未预填，作者逐项处理仍在其侧记录。
+审阅性质：纸面与静态核对 + rc.2 源码核对 + 门禁复跑。未重跑 2.4 实测（原始会话证据存于本机 `artifacts/r1-2.4-test/` 等门禁排除目录，第三方只能依据记录文本核对一致性），故对 V25a `pass` 的确认是基于记录与源码交叉核对的可信性判断，不构成独立复测。
+
+## 一、总体意见
+
+**范围修订方向成立：需修订一处验收口径矛盾（R2-A1）与两处依据精度（R2-C1、R2-C2），改完即可提交，无需第 3 轮。**
+
+修订的核心判断经源码与记录交叉核对属实：单用户部署确无 non-owner 身份面、R1 确无绑定/准入层、`principalOf` 为空确实不能单独授权。2.4a 实测证据具体且内部自洽（真实 `/api` 会话、事件 seq 序列、pid／waitedMs／callId 换代均可对账），V25a 记 `pass` 有据。不变项（非 owner 与绑定准入保持 `blocked`、不新增伪造 principal 证据、2.4b 不计完成度）均未放水。
+
+但修订文本里 V25b 的口径存在三处互相打架的表述（见 R2-A1），不修清会导致 R1 完成判定不可执行——要么被永久 `blocked` 卡死，要么被「不属 R1」四个字当成豁免借口。这必须在本轮改掉。
+
+## 二、审阅范围与依据
+
+- 本轮修订的全部落点文件（上列 4 份）+ 两份实测记录 + `review-response.md`（确认未预填第 2 轮）。
+- 源码核对（本机 rc.2 快照 `~/Developer/tools/deepseek-harness`，仅只读）：
+  - `packages/typert/protocol/src/types.ts:455-461`：`PrincipalMap` 仅 `owner: { kind: 'owner' }`——修订声明属实。
+  - `packages/typert/protocol/src/principal.ts:14-17`：`principalOf` 对 owner 与无 Remote invocation 的进程内代码都返回 `undefined`——与 design §7 表、V25a 观察项一致。
+  - `packages/core/tools/src/contracts.ts:175-203`：`ToolExecutionInput` 只有 `callId/rootCallId/name/schema?/arguments/agent?/toolSet?/parent?/signal`，无 invocation／principal；`agent` 可选（:188）——与「工具准入须来自 agent/session 归属」一致。
+  - `packages/experimental/liveshare-protocol/README.md:29`：协议包为库，「no profile mounts it」，owner host 与 gateway worker 同装、Relay 独立部署；`src/identity/types.ts:35`：浏览器 OAuth 契约由部署方 identity adapter 实现——「需独立部署的 Liveshare 服务」成立（但见 R2-C1 的引用精度问题）。
+- 仓库门禁与校验复跑（结果见下表）。
+
+## 三、校验结论
+
+| 项目 | 命令／方法 | 结果 |
+|---|---|---|
+| 仓库门禁 | `node scripts/check-repo.mjs --all` | `pass`；洁净度 32 项自测过、链接 67 篇 0 问题、双语 5 对 0 问题 |
+| OpenSpec change 严格校验 | `npx --yes @fission-ai/openspec@1.17.0 validate establish-r1-project-plugin --type change --strict --no-interactive` | `pass`；与作者补录的 1.17.0 同版本，结论可互相印证 |
+| V25a 证据可信性 | 映射记录 × rc.2 源码交叉核对 | `pass`；owner Remote（浏览器 cookie 与 `/connect` API cookie 均 `peerPrincipal:{kind:"owner"}`）、ToolRunContext 无 invocation（agentId=SessionId、callId 单次）、queue=next-turn 不打断、steer=next-step 不 abort 在飞工具、cancel 112ms 内替换结果并 `aborted/user`、重启后 agentId 稳定 callId 换代——全部与源码语义一致，记录含会话 id／pid／事件 seq 可对账 |
+| 2.4 实测独立复跑 | 无（artifacts 属本机证据，按项目约定不入库） | `untested`；不构成对 V25a 的独立复测 |
+| tasks 2.4a 勾选状态 | 静态核对 | 未勾选，注明「待范围修订 review 通过后勾选」——符合修订问题 3 的承诺 |
+
+## 四、问题清单
+
+### A 类 · 必须修订
+
+#### R2-A1 · V25b「不属 R1」「转第 6 段复测」「blocked 阻完成」三种口径互相矛盾，R1 完成判定不可执行
+
+- 位置：`validation-matrix.md` V25b 行（标「（不属 R1）」、状态 `blocked`）与完成判据（「必须场景 fail／blocked／untested 时，R1 不标完成」，且无任何例外条款）；`tasks.md` 2.4b（「不属 R1，转入第 6 段复测」）；scope-amendment.md 问题 1。
+- 问题：V25b 实际捆了两件可分的东西——① agent 缺失／归属不唯一拒绝新绑定：第 6 段（6.2／6.5）实现绑定层后**在 R1 内即可复测**，与 liveshare 无关；② non-owner 拒绝：无真实 Liveshare 部署则 R1 内永远无法复测。当前三处文本组合出两个都不成立的结局：按完成判据字面，V25b 永久 `blocked` ⇒ R1 永不完成；按「不属 R1」字面，V25b 又成了脱离完成判据的豁免项——两读法都通，正是放水空间。
+- 影响：R1 达成判定无法执行；且 6.2／6.5 的任务文本只写「依据 2.4 结论测试」，未显式承接 V25b 的复测义务，①可能真的落空。
+- 建议（三步，改动小）：① 拆口径写进 V25b 行：agent 缺失／归属不唯一部分**必须**在第 6 段复测（6.2／6.5 文本显式承接），复测前保持 `blocked`；non-owner 部分保持 `blocked`，作为 R1 已声明边界。② 完成判据加一句显式例外：non-owner 复测条件（真实多身份部署）不在 R1 交付范围，其 `blocked` 不阻 R1 完成，但须随 change 归档带入 R2+ 边界记录；agent 缺失／归属不唯一部分不享此例外。③ 据此同步 scope-amendment.md 的「修订内容」表与问题 1 的推荐答案。对修订问题 1 的裁决见下节：**接受移出，R1 不依赖真实 Liveshare 部署**（会显著扩大范围且属 R2+ Git 协作前缀）。
+
+### C 类 · 依据精度
+
+#### R2-C1 · liveshare 引用的「OAuth、数据库、路由」部分字样未核到
+
+- 位置：scope-amendment.md 触发事实 1、design.md §7 表第 2 行。
+- 事实：rc.2 快照中 `liveshare-protocol/README.md:29` 可证「独立部署 + gateway worker + Relay + no profile mounts it」，`identity/types.ts:35` 可证「浏览器 OAuth 契约」；但该 README 内无「数据库」「路由」字样。结论（本机无该服务、非 owner 身份面不可得）不受影响。
+- 建议：引用收敛为「独立部署的 Liveshare 服务（owner host + gateway worker + Relay，浏览器 OAuth 契约由部署方实现，见 README.md:29 与 identity/types.ts:35）」，删去未核到的「数据库、路由」；design §7 表同步。
+
+#### R2-C2 · 矩阵反例映射表与 V25 字样未随拆分同步
+
+- 位置：`validation-matrix.md`「路线图 R1 必须反例映射」表行「伪造身份、旧绑定和排队请求 | V24、V25、V26」。
+- 事实：V25 已拆为 V25a／V25b，该行仍写 V25；完成判据段也未提 V25b 口径（与 R2-A1 一并处理）。
+- 建议：改为「V24、V25a、V25b、V26」，与 R2-A1 的例外声明同步写进完成判据。
+
+## 五、对 scope-amendment 三个审阅问题的裁决
+
+1. **non-owner 与绑定准入移出 2.4 验收：接受**，R1 不要求真实 Liveshare 部署。但按 R2-A1 拆清：绑定准入的「agent 缺失／归属不唯一」复测义务落到第 6 段并计入 R1；non-owner 复测保持 `blocked` 并作为 R1 边界带入后续轮次，不以伪造 principal 补测（红线维持）。
+2. **V25a 足够覆盖原 V25 意图：是**。原 V25 的可测核心（owner 身份面、工具上下文无 invocation、turn 事件映射）已全部实测；不可测部分显式移入 V25b 且不消失。V26 的插件绑定层隔离行为（待执行 B 不覆盖 A 等）与 2.4a 的宿主事件映射是两层，不重叠、不冲突。
+3. **拆分方式：同意**。2.4a 待本审阅放行后勾选、2.4b 保持 `blocked` 且复测义务按 R2-A1 落到 6.2／6.5；勾选时 tasks 状态行、矩阵状态、映射记录三处同步。
+
+## 六、已核对无异议
+
+- 修订触发事实三条全部属实（源码核对 + 环境记录），非「借实测放水」：被移出的验收项确实指向 R1 不存在的前提。
+- 2.3 组合前提已补进 tasks 2.3（profile 须含 `@deepseek-ai/dsh-web-app`），与实测一致；Client 回退自动探针的理由（TS2307 构建序、模块表缺 `remote-info`）记录完整，属合理工程决策。
+- design §7 新表把「已核对源码」「已实测」「设计事实」三种状态分开标注，取代原笼统的「运行链路仍未验证」，方向正确；原候选映射表保留未删。
+- 不变项守住：V25b 未改 `pass`、无伪造 principal 替代证据、2.4a 未提前勾选、修订未扩大 R1 交付范围。
+- 映射记录质量：事件 seq 表、双 pid、waitedMs（8001／15001／112ms）、callId 换代等交叉可对账；「迟到工具跨 turn 到达」诚实记为 untested，未混入 pass。
+- spec 未随修订改动，属正确决定：spec 描述目标能力（non-owner 场景仍保留），验证状态由矩阵承载，二者分层不冲突。
+- 门禁与 1.17.0 严格校验通过；`review.md` 原第 1 轮文本未被改动。
+
+## 七、放行条件
+
+1. 修订 R2-A1（V25b 拆口径 + 完成判据例外 + 6.2／6.5 显式承接 + scope-amendment 同步）。
+2. 顺手处理 R2-C1、R2-C2。
+3. 作者在 `review-response.md` 记录本轮逐项处理；重跑门禁与 1.17.0 严格校验并记录输出摘要。
+4. 完成上述后 2.4a 可勾选，无需第 3 轮审阅（改动属微小修，按工作流豁免再审）；non-owner 复测义务随 change 进入 R2+ 边界记录。
