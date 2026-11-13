@@ -1,0 +1,14 @@
+{
+  // Host 聚合 face（tasks 2.2）：供 @deepseek-ai/dsh-typert-generator 的
+  // WorkspaceAnalyzer 发现 packages/ 下的 face 注册。Client 单独聚合，
+  // 因为两侧合并 cordis Context 的键不同，一个 program 不能同时看两边。
+  "extends": "./packages/project-plugin/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [],
+  "references": [
+    { "path": "./packages/project-plugin" }
+  ]
+}

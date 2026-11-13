@@ -1,0 +1,16 @@
+{
+  "name": "dsh-cona-root",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.18.0",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter dsh-cona-project run build",
+    "typecheck": "pnpm --filter dsh-cona-project run typecheck",
+    "test": "pnpm --filter dsh-cona-project run test",
+    "check:plugin": "pnpm --filter dsh-cona-project run check:boundaries && pnpm --filter dsh-cona-project run check:protocol-sync"
+  }
+}

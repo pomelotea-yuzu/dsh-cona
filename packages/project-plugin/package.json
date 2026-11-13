@@ -4,28 +4,49 @@
   "private": true,
   "description": "DSH-Cona 项目管理插件（R1）：领域、公开资料格式与无宿主校验",
   "type": "module",
-  "packageManager": "pnpm@12.18.0",
   "engines": {
+    "dsh": "0.2.2-rc.2",
     "node": ">=24.9.0"
   },
+  "main": "dist/src/host/index.js",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
   "exports": {
-    ".": "./dist/src/index.js",
-    "./cli/validate": "./dist/src/cli/validate.js"
+    ".": "./dist/src/host/index.js",
+    "./client": "./dist/client/client.browser.js",
+    "./cli/validate": "./dist/src/cli/validate.js",
+    "./typert": "./dist/typert/typert.host.js",
+    "./remote": "./dist/typert/remote.js"
   },
   "files": [
     "dist",
-    "formats"
+    "formats",
+    "cordis.patch.yml"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.domain.json --noEmit",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "check:protocol-sync": "node scripts/check-protocol-sync.mjs",
+    "check:manifest": "node scripts/check-manifest.mjs",
     "test": "npm run build && node --test dist/test/*.test.js",
     "validate": "node dist/src/cli/validate.js"
   },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.2-rc.2"
+  },
   "devDependencies": {
     "@types/node": "24.10.1",
+    "esbuild": "0.25.12",
     "typescript": "5.9.3"
   }
 }

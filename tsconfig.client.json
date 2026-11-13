@@ -1,0 +1,10 @@
+{
+  // Client 聚合 face（tasks 2.2）：与 tsconfig.host.json 同构，faces 分离见 DSH typert 约定。
+  "extends": "./tsconfig.host.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "references": [
+    { "path": "./packages/project-plugin" }
+  ]
+}
