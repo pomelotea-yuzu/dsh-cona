@@ -1,0 +1,23 @@
+{
+  "name": "@deepseek-ai/dsh-typert-protocol",
+  "version": "0.2.2-rc.2",
+  "private": true,
+  "description": "Vendored source copy of @deepseek-ai/dsh-typert-protocol 0.2.2-rc.2 (MIT, Copyright (c) 2026 DeepSeek) for typert source-plane analysis; npm rc.2 类型包仍为运行时 peer，运行时一律解析 node_modules 副本",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./types": {
+      "types": "./lib/types/types.d.ts",
+      "default": "./lib/types/types.js"
+    },
+    "./src/*": "./src/*"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-brand": "0.2.2-rc.2",
+    "zod": "4.6.6"
+  }
+}

@@ -1,4 +1,5 @@
 packages:
   - packages/*
+  - packages/vendor/*
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true

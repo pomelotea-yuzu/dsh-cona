@@ -16,12 +16,12 @@ declare module '@deepseek-ai/cordis' {
 export interface ConaProbeResult {
   /** 本次调用是否携带宿主生成的 Remote invocation。 */
   hasInvocation: boolean;
-  /** principalOf 结果：owner 与无 invocation 时为 undefined。 */
-  principalOfResult: Principal | undefined;
-  /** invocation.peer.principal 原样（含 kind），用于区分 owner 与空值。 */
-  peerPrincipal: Principal | undefined;
-  /** invocation.service 标识（若存在）。 */
-  service: unknown;
+  /** principalOf 结果：owner 与无 invocation 时字段缺省（Remote 边界禁 undefined，以缺省表达空）。 */
+  principalOfResult?: Principal;
+  /** invocation.peer.principal 原样（含 kind），用于区分 owner 与空值；空时字段缺省。 */
+  peerPrincipal?: Principal;
+  /** invocation.service 标识（若存在）；空时为 null（JSON 安全）。 */
+  service: string | null;
   /** 宿主进程信息，用于核对二进制与版本。 */
   runtime: {
     nodeVersion: string;
@@ -38,11 +38,12 @@ export class ConaDiagnosticService extends TypertRemoteService {
   @Remote('probe')
   probe(): ConaProbeResult {
     const invocation: RemoteInvocation | undefined = this.ctx.invocation
+    const principal = principalOf(invocation)
     return {
       hasInvocation: invocation !== undefined,
-      principalOfResult: principalOf(invocation),
-      peerPrincipal: invocation?.peer.principal,
-      service: invocation === undefined ? undefined : invocation.service,
+      ...(principal === undefined ? {} : { principalOfResult: principal }),
+      ...(invocation === undefined ? {} : { peerPrincipal: invocation.peer.principal }),
+      service: invocation === undefined || invocation.service === undefined ? null : String(invocation.service),
       runtime: {
         nodeVersion: process.version,
       },

@@ -8,7 +8,7 @@
     "dsh": "0.2.2-rc.2",
     "node": ">=24.9.0"
   },
-  "main": "dist/src/host/index.js",
+  "main": "./lib/host/index.js",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -19,34 +19,63 @@
     }
   },
   "exports": {
-    ".": "./dist/src/host/index.js",
-    "./client": "./dist/client/client.browser.js",
-    "./cli/validate": "./dist/src/cli/validate.js",
-    "./typert": "./dist/typert/typert.host.js",
-    "./remote": "./dist/typert/remote.js"
+    ".": "./lib/host/index.js",
+    "./client": "./lib/client/index.js",
+    "./cli/validate": "./lib/cli/validate.js",
+    "./types": {
+      "types": "./lib/types.d.ts",
+      "default": "./lib/types.js"
+    },
+    "./typert": {
+      "types": "./lib/typert.host.d.ts",
+      "default": "./lib/typert.host.js"
+    },
+    "./remote": {
+      "types": "./lib/typert.remote-client.d.ts",
+      "default": "./lib/typert.remote-client.js"
+    }
   },
   "files": [
-    "dist",
+    "lib",
+    "lib/typert.host.js",
+    "lib/typert.host.d.ts",
+    "lib/typert.remote-client.js",
+    "lib/typert.remote-client.d.ts",
+    "lib/typert.remote-client.d.ts.map",
     "formats",
     "cordis.patch.yml"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.domain.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.domain.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "check:protocol-sync": "node scripts/check-protocol-sync.mjs",
     "check:manifest": "node scripts/check-manifest.mjs",
-    "test": "npm run build && node --test dist/test/*.test.js",
-    "validate": "node dist/src/cli/validate.js"
+    "generate:typert": "node scripts/generate-typert.mjs",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test lib-test/test/*.test.js",
+    "validate": "node lib/cli/validate.js"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
     "@deepseek-ai/dsh-tools": "0.2.2-rc.2",
     "@deepseek-ai/dsh-typert-protocol": "0.2.2-rc.2"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-typert-generator": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.2-rc.2",
     "@types/node": "24.10.1",
     "esbuild": "0.25.12",
     "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "zod": "4.6.6"
   }
 }

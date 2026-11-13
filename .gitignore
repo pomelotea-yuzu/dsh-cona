@@ -13,6 +13,7 @@
 # ── 依赖与构建产物 ──────────────────────────────────────────────
 node_modules/
 dist/
+lib/
 out/
 build/
 .pnpm-store/
@@ -95,3 +96,4 @@ artifacts/**/*.png
 *.AppImage
 *.mp4
 *.webm
+lib-test/

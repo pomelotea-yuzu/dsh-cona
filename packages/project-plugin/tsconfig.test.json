@@ -1,0 +1,11 @@
+{
+  // 测试编译（与发布产物分离）：lib 直接镜像 src（typert 生成器 lib→src 映射约定），
+  // 测试单独编译到 lib-test（不入 files、不随包分发）。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "lib-test",
+    "noEmitOnError": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

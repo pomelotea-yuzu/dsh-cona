@@ -2,13 +2,25 @@
   // Host 聚合 face（tasks 2.2）：供 @deepseek-ai/dsh-typert-generator 的
   // WorkspaceAnalyzer 发现 packages/ 下的 face 注册。Client 单独聚合，
   // 因为两侧合并 cordis Context 的键不同，一个 program 不能同时看两边。
+  //
+  // typert 源面（source-plane）：生成器要求 Remote/TypertRemoteService 符号解析到
+  // 登记在 packages/ 下的协议包源文件（上游 monorepo 以 paths 把 @deepseek-ai/*
+  // 映射到 packages/*/*/src/index.ts）。插件仓复刻该约定：protocol 源码 vendor
+  // 于 packages/vendor/dsh-typert-protocol（0.2.2-rc.2，MIT），paths 指向其 src；
+  // 运行时产物仍按 node_modules 的 npm 副本解析（paths 不影响 emit）。
   "extends": "./packages/project-plugin/tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node"]
+    "rewriteRelativeImportExtensions": true,
+    "types": ["node"],
+    "paths": {
+      "@deepseek-ai/dsh-typert-protocol": ["./packages/vendor/dsh-typert-protocol/src/index.ts"],
+      "@deepseek-ai/dsh-typert-protocol/*": ["./packages/vendor/dsh-typert-protocol/src/*"]
+    }
   },
   "include": [],
   "references": [
-    { "path": "./packages/project-plugin" }
+    { "path": "./packages/project-plugin" },
+    { "path": "./packages/vendor/dsh-typert-protocol" }
   ]
 }

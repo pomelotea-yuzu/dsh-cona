@@ -1,6 +1,7 @@
 # R1 环境与依赖前置检查记录（tasks 2.1）
 
 日期：2026-11-13。本文件记录任务 2.1 要求的冻结安装前实测事实；全部为本机（macOS，darwin）实测，不是推断。
+**2026-11-13 傍晚更正**：npm 已发布 `0.2.2-rc.2`（含 `.d.ts` 与 `dsh-typert-generator`，实测 tarball 确认），早前「npm 无 rc.2」结论作废；类型与生成改走 npm 精确版本，app.asar 解包与源码副本 install 两条绕路拆除。dist-tags：`latest=rc.1`、`next=rc.3`；按用户决定锁 rc.2 对齐宿主，插件第一版完成后再适配最新版。
 
 ## 运行时
 
@@ -13,36 +14,43 @@
 | 包管理器 | `pnpm 12.18.0`（插件仓 packageManager 字段）；宿主 runtime.json 记录 `pnpm 11.28.5` | 待实测 engines 处理（profile 安装时） |
 | **dsh CLI** | `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`，`--version` 实测输出 `0.2.2-rc.2` | 可用；组合包登记路径成立 |
 | 宿主 DSH 应用 | Info.plist `CFBundleShortVersionString = 0.2.2-rc.2` | 与设计固定版本一致 |
-| DSH 源码副本 | `~/Developer/tools/deepseek-harness`，package.json version `0.2.2-rc.2` | 副本非 git 检出，按内容核对；`pnpm install`（仅依赖，不构建）供 typert 生成器与类型解析 |
+| DSH 源码副本 | `~/Developer/tools/deepseek-harness`，package.json version `0.2.2-rc.2` | 副本非 git 检出，按内容核对；rc.2 类型/生成包上 npm 后**不再需要**为它跑 install（仅留作源码查阅参考） |
 | DSH home | `~/.dsh/`（profiles/desktop 为个人 profile，**不改动**） | 测试用独立 profile 由 CLI 创建 |
 
-## npm 依赖可用性
+## npm 依赖可用性（2026-11-13 傍晚更新）
 
 | 包 | npm 现状 | 判定 |
 |---|---|---|
-| `@deepseek-ai/dsh` | 最高 `0.2.2-rc.1` | **fail**：rc.2 未发布；不改浮动版本，不降级 |
-| `@deepseek-ai/dsh-base` | `0.0.1-rc.1` | 同上口径 |
+| `@deepseek-ai/dsh` 等全部 `@deepseek-ai/dsh-*` | **`0.2.2-rc.2` 已发布**（tarball 实测含 `.d.ts`；`dsh-typert-generator` 也在） | **可用**，精确版本安装；`next=rc.3` 不用 |
 | `@deepseek-ai/cordis` | `4.1.0` | 与宿主 rc.2 清单一致，可用 |
-| 其余 `@deepseek-ai/dsh-*` | npm 缺 rc.2 | **fail**：见下"处理方式" |
+| 早前「npm 无 rc.2」记录 | 当时属实，现已失效 | 结论文本保留于 git 历史 |
 
-处理方式（design §1：显式选择并实测，不放宽边界）：`engines.dsh: "0.2.2-rc.2"` 与 `peerDependencies` 精确范围不变。类型与开发副本取自已安装应用的 `app.asar`（rc.2 分发含各包 `lib/*.js` 运行产物与 `src/*.ts` 源码，**不含 .d.ts**），解包至本仓 `artifacts/dsh-pkgs/@deepseek-ai/`（门禁排除目录，不入库）；类型解析经 tsconfig paths 指向这些 src。`dsh-typert-generator` 桌面分发未携带，从源码副本运行（仅依赖安装，不构建宿主）。真实宿主验证使用已安装 rc.2 应用与其自带 CLI。
+处理方式（2026-11-13 傍晚更新，design §1：显式选择并实测，不放宽边界）：`engines.dsh: "0.2.2-rc.2"` 与 `peerDependencies` 精确范围不变。**类型与生成直接取 npm `0.2.2-rc.2` 精确版本**（devDependencies 与 peer 双声明，满足 check:manifest 双声明项）：`@deepseek-ai/cordis@4.1.0`、`@deepseek-ai/dsh-tools@0.2.2-rc.2`、`@deepseek-ai/dsh-typert-protocol@0.2.2-rc.2`、`@deepseek-ai/dsh-typert-generator@0.2.2-rc.2`、`@deepseek-ai/dsh-llm@0.2.2-rc.2`、`zod@4.6.6`（生成产物运行时依赖）。真实宿主验证使用已安装 rc.2 应用与其自带 CLI。
+
+**Typert 源面（source-plane）补充**：生成器要求 Remote/TypertRemoteService 符号解析到登记于 workspace `packages/` 下的协议包**源文件**（上游 monorepo 以 tsconfig paths 把 `@deepseek-ai/*` 映射到包 src）。插件仓复刻该约定：protocol 源码 vendor 于 `packages/vendor/dsh-typert-protocol`（0.2.2-rc.2，MIT，8 文件 1802 行），聚合 tsconfig paths 指向其 src 并登记 references；**运行时不受影响**（paths 不参与 emit，产物仍解析 node_modules 的 npm 副本）。同时确认的生成器契约：产物写入包 `lib/`（`lib/typert.host.{js,d.ts}` + 有 Remote 方法时 `lib/typert.remote-client.{js,d.ts,d.ts.map}`）；exports 必须为 `{ types, default }` 对象形式且 files 显式列出产物文件；`./client` 导出必须映射回真实 TS 源文件；Remote 边界类型禁 `undefined`（空值用字段缺省/null 表达）且必须从非根类型子路径（`./types`）导出；`dsh-tools` 类型链会传入 dsh-session 对 protocol 接口的 merge 与 vendored 源码冲突，工具定义改为不 import dsh-tools、由宿主 `tools.register()` 运行时校验兜底。
+
+生成结果（2026-11-13 实测）：`scripts/generate-typert.mjs`（调 `WorkspaceTypertGenerator`，root=仓库根）产出 `lib/typert.host.{js,d.ts}` 与 `lib/typert.remote-client.{js,d.ts,d.ts.map}`（含 `conaDiagnostic/probe` wire schema）；build（tsc→lib 镜像 src 布局 + esbuild client factory）、typecheck（host/domain/test 三配置）、79 项测试、check:manifest、仓库门禁 `check-repo --all` 全过。
 
 ## 宿主兼容判据（源码核对）
 
 `packages/boot/app-boot/src/plugin-compatibility.ts:52`：`semver.satisfies(runtimeVersion, range, { includePrerelease: true })`；`engines.dsh` 存在时单独决定，peer 仅在无 engines.dsh 时检查。精确 `"0.2.2-rc.2"` 范围在 includePrerelease 下匹配运行时 `0.2.2-rc.2`——**静态核对通过；profile 安装与启动实测待 2.3**。
 
-## 插件 manifest（tasks 2.2 静态部分）
+## 插件 manifest（tasks 2.2 静态部分，2026-11-13 傍晚随 lib 布局重构更新）
 
 - `engines.dsh = "0.2.2-rc.2"`、`engines.node = ">=24.9.0"`；
-- `main = dist/src/host/index.js`（Host ESM）；`exports["./client"] = ./dist/client/client.browser.js`；
+- 产物布局对齐上游：包 `lib/` 直接镜像 `src/`（`main = ./lib/host/index.js`，`exports["."] = ./lib/host/index.js`）；测试单独编译到 `lib-test/`（不入 files）；
+- `exports["./client"] = ./lib/client/index.js`（esbuild bundle，映射回 `src/client/index.ts` 满足生成器源面检查）；
+- `exports["./types"] = { types: ./lib/types.d.ts, default: ./lib/types.js }`（Remote 边界类型子路径，导出 `ConaProbeResult`／`ConaToolObservation`）；
+- `exports["./typert"] = { types: ./lib/typert.host.d.ts, default: ./lib/typert.host.js }`、`exports["./remote"] = { types: ./lib/typert.remote-client.d.ts, default: ./lib/typert.remote-client.js }`（生成器 validateExport 契约）；
+- `files`：`lib` + 显式列出 `lib/typert.host.js`、`lib/typert.host.d.ts`、三个 remote-client 文件 + `formats` + `cordis.patch.yml`；
 - `dsh.bundle.patch = ./cordis.patch.yml`（插件行 `- insert: - id: cona-project, name: dsh-cona-project`）；
 - `dsh.client.platform = "web"`，`dsh.client.inject = []`（诊断 Client 无宿主 UI 服务依赖）；
 - Client factory 产物：esbuild cjs bundle + `window.__ModuleLoader__.load({ id, factory: (require) => {...} })` 包装，external `@deepseek-ai/*` 经注入 require 解析（格式对照 `packages/client/tsdown.client.ts` banner/footer，未导入上游构建框架）；
-- 共享宿主包 peer/dev 双声明：peer 已声明，dev 副本待本地构建产物就位后安装（`check:manifest` 当前按预期失败于双声明项）。
+- 共享宿主包 peer/dev 双声明：peer 与 dev 均已声明精确 rc.2，`check:manifest` 通过。
 
-## Typert 生成（2.2 剩余）
+## Typert 生成（2.2 完成）
 
-Host 诊断 Service（`@Remote('probe')`）已落源码；wire 端点产物需经 `@deepseek-ai/dsh-typert-generator` 的 `WorkspaceAnalyzer`（宿主聚合 tsconfig 结构：root + `tsconfig.host.json`/`tsconfig.client.json`）。插件仓聚合配置与生成脚本待宿主源码构建完成后接入，接入结果回写本文件。
+已由 `scripts/generate-typert.mjs` 完成（详见上文「Typert 源面补充」「生成结果」）。
 
 ## 待实测（保持 untested）
 

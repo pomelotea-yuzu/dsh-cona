@@ -18,16 +18,29 @@ const check = (ok, message) => {
 check(manifest.type === 'module', 'type 必须是 module');
 check(manifest.engines?.dsh === '0.2.2-rc.2', 'engines.dsh 必须精确为 0.2.2-rc.2');
 check(typeof manifest.engines?.node === 'string' && manifest.engines.node.startsWith('>=24'), 'engines.node 必须声明 >=24 起');
-check(manifest.main === 'dist/src/host/index.js', 'main 必须指向 Host ESM 入口');
+check(manifest.main === './lib/host/index.js', 'main 必须指向 Host ESM 入口（lib 镜像 src 布局）');
 check(manifest.dsh?.bundle?.patch === './cordis.patch.yml', 'dsh.bundle.patch 必须声明');
 check(manifest.dsh?.client?.platform === 'web', 'dsh.client.platform 必须是 web');
 check(Array.isArray(manifest.dsh?.client?.inject), 'dsh.client.inject 必须声明（可为空数组）');
 check(existsSync(path.join(packageRoot, 'cordis.patch.yml')), 'cordis.patch.yml 必须存在');
-check(manifest.exports?.['.'] === './dist/src/host/index.js', 'exports["."] 必须指向 Host 入口');
+check(manifest.exports?.['.'] === './lib/host/index.js', 'exports["."] 必须指向 Host 入口');
+
+// Typert 产物导出（生成器 validateExport 契约：对象条件形式 + files 显式列出）。
+const typertExport = manifest.exports?.['./typert'];
+check(typertExport?.default === './lib/typert.host.js' && typertExport?.types === './lib/typert.host.d.ts',
+  'exports["./typert"] 必须为 { types: "./lib/typert.host.d.ts", default: "./lib/typert.host.js" }');
+const remoteExport = manifest.exports?.['./remote'];
+if (remoteExport !== undefined) {
+  check(remoteExport.default === './lib/typert.remote-client.js' && remoteExport.types === './lib/typert.remote-client.d.ts',
+    'exports["./remote"] 必须为 { types: "./lib/typert.remote-client.d.ts", default: "./lib/typert.remote-client.js" }');
+  for (const file of ['lib/typert.remote-client.js', 'lib/typert.remote-client.d.ts', 'lib/typert.remote-client.d.ts.map']) {
+    check((manifest.files ?? []).includes(file), `files 必须包含 ${file}`);
+  }
+}
 
 // Client 入口与产物（closure factory）。
-check(manifest.exports?.['./client'] === './dist/client/client.browser.js', 'exports["./client"] 必须指向 factory 产物');
-const clientEntry = path.join(packageRoot, 'dist', 'client', 'client.browser.js');
+check(manifest.exports?.['./client'] === './lib/client/index.js', 'exports["./client"] 必须指向 factory 产物');
+const clientEntry = path.join(packageRoot, 'lib', 'client', 'index.js');
 check(existsSync(clientEntry), 'client factory 产物缺失（先运行 build）');
 if (existsSync(clientEntry)) {
   const factoryText = readFileSync(clientEntry, 'utf8');
@@ -45,10 +58,12 @@ for (const [name, range] of Object.entries(peers)) {
   }
 }
 
-// files 资源完整性：dist 与 formats 都必须随包分发。
-for (const required of ['dist', 'formats']) {
+// files 资源完整性：lib 与 formats 都必须随包分发（生成器要求 lib/typert.* 显式列出）。
+for (const required of ['lib', 'formats']) {
   check((manifest.files ?? []).includes(required), `files 必须包含 ${required}`);
 }
+check((manifest.files ?? []).includes('lib/typert.host.js'), 'files 必须包含 lib/typert.host.js');
+check((manifest.files ?? []).includes('lib/typert.host.d.ts'), 'files 必须包含 lib/typert.host.d.ts');
 
 // --packed：检查 tarball 解包目录（由调用方先 npm pack 并解包）。
 const packedIndex = process.argv.indexOf('--packed');
@@ -62,7 +77,7 @@ if (packedIndex !== -1) {
   check(existsSync(path.join(dir, hostEntry)), `tarball 缺 Host 产物 ${hostEntry}`);
   const clientPath = manifest.exports['./client'];
   if (clientPath) {
-    check(existsSync(path.join(dir, clientPath)) || !existsSync(path.join(dir, 'dist', 'src', 'client')), 'tarball Client 产物与 exports 声明不一致');
+    check(existsSync(path.join(dir, clientPath)) || !existsSync(path.join(dir, 'lib', 'client', 'index.js')), 'tarball Client 产物与 exports 声明不一致');
   }
 }
 

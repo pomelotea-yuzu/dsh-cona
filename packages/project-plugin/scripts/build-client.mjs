@@ -9,11 +9,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const outDir = path.join(packageRoot, 'dist', 'client');
+const outDir = path.join(packageRoot, 'lib', 'client');
 
 await build({
   entryPoints: [path.join(packageRoot, 'src', 'client', 'index.ts')],
-  outfile: path.join(outDir, 'client.browser.js'),
+  outfile: path.join(outDir, 'index.js'),
   bundle: true,
   platform: 'browser',
   format: 'cjs',
@@ -34,4 +34,4 @@ await build({
   },
 });
 
-process.stdout.write(`client factory 已产出：${path.join('dist', 'client', 'client.browser.js')}\n`);
+process.stdout.write(`client factory 已产出：${path.join('lib', 'client', 'index.js')}\n`);
