@@ -223,7 +223,8 @@ async function main(): Promise<number> {
   });
   const command = positionals[0];
   const target = positionals[1];
-  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  // lib/cli/validate.js → lib → 包根（lib 直接镜像 src；旧 dist/src/cli 布局已废弃）。
+  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   if (command === undefined || target === undefined) {
     process.stderr.write('用法: validate.js <check|check-file|compute-plan-version|init> <path> [--print-canonical]\n');
     return 2;

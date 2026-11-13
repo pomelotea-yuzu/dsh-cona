@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// manifest 必查字段检查（tasks 2.2，design §1）：构建前与 pack 后各跑一次。
+// manifest 必查字段检查（tasks 2.2，design §1）：build 后与 pack 后各跑一次。
 // 必查：type=module、dsh.bundle.patch、dsh.client.platform=web、Client inject/external、
 // exports["./client"]、engines.dsh=0.2.2-rc.2、engines.node、共享 peer/dev 双声明、files 完整。
 // 用法：node scripts/check-manifest.mjs [--packed <tarball>]
@@ -48,6 +48,24 @@ if (existsSync(clientEntry)) {
   check(factoryText.trimEnd().endsWith('return module.exports; } });'), 'client factory 缺少 module.exports 收尾');
 }
 
+// 导出点与 files 声明的产物必须真实存在（本检查以 build 后为前置；2.3 实测缺口：
+// build 未生成 typert 产物时，只核对 files 数组会放过不完整 tarball）。
+const exportFiles = (target) => {
+  if (typeof target === 'string') return [target];
+  const files = [];
+  if (typeof target?.types === 'string') files.push(target.types);
+  if (typeof target?.default === 'string') files.push(target.default);
+  return files;
+};
+for (const [subpath, target] of Object.entries(manifest.exports ?? {})) {
+  for (const file of exportFiles(target)) {
+    check(existsSync(path.join(packageRoot, file)), `exports["${subpath}"] 指向的产物不存在：${file}（先运行 build）`);
+  }
+}
+for (const file of manifest.files ?? []) {
+  check(existsSync(path.join(packageRoot, file)), `files 声明的产物不存在：${file}`);
+}
+
 // 共享宿主包 peer/dev 双声明（发布文档要求）。
 const peers = manifest.peerDependencies ?? {};
 const devDeps = manifest.devDependencies ?? {};
@@ -78,6 +96,14 @@ if (packedIndex !== -1) {
   const clientPath = manifest.exports['./client'];
   if (clientPath) {
     check(existsSync(path.join(dir, clientPath)) || !existsSync(path.join(dir, 'lib', 'client', 'index.js')), 'tarball Client 产物与 exports 声明不一致');
+  }
+  for (const file of manifest.files ?? []) {
+    check(existsSync(path.join(dir, file)), `tarball 缺 files 声明产物：${file}`);
+  }
+  for (const [subpath, target] of Object.entries(manifest.exports ?? {})) {
+    for (const file of exportFiles(target)) {
+      check(existsSync(path.join(dir, file)), `tarball 缺 exports["${subpath}"] 产物：${file}`);
+    }
   }
 }
 

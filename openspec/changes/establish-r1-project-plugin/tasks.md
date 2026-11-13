@@ -1,6 +1,6 @@
 # R1 实现任务
 
-状态：已收到[第 1 轮外部 review](review.md)并按意见修订，处理见 [review-response](review-response.md)；2026-11-13 起按用户授权进入实施，第 1 段（格式、领域与无宿主校验）完成，第 2 段中 2.1／2.2 完成（npm 已发布 0.2.2-rc.2 类型包与 typert-generator，类型与生成改走 npm 精确版本 + vendored protocol 源面，typert.host／remote-client 产物已生成，build／typecheck／test 79 项／check:manifest／仓库门禁全过），2.3–2.5 待实测，见 [接手记录](implementation/2026-11-13-handoff.md)，第 3 段起未开始。协议正文和向量是已交付的提案工件，其复算不勾选实现任务；不得把工件齐备或静态校验当成产品已完成。
+状态：已收到[第 1 轮外部 review](review.md)并按意见修订，处理见 [review-response](review-response.md)；2026-11-13 起按用户授权进入实施，第 1 段（格式、领域与无宿主校验）完成，第 2 段中 2.1／2.2 完成（npm 已发布 0.2.2-rc.2 类型包与 typert-generator，类型与生成改走 npm 精确版本 + vendored protocol 源面，typert.host／remote-client 产物已生成，build／typecheck／test 79 项／check:manifest／仓库门禁全过），2.3 已完成主体实测（洁净构建/打包、独立 home 安装、宿主与 Remote 探针；浏览器内 Client 激活待 GUI，见环境记录第二轮），2.4–2.5 待实测，见 [接手记录](implementation/2026-11-13-handoff.md)，第 3 段起未开始。协议正文和向量是已交付的提案工件，其复算不勾选实现任务；不得把工件齐备或静态校验当成产品已完成。
 
 ## 1. 格式、领域与无宿主校验
 
@@ -14,7 +14,7 @@
 
 - [x] 2.1 建立根 workspace、锁文件及固定依赖声明；冻结安装前记录实际 Node 二进制绝对路径和补丁版本、包管理器版本，低于要求时显式选择并实测兼容运行时，再核对 DSH rc.2／共享 peer／依赖引擎；分别实测包管理器与宿主对 `engines.dsh: "0.2.2-rc.2"` 的安装及启动判定，不可用依赖记 fail／blocked，不改浮动版本。（2026-11-13：workspace/锁文件/依赖冻结与核对完成，见[环境记录](implementation/2026-11-13-environment-record.md)；engines.dsh 安装/启动判定实测随 2.3 进行）
 - [x] 2.2 配置 Host ESM、Client factory 与自有 Typert contribution 生成；构建／类型及包清单检查必须核对 dsh.bundle.patch、dsh.client.platform="web"、Client inject／external、exports["./client"]、engines.dsh／node、共享 peer／开发副本和 files 资源完整，构建不读取相邻上游 monorepo 配置。（2026-11-13：npm rc.2 类型包可用，`engines.dsh` 安装/启动判定实测随 2.3 进行）
-- [ ] 2.3 在没有相邻上游源码的检出目录构建并 pack；在独立 home／profile 安装 tarball，实际观察 Host、Client 导航与 Remote 探针，分别记录开发命令及宿主实际使用的 Node 二进制／补丁版本、DSH 版本和共享实例结果，不能仅用 shell 版本或随包元数据代替实际 Host 观察。
+- [ ] 2.3 在没有相邻上游源码的检出目录构建并 pack；在独立 home／profile 安装 tarball，实际观察 Host、Client 导航与 Remote 探针，分别记录开发命令及宿主实际使用的 Node 二进制／补丁版本、DSH 版本和共享实例结果，不能仅用 shell 版本或随包元数据代替实际 Host 观察。（2026-11-13 晚第二轮：修复洁净检出 3 个阻断——测试与 CLI 仍指旧 dist 布局、build 不生成 Typert 产物、manifest 不查产物存在——后，洁净检出 79 测试与 47 文件 tarball 可复现；独立 DSH_HOME 安装、宿主 apply 日志 Node v24.21.0、boot graph 含 dsh-cona-project 且客户端 bundle 200、Remote probe 真实 HTTP 调用返回 owner principal；但 cona-r1-test 现有组合无 Web 应用，浏览器内 Client 激活仍未观察，故不勾选。证据与命令见环境记录第二轮。）
 - [ ] 2.4 用最小诊断插件分开实测真实 Remote invocation＋owner/non-owner principal、无 invocation 的真实 ToolRunContext 及消息消费／turn／取消／结束映射；确认 principalOf 为空不单独授权，工具无 invocation 但绑定有效可按有限范围准入，agent 缺失／归属不唯一拒绝新绑定并记 blocked；覆盖 queue、steer、迟到工具与重启，交付映射结论，不以自报身份补缺口。
 - [ ] 2.5 增加插件 build、typecheck、必要 test 与格式／资源检查入口，并接入现有仓库门禁和插件 Node CI；运行整条计划 `pnpm check:ci` 验证，说明实际 Node 版本，不移除原有洁净度与双语检查。
 

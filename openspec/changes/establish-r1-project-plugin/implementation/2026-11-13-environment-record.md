@@ -62,6 +62,33 @@
 
 ## 待实测（保持 untested）
 
-- Client 导航与 Client factory 加载观察（需 GUI 交互，待用户以创造模式/DASH 界面操作 cona-r1-test profile）。
-- 真实 Remote invocation / principalOf / ToolRunContext 映射（2.4）。
-- 共享实例与多 profile 并存结果（2.3 收尾）。
+- Client 导航与 Client factory 加载观察（需 GUI 交互；第二轮已证 profile 缺 Web 应用，boot graph/资产已验，浏览器内激活仍未验证）。
+- 真实 Remote invocation / principalOf / ToolRunContext 映射（2.4；第二轮已用 browser peer 调通 probe，non-owner 与工具上下文未测）。
+- 共享实例与多 profile 并存结果（2.3 收尾；第二轮已证 profile 内无共享 peer 副本，多 profile 并存未测）。
+
+## 第二轮验证：外部测试 2.3（2026-11-13 晚）
+
+测试者未改动个人 profile；因命令沙箱禁止写 `~/.dsh`，全部安装/启动在独立 `DSH_HOME`（`artifacts/r1-2.3-test/home-*`）内复现，证据留在 `artifacts/r1-2.3-test/`（门禁排除目录）。开发命令：clean 检出构建用 `pnpm build`（pnpm 12.18.0，即 DSH 运行时自带 11.28.5 按 packageManager 自升级；系统 Node v26.13.0），pack 用 `pnpm pack --pack-destination`，profile 安装用 `dsh plugin --profile cona-r1-test add <tgz>`。
+
+### 发现并已修复的问题（洁净检出无法复现 2.3 的“构建并 pack”）
+
+1. **测试仍指向旧 `dist/` 布局**：`test/cli.test.ts` 的 CLI 路径是 `dist/src/cli/validate.js`。洁净检出没有 `dist/`，0 项能跑；本仓之所以曾报 79 项全过，是因为工作区残留了布局重构前（16:40）的未跟踪 `dist/`，测试实际跑的是旧构建产物。
+2. **CLI `init` 的包根上溯级数错误**：`src/cli/validate.ts` 从 `import.meta.url` 上溯 3 级（旧 `dist/src/cli` 深度），`lib/cli` 布局下解析到 `packages/`，`init` 读 `packages/formats/...` 报 ENOENT（exit 2）。
+3. **`pnpm build` 不生成 Typert 产物**：`build` 原先只有 tsc + client；洁净检出 pack 得 42 项，缺 `lib/typert.host.{js,d.ts}` 与三个 `typert.remote-client.*`，但 `check:manifest` 仍通过——原先只核对 `files` 数组文本，不核对产物是否存在，也未查 `exports` 目标。
+
+修复：CLI 上溯改 2 级并更新 README 命令；`build` 追加 `node scripts/generate-typert.mjs`，并加 `prepack: npm run build`（实测删空 `lib/` 后直接 `pnpm pack` 仍产出完整包）；`check:manifest` 增加包内与 `--packed` 解包目录的 exports/files 存在性检查。修复后实测：79/79 测试、typecheck、boundaries、protocol-sync、`check-repo --all` 全过；`pnpm pack` 47 项（含 Typert 5 文件与 pnpm 自动带入的根 LICENSE），`check:manifest --packed` 通过。
+
+### 2.3 剩余缺口：cona-r1-test 没有 Web 应用，Client 无法加载
+
+- 自定义 profile 的默认组合是 `DEFAULT_PROFILE_BUNDLES = ["@deepseek-ai/dsh-base"]`（`packages/util/official-bundles/src/bundles.ts:45`）；`cona-r1-test` 的 `dsh.profile.bundles` 只有 base + 插件。`dsh --profile cona-r1-test` 实测只打印 `[dsh-cona-project] host apply; node = v24.21.0`，进程存活但不开 HTTP、无页面——之前的“启动成功、零告警”成立，但这份 profile 从结构上不可能观察 Client。
+- 在独立 home 的 profile 副本加入 `@deepseek-ai/dsh-web-app`（安装自带 bundle，非 npm 依赖）后：`dsh --profile cona-r1-test --port 0 --no-open` 打印 `http://127.0.0.1:65180/?token=…`；`GET /` 跟随 303 后 200；`__DSH_BOOT__` 76 个 entry 中含 `dsh-cona-project`（第二个 application batch，URL `plugins/??dsh-cona-project/client.js&rev=d1d94585a03c`），该 bundle HTTP 200（1433 字节，`__ModuleLoader__.load` 包装完整）。
+- 离线按 loader 契约执行服务端下发的 bundle：注册 id=`dsh-cona-project`、`apply` 可调用并输出 `[dsh-cona-project] client factory loaded`。这是产物契约级验证，**不是**浏览器激活证据。
+- Remote 探针（真实 HTTP 调用，非静态）：带浏览器 cookie `POST /api/conaDiagnostic/probe`，body `{"type":"client-request","rpcId":…,"method":"conaDiagnostic/probe","payload":{"args":{}}}` → `{"ok":true,"value":{"hasInvocation":true,"peerPrincipal":{"kind":"owner"},"service":"conaDiagnostic","runtime":{"nodeVersion":"v24.21.0"}}}`。`principalOfResult` 缺省符合协议（`principalOf` 对 owner 返回 undefined，`packages/vendor/dsh-typert-protocol/src/principal.ts:14`）。
+- 共享实例：profile 的 `node_modules` 只有 `dsh-cona-project` 与 `zod`，无 `@deepseek-ai/*` 副本；cordis/dsh-tools/typert-protocol 由宿主注入，工具注册通过宿主 schema 校验。
+
+证据文件（本机 `artifacts/r1-2.3-test/`，不入库）：`cleanroom.sh`（洁净检出脚本）、`boot-base.log`（无 Web 应用启动）、`boot-web.log`（web 应用启动与 URL）、`index.html`、`boot-graph.json`、`client-bundle.js`、`probe-browser-peer.json`、`repo-test*.log`；独立 home 为 `home-a`（base-only）、`home-b`（加 web-app）。
+
+### 仍未验证
+
+- 浏览器内 Client factory 实际激活与 console 日志（无浏览器控制；需要 GUI。前提是给 `cona-r1-test` 的 `dsh.profile.bundles` 加上 `@deepseek-ai/dsh-web-app`，当前真实 profile 未改）。
+- non-owner principal、无 invocation 的 ToolRunContext、queue/steer/取消/重启映射（2.4）。

@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const cli = path.join(packageRoot, 'dist', 'src', 'cli', 'validate.js');
+const cli = path.join(packageRoot, 'lib', 'cli', 'validate.js');
 const sample = path.join(packageRoot, 'formats', 'v1', 'sample-project.json');
 const artifacts = path.join(packageRoot, 'artifacts');
 mkdirSync(artifacts, { recursive: true });

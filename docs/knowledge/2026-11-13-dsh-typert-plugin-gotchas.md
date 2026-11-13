@@ -1,6 +1,6 @@
 # DSH 插件开发与 Typert 生成踩坑契约（0.2.2-rc.2 实测）
 
-> 2026-11-13 在 R1 插件贯通实验中实测得出（tasks 2.1–2.2），全部为本机验证事实，不是推断。适用范围：DSH `0.2.2-rc.2`、从独立插件仓（非 DSH monorepo 内）开发插件、使用 `@deepseek-ai/dsh-typert-generator` 生成 typert 产物。上游改版后需重测。证据原文见 [R1 环境记录](../../openspec/changes/establish-r1-project-plugin/implementation/2026-11-13-environment-record.md)。
+> 2026-11-13 在 R1 插件贯通实验中实测得出（tasks 2.1–2.3），全部为本机验证事实，不是推断。适用范围：DSH `0.2.2-rc.2`、从独立插件仓（非 DSH monorepo 内）开发插件、使用 `@deepseek-ai/dsh-typert-generator` 生成 typert 产物。上游改版后需重测。证据原文见 [R1 环境记录](../../openspec/changes/establish-r1-project-plugin/implementation/2026-11-13-environment-record.md)。
 
 ## 版本事实（2026-11-13 实测）
 
@@ -38,6 +38,9 @@
 12. **工具 schema 是强约束 JSON Schema 子集**：`required` 必须是对象级**字符串数组**（标准形态），property 内布尔 `required: true` 报 `JsonSchemaError: unsupported JSON schema`；`oneOf`/`const`/`enum` 等有关键字级校验规则，见 dsh-tools `json-schema.ts`。
 13. **profile 内 pnpm 重装**：`dsh plugin --profile <name> add <tarball>` 对同名同版本会静默跳过（`Already up to date`），换 tarball 后必须先 `remove` 再 `add`。
 14. **宿主进程 Node 版本可直接观察**：插件 apply 里 `console.log(process.version)` 随激活日志输出——比 runtime.json 或 shell 版本更硬的证据（实测 rc.2 宿主进程 = 自带 Node v24.21.0）。
+15. **自定义 profile 默认没有 Web 应用**：`dsh plugin --profile <新名字>` 初始化的组合是 `DEFAULT_PROFILE_BUNDLES = ["@deepseek-ai/dsh-base"]`，不含 `@deepseek-ai/dsh-web-app`。这种 profile 下 `dsh --profile <名字>` 进程会存活但不开 HTTP、没有页面，Client 永远不加载；要观察 Client，先把 `@deepseek-ai/dsh-web-app` 加进 profile 的 `dsh.profile.bundles`（安装自带 bundle，不需要装成 npm 依赖）。加入后 `--port 0` 打印的 URL 即页面入口。
+16. **Client 注册链路可从页面 boot graph 核对**：Web 宿主按各包 `dsh.client` 扫描，`GET /` 内联的 `globalThis["__DSH_BOOT__"]` 含 entries/batches；插件对应的 entry URL 形如 `plugins/??<包名>/client.js&rev=…`，可直接断言 200 与 `__ModuleLoader__.load({ id: "<包名>" })`。浏览器内激活日志仍需真实页面，不能用静态核对代替。
+17. **`--dump-config` 会写 profile 的 `cordis.yml`**：profile 目录不可写时（如受限沙箱）连 dump 都报 EPERM；只读演示可用独立 `DSH_HOME`。
 
 ## 关联
 

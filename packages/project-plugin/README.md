@@ -16,10 +16,10 @@ pnpm check:boundaries   # domain 无 Node/React/Cordis 导入检查
 pnpm check:protocol-sync # 包内协议工件与 change 工件逐字节一致
 pnpm test               # 编译 + 全部测试（向量复算 43 项、领域规则 22 项、CLI 端到端 14 项）
 
-node dist/src/cli/validate.js check <root>                        # 校验资料根
-node dist/src/cli/validate.js check-file <project.json>           # 校验单文件
-node dist/src/cli/validate.js compute-plan-version <file> [--print-canonical]
-node dist/src/cli/validate.js init <dir>                          # 建立资料根骨架
+node lib/cli/validate.js check <root>                        # 校验资料根
+node lib/cli/validate.js check-file <project.json>           # 校验单文件
+node lib/cli/validate.js compute-plan-version <file> [--print-canonical]
+node lib/cli/validate.js init <dir>                          # 建立资料根骨架
 ```
 
 独立校验命令在无 DSH 服务的纯 Node 进程运行，不加载宿主、浏览器或模型服务，不执行资料根内的脚本或远程引用；其他实现仅凭公开协议与一致性向量即可复算规划指纹。
