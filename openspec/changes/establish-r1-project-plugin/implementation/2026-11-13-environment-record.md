@@ -52,8 +52,16 @@
 
 已由 `scripts/generate-typert.mjs` 完成（详见上文「Typert 源面补充」「生成结果」）。
 
+## profile 安装与启动实测（tasks 2.3，2026-11-13 实测）
+
+- `npm pack`：46 文件 tarball（`artifacts/pack/dsh-cona-project-0.1.0.tgz`，门禁排除目录），解包后 `check:manifest --packed` 通过；无相邻上游源码参与。
+- 安装：`dsh plugin --profile cona-r1-test add <tarball>`（CLI 首用时自动新建独立 profile `~/.dsh/profiles/cona-r1-test/`），profile 内 pnpm **11.28.5** 执行安装，**未因 engines.dsh/engines.node 拒装**；peer 警告符合预期（cordis/dsh-tools/typert-protocol 由宿主运行时注入）。注意：同名同版本重复 add 会被 pnpm 跳过，重装需先 remove 再 add。
+- `--dump-config`：组合层出现 `# == dsh-cona-project` → `- id: cona-project, name: dsh-cona-project`（cordis.patch.yml 插件行生效）；profile 根 `dsh.profile.bundles = [@deepseek-ai/dsh-base, dsh-cona-project]`。
+- **启动实测**：`dsh --profile cona-r1-test` 启动成功、进程持续存活（45s timeout 击杀，exit=124）、零激活告警；插件激活日志输出 `[dsh-cona-project] host apply; node = v24.21.0`——**宿主进程实际 Node 即自带的 24.21.0**（与 runtime.json 记录一致），engines.dsh="0.2.2-rc.2" 通过宿主兼容判定。
+- 调试过程修复两处（均已随本轮提交）：函数插件访问 `ctx.tools` 需声明 inject（cordis `Inject.resolve(plugin.inject)`，函数与模块两层都声明）；工具 schema 的 `required` 必须是对象级数组（dsh-tools 强制 JSON Schema 子集，property 内布尔 `required` 报 JsonSchemaError）。
+
 ## 待实测（保持 untested）
 
-- 包管理器对 `engines.dsh` 的安装判定（profile 内 pnpm）与宿主启动判定分别实测（2.3）。
+- Client 导航与 Client factory 加载观察（需 GUI 交互，待用户以创造模式/DASH 界面操作 cona-r1-test profile）。
 - 真实 Remote invocation / principalOf / ToolRunContext 映射（2.4）。
-- 独立 home/profile 安装 tarball 与导航观察（2.3）。
+- 共享实例与多 profile 并存结果（2.3 收尾）。

@@ -44,7 +44,8 @@ interface ConaToolDefinition {
     schema: {
       type: 'object';
       additionalProperties: false;
-      properties: Record<string, { type: string; required?: boolean }>;
+      properties: Record<string, { type: string }>;
+      required?: string[];
     };
     render(args: unknown, value: unknown): Array<{ type: 'text'; text: string }>;
   };
@@ -57,13 +58,14 @@ interface ConaToolsRegistry {
 }
 
 export function apply(ctx: Context): void {
+  // tasks 2.3：宿主进程 Node 版本的直接观察证据（随激活日志输出）。
+  console.log('[dsh-cona-project] host apply; node =', process.version, '; pid =', process.pid)
   ctx.plugin(ConaDiagnosticService)
 
   const tools = (ctx as Context & { tools?: ConaToolsRegistry }).tools
   if (tools === undefined) {
     throw new Error('cona_diag_context: host tools service unavailable (dsh.tools not mounted)')
   }
-
   tools.register({
     name: 'cona_diag_context',
     description: 'R1 diagnostic probe: reports the real ToolRunContext fields (agent/callId/signal) of this execution. Read-only.',
@@ -76,8 +78,9 @@ export function apply(ctx: Context): void {
           agentId: { type: 'string' },
           callId: { type: 'string' },
           signalAborted: { type: 'boolean' },
-          capturedAt: { type: 'string', required: true },
+          capturedAt: { type: 'string' },
         },
+        required: ['capturedAt'],
       },
       render(_args, value) {
         const v = value as {
@@ -112,3 +115,11 @@ export function apply(ctx: Context): void {
     },
   })
 }
+
+// cordis inject 声明（Fiber 构造按 Inject.resolve(plugin.inject) 读取）：
+// 'tools' 使 cordis 延迟 apply 至 dsh-tools 服务就绪，并放行 ctx.tools 属性访问
+// （否则报 cannot get property "tools" without inject，2026-11-13 profile 实测）。
+// host loader 可能以模块对象或 apply 函数两种形态登记插件，两层都声明。
+;(apply as unknown as { inject: string[] }).inject = ['tools']
+
+export const inject = ['tools']

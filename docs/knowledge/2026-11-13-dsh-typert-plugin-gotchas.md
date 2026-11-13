@@ -32,6 +32,13 @@
 - 包内遗留 `pnpm-lock.yaml` 应删除（workspace 化后锁文件只在根）。
 - 生成器报错信息可读性尚可，但「产物为空、无报错」几乎总是源面登记没生效——先查 paths/references/manifest name 三件套，再怀疑别的。
 
+## 宿主加载期契约（profile 实测）
+
+11. **函数插件访问服务必须声明 inject**：直接读 `ctx.tools` 报 `cannot get property "tools" without inject`（cordis ReflectService 代理只放行 `fiber.inject` 里登记的服务）。cordis 在构造 Fiber 时按 `Inject.resolve(plugin.inject)` 读取；host loader 可能以模块对象或 apply 函数两种形态登记插件，建议两层都声明（`export const inject = ['tools']` + `apply.inject = ['tools']`）。声明后 cordis 会自动延迟 apply 到服务就绪。
+12. **工具 schema 是强约束 JSON Schema 子集**：`required` 必须是对象级**字符串数组**（标准形态），property 内布尔 `required: true` 报 `JsonSchemaError: unsupported JSON schema`；`oneOf`/`const`/`enum` 等有关键字级校验规则，见 dsh-tools `json-schema.ts`。
+13. **profile 内 pnpm 重装**：`dsh plugin --profile <name> add <tarball>` 对同名同版本会静默跳过（`Already up to date`），换 tarball 后必须先 `remove` 再 `add`。
+14. **宿主进程 Node 版本可直接观察**：插件 apply 里 `console.log(process.version)` 随激活日志输出——比 runtime.json 或 shell 版本更硬的证据（实测 rc.2 宿主进程 = 自带 Node v24.21.0）。
+
 ## 关联
 
 - R1 实施细节与接手状态：[R1 接手记录](../../openspec/changes/establish-r1-project-plugin/implementation/2026-11-13-handoff.md)
