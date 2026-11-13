@@ -113,3 +113,11 @@
 - **blocked**：non-owner principal（`PrincipalMap` 仅 owner；唯一非 owner 面是需独立服务与 OAuth 的 liveshare `share-viewer`）；agent 缺失／归属不唯一的绑定拒绝（R1 无绑定层，属第 6 段）。
 - 上轮提交的 Client 自动探针已回退：洁净构建 `TS2307`（tsc 先于 generate）＋运行时 `require("@deepseek-ai/dsh-typert-protocol/remote-info")` 未在模块表而 `dsh.client.inject=[]`；2.4 的 Remote 证据改用真实 `/api` 载体。
 - 由此触发 [R1 范围修订](../scope-amendment.md)（2.4→2.4a/2.4b、V25→V25a/V25b、design 增 DSH 行为前提表），已按工作流交第 2 轮 review；通过前 2.4a 不勾选、2.4b 保持 blocked。
+
+
+## 2.5 门禁与插件 CI（2026-11-13）
+
+- 根 `package.json` 新增 `check:ci`：`node scripts/check-repo.mjs --all && pnpm build && pnpm typecheck && pnpm test:run && pnpm check:plugin && pnpm check:manifest`；插件 `test` 拆出 `test:run`（`tsc -p tsconfig.test.json && node --test lib-test/test/*.test.js`），构建只跑一次。
+- 本地实测（PATH 指向宿主自带 Node）：`node v24.21.0`、`pnpm 12.18.0`；`pnpm install --frozen-lockfile` 通过；`pnpm check:ci` exit 0——洁净度 147 文件 0 问题、链接 68 篇 0 问题、双语 5 对 0 问题、build/typecheck、**79/79 测试**、包边界、协议同步、manifest 全过。
+- CI：`.github/workflows/ci.yml` 改为 pnpm 12.18.0 + Node 24.21.0、`pnpm install --frozen-lockfile` + `pnpm check:ci`；`.workflow/ci.yml`（Gitee Go）自装 Node 24.21.0、`npm i -g pnpm@12.18.0`（npmmirror 源）、install + `check:ci`，保持单条 `&&` 链（沿用 Gitee 单条不短路教训）。
+- 未验证：GitHub Actions 与 Gitee Go 的**远端实跑**本机无法执行；只做了 YAML 语法解析（Ruby YAML 通过）与本地同一命令链验证。远端 runner、镜像源与 pnpm 全局安装行为保持 `untested`，不能记成 CI 已通过。

@@ -53,8 +53,9 @@
     "check:protocol-sync": "node scripts/check-protocol-sync.mjs",
     "check:manifest": "node scripts/check-manifest.mjs",
     "generate:typert": "node scripts/generate-typert.mjs",
-    "test": "npm run build && tsc -p tsconfig.test.json && node --test lib-test/test/*.test.js",
-    "validate": "node lib/cli/validate.js"
+    "test": "npm run build && npm run test:run",
+    "validate": "node lib/cli/validate.js",
+    "test:run": "tsc -p tsconfig.test.json && node --test lib-test/test/*.test.js"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.1.0",

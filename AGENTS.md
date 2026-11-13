@@ -12,7 +12,7 @@
 
 用户要求项目资料可选项目／DSH／自定义目录，支持 Git 多人跨环境协作、其他 Agent 可读与新机器 DSH 接续。公开资料与本机会话、授权及回执分开，格式与恢复方案仍待验证。
 
-当前活动提案：`openspec/changes/establish-r1-project-plugin/`，覆盖 R1 插件贯通实验；第 1 轮外部审阅已完成并按意见修订，2.1–2.3 完成，2.4 映射完成（范围修订待单次审阅），2.5 起未完成；处理见 change 内的 `review-response.md`。
+当前活动提案：`openspec/changes/establish-r1-project-plugin/`，覆盖 R1 插件贯通实验；第 1 轮外部审阅已完成并按意见修订，第 2 段完成（2.1–2.5；2.4b 的绑定/归属复测待第 6 段，non-owner 为 R1 边界），第 3 段未开始；处理见 change 内的 `review-response.md`。
 
 ## 权威性
 
@@ -42,7 +42,7 @@
 
 ## 门禁
 
-`node scripts/check-repo.mjs --all`；首次克隆后 `git config core.hooksPath .githooks`。
+`pnpm check:ci`（仓库门禁 + 插件 build/typecheck/test/边界/协议/manifest；CI 固定 Node 24.21.0、pnpm 12.18.0）；只查仓库门禁为 `node scripts/check-repo.mjs --all`；首次克隆后 `git config core.hooksPath .githooks`。
 
 ## Change 工作流
 

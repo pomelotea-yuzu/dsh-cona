@@ -1,12 +1,11 @@
 name: CI
 
-# 校验逻辑的唯一事实源是仓库脚本，本流水线只做"装 Node + 调用脚本"，不另写一套判据。
-# 与 pre-commit 和 .workflow/ci.yml 共用 scripts/check-repo.mjs 的门禁链。
+# 校验逻辑的唯一事实源是仓库脚本：本流水线只装 Node/pnpm 并调用 `pnpm check:ci`，
+# 不另写判据。`check:ci` 含仓库洁净度/链接/双语门禁 + 插件 build/typecheck/test/
+# 边界/协议同步/manifest 资源检查（见根 package.json）。
 #
-# pnpm workspace 骨架落地后，在 Run gates 之前插入依赖安装步骤，并把 commands 换成：
-#   pnpm install --frozen-lockfile
-#   pnpm check:ci            # 内含 build / typecheck / test / lint / spec
-# （提交前检查口径见 CONTRIBUTING.md）
+# Node 固定 24.21.0：插件 engines.node 为 >=24.9.0，DSH rc.2 宿主自带 Node 24.21.0；
+# 实际版本由 Report versions 步骤打印，不随 setup-node 的浮标漂移。
 
 on:
   push:
@@ -23,17 +22,30 @@ concurrency:
 
 jobs:
   gates:
-    name: Repository gates
+    name: Repository + plugin gates
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.18.0
+          run_install: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24.21.0'
+          cache: pnpm
 
-      - name: Repository gates (hygiene / links / bilingual / selftests)
-        run: node scripts/check-repo.mjs --all
+      - name: Report versions
+        run: node -v && pnpm -v
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Repository and plugin gates
+        run: pnpm check:ci

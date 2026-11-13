@@ -9,7 +9,7 @@ Initialized on 2026-11-10. As of 2026-11-12, project management design, architec
 ## Before committing
 
 - Leave a newly written change uncommitted for another agent's review, arranged by the user. The reviewer writes `review.md` inside the change; the author reads it, revises the change, records the disposition of each finding, and reruns checks before committing. See the [change workflow](docs/development/workflow.md).
-- Run `node scripts/check-repo.mjs --all` locally; after a fresh clone run `git config core.hooksPath .githooks` once.
+- Run `pnpm check:ci` locally (repository hygiene/link/bilingual gates plus plugin build/typecheck/79 tests/boundaries/protocol sync/manifest; Node ≥24.9, with CI pinned to Node 24.21.0 and pnpm 12.18.0). Use `node scripts/check-repo.mjs --all` for the repository gates alone; after a fresh clone run `git config core.hooksPath .githooks` once.
 - Repository-local disposable output goes to `artifacts/`; local experiment runtime data may go to `.dsh-cona/`. Neither is committed. Hand-written conclusions belong in the matching `docs/` subdirectory. These conventions do not prescribe deployment directories. Users can choose among three project material locations; see the [collaboration design](docs/architecture/2026-11-12-project-data-portability.md) for portable versus local data. The format is not yet implemented.
 - Bilingual facade documents are registered in `i18n/docs-manifest.json` and must be updated together.
 

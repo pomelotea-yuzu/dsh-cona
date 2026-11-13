@@ -1,6 +1,6 @@
 # R1 实现任务
 
-状态：已收到[第 1 轮外部 review](review.md)并按意见修订，处理见 [review-response](review-response.md)；2026-11-13 起按用户授权进入实施，第 1 段（格式、领域与无宿主校验）完成，第 2 段中 2.1／2.2 完成（npm 已发布 0.2.2-rc.2 类型包与 typert-generator，类型与生成改走 npm 精确版本 + vendored protocol 源面，typert.host／remote-client 产物已生成，build／typecheck／test 79 项／check:manifest／仓库门禁全过），2.3 已完成（洁净构建/打包、独立 home 安装、宿主与 Remote 探针、浏览器内 Client 激活，见环境记录第二轮），2.4a 完成（第 2 轮 review 放行，见 [范围修订](scope-amendment.md)），2.4b 拆口径（绑定／归属部分 6.2／6.5 复测计入 R1，non-owner 为 R1 边界），2.5 待实测，见 [接手记录](implementation/2026-11-13-handoff.md)，第 3 段起未开始。协议正文和向量是已交付的提案工件，其复算不勾选实现任务；不得把工件齐备或静态校验当成产品已完成。
+状态：已收到[第 1 轮外部 review](review.md)并按意见修订，处理见 [review-response](review-response.md)；2026-11-13 起按用户授权进入实施，第 1 段（格式、领域与无宿主校验）完成，第 2 段中 2.1／2.2 完成（npm 已发布 0.2.2-rc.2 类型包与 typert-generator，类型与生成改走 npm 精确版本 + vendored protocol 源面，typert.host／remote-client 产物已生成，build／typecheck／test 79 项／check:manifest／仓库门禁全过），2.3 已完成（洁净构建/打包、独立 home 安装、宿主与 Remote 探针、浏览器内 Client 激活，见环境记录第二轮），2.4a 完成（第 2 轮 review 放行，见 [范围修订](scope-amendment.md)），2.4b 拆口径（绑定／归属部分 6.2／6.5 复测计入 R1，non-owner 为 R1 边界），2.5 完成（`pnpm check:ci` 接入，本地以 Node v24.21.0 实跑通过；远端流水线未实跑），见 [接手记录](implementation/2026-11-13-handoff.md)，第 3 段起未开始。协议正文和向量是已交付的提案工件，其复算不勾选实现任务；不得把工件齐备或静态校验当成产品已完成。
 
 ## 1. 格式、领域与无宿主校验
 
@@ -17,7 +17,7 @@
 - [x] 2.3 在没有相邻上游源码的检出目录构建并 pack；在独立 home／profile 安装 tarball，实际观察 Host、Client 导航与 Remote 探针，分别记录开发命令及宿主实际使用的 Node 二进制／补丁版本、DSH 版本和共享实例结果，不能仅用 shell 版本或随包元数据代替实际 Host 观察。（2026-11-13 晚第二轮：修复洁净检出 3 个阻断——测试与 CLI 仍指旧 dist 布局、build 不生成 Typert 产物、manifest 不查产物存在——后，洁净检出 79 测试与 47 文件 tarball 可复现；独立 DSH_HOME 安装、宿主 apply 日志 Node v24.21.0、boot graph 含 dsh-cona-project 且客户端 bundle 200、Remote probe 真实 HTTP 调用返回 owner principal；已在 cona-r1-test 加入 web-app 并复测页面/boot graph/客户端 bundle/Remote probe；浏览器内 Client 激活由用户在 Safari 控制台观察到 `[dsh-cona-project] client factory loaded`（apply，index.ts:13），故勾选。前提：profile 组合须含 Web 应用 bundle（`@deepseek-ai/dsh-web-app`），默认自定义 profile 不含，Client 不可观察。证据与命令见环境记录第二轮。）
 - [x] 2.4a 用最小诊断插件分开实测真实 owner Remote invocation 与无 invocation 的真实 ToolRunContext，并交付消息消费／turn／取消／结束的映射结论（含 queue、steer、迟到工具与重启）；确认 principalOf 为空不单独授权，工具路径不因缺 invocation 被拒、也不凭 principalOf 取得 owner 权限，不以自报身份补缺口。（2026-11-13 API 驱动真实会话实测完成：owner Remote、ToolRunContext、queue、steer（含迟到工具）、cancel、重启映射；见 [2.4 映射记录](implementation/2026-11-13-2.4-mapping-record.md)。第 2 轮 review 在 R2-A1／C1／C2 处理后放行，故勾选。）
 - [ ] 2.4b（blocked，拆口径）实测绑定准入与 non-owner 拒绝。（i）工具无 invocation 但绑定有效可按有限范围准入；agent 缺失／归属不唯一拒绝新绑定——R1 只有诊断探针、无绑定/准入层，第 6 段实现后复测，**计入 R1，不享完成例外**（6.2／6.5 已显式承接）。（ii）non-owner／伪造主体拒绝——单用户部署仅 owner 身份面（唯一非 owner 为 liveshare `share-viewer`，需独立部署），保持 R1 边界；其 blocked 不阻 R1 完成，随 change 归档带入 R2+ 边界记录。不得用进程内伪造 principal 补测。
-- [ ] 2.5 增加插件 build、typecheck、必要 test 与格式／资源检查入口，并接入现有仓库门禁和插件 Node CI；运行整条计划 `pnpm check:ci` 验证，说明实际 Node 版本，不移除原有洁净度与双语检查。
+- [x] 2.5 增加插件 build、typecheck、必要 test 与格式／资源检查入口，并接入现有仓库门禁和插件 Node CI；运行整条计划 `pnpm check:ci` 验证，说明实际 Node 版本，不移除原有洁净度与双语检查。（2026-11-13：根 `check:ci` = `check-repo --all` + build + typecheck + `test:run` + boundaries + protocol-sync + check:manifest；GitHub CI 与 Gitee Go 改为 Node 24.21.0 + pnpm 12.18.0，本地以 Node v24.21.0／pnpm 12.18.0 实跑 `pnpm check:ci` 通过（79 测试）；GitHub/Gitee 流水线本身未在远端实跑，保持静态接入记录。）
 
 ## 3. 公开资料与本机文件后端
 

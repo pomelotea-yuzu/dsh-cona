@@ -39,6 +39,6 @@
 
 - OpenSpec 的工件齐备或校验通过不代表外部审阅已完成；没有 `review.md` 或双审未齐时仍处于待审阅状态，不自动提交。
 - 提案中的验收场景在真正执行前保持 `untested`；运行结论只使用 `pass` / `fail` / `blocked` / `untested`，替身通过不代替真实宿主。
-- 校验至少包括所用 OpenSpec 版本的 change 严格校验和 `node scripts/check-repo.mjs --all`；插件实现后再加入实际构建、类型及必要测试。
+- 校验至少包括所用 OpenSpec 版本的 change 严格校验；仓库与插件的合并门禁是 `pnpm check:ci`（内含 `node scripts/check-repo.mjs --all`、build、typecheck、79 项测试、边界、协议同步与 manifest 资源检查），CI 固定 Node 24.21.0 与 pnpm 12.18.0。
 - 在 change 的交接／review-response 中保存校验工具准确版本、命令、输出摘要和环境边界。复查使用明确版本，不用 latest 结果冒充编写时版本；其他版本的补跑分别归属。门禁只读取 Git 索引时，新增工件须暂存后检查或用包含新文件的独立快照检查，并写明范围。
 - push 与 tag 仍须用户明确指示，不因允许 Git 提交而自动获得授权。
