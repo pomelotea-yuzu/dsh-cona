@@ -19,8 +19,12 @@ export interface ConaToolObservation {
   agentId: string | null;
   /** exec 上可见的 callId（若存在）。 */
   callId: string | null;
-  /** exec.signal 状态；缺失记 null。 */
-  signalAborted: boolean | null;
+  /** execute 入口时 exec.signal 的状态；缺失记 null。 */
+  signalAbortedAtStart: boolean | null;
+  /** 等待结束（或 abort）后 exec.signal 的状态；缺失记 null。 */
+  signalAbortedAtEnd: boolean | null;
+  /** 从入口到返回的实际等待毫秒（delayMs=0 时接近 0）。 */
+  waitedMs: number;
   /** 捕获时间（UTC instant 字符串）。 */
   capturedAt: string;
 }
@@ -29,17 +33,28 @@ export interface ConaToolObservation {
 export const toolObservations: ConaToolObservation[] = []
 
 /** 与 dsh-tools ToolRunContext 运行时形态对齐的最小结构（仅探针所需字段）。 */
+interface ConaAbortSignalLike {
+  readonly aborted: boolean;
+  addEventListener?(type: 'abort', listener: () => void, options?: { readonly once?: boolean }): void;
+  removeEventListener?(type: 'abort', listener: () => void): void;
+}
+
 interface ConaToolExec {
   agent?: { readonly id: unknown };
   callId?: unknown;
-  signal?: { readonly aborted: boolean };
+  signal?: ConaAbortSignalLike;
 }
 
 /** 与 dsh-tools ToolDefinition 运行时形态对齐的最小结构（工具定义部分）。 */
 interface ConaToolDefinition {
   name: string;
   description: string;
-  parameters: Record<string, never>;
+  parameters: {
+    type: 'object';
+    additionalProperties: false;
+    properties: Record<string, { type: string; description?: string; enum?: number[] }>;
+    required?: string[];
+  };
   output: {
     schema: {
       type: 'object';
@@ -49,7 +64,7 @@ interface ConaToolDefinition {
     };
     render(args: unknown, value: unknown): Array<{ type: 'text'; text: string }>;
   };
-  execute(args: unknown, exec: ConaToolExec): Promise<Record<string, string | boolean>>;
+  execute(args: unknown, exec: ConaToolExec): Promise<Record<string, string | boolean | number>>;
 }
 
 /** 与 dsh-tools Tools 服务运行时形态对齐的最小结构。 */
@@ -68,8 +83,17 @@ export function apply(ctx: Context): void {
   }
   tools.register({
     name: 'cona_diag_context',
-    description: 'R1 diagnostic probe: reports the real ToolRunContext fields (agent/callId/signal) of this execution. Read-only.',
-    parameters: {},
+    description: 'R1 diagnostic probe: reports the real ToolRunContext fields (agent/callId/signal) of this execution. Optional delayMs keeps the call in flight so queue/steer/cancel and late-result behavior can be observed. Read-only.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        delayMs: {
+          type: 'integer',
+          description: 'Optional in-flight delay in milliseconds (0-30000, default 0) to observe queue/steer/cancel and late results.',
+        },
+      },
+    },
     output: {
       schema: {
         type: 'object',
@@ -77,40 +101,81 @@ export function apply(ctx: Context): void {
         properties: {
           agentId: { type: 'string' },
           callId: { type: 'string' },
-          signalAborted: { type: 'boolean' },
+          signalAbortedAtStart: { type: 'boolean' },
+          signalAbortedAtEnd: { type: 'boolean' },
+          waitedMs: { type: 'integer' },
           capturedAt: { type: 'string' },
         },
-        required: ['capturedAt'],
+        required: ['capturedAt', 'waitedMs'],
       },
       render(_args, value) {
         const v = value as {
           capturedAt?: string
           agentId?: string
           callId?: string
-          signalAborted?: boolean
+          signalAbortedAtStart?: boolean
+          signalAbortedAtEnd?: boolean
+          waitedMs?: number
         }
         const lines = [
           `capturedAt: ${v.capturedAt ?? '(missing)'}`,
           `agentId: ${v.agentId ?? '(none)'}`,
           `callId: ${v.callId ?? '(none)'}`,
-          `signalAborted: ${v.signalAborted === undefined ? '(none)' : String(v.signalAborted)}`,
+          `signalAbortedAtStart: ${v.signalAbortedAtStart === undefined ? '(none)' : String(v.signalAbortedAtStart)}`,
+          `signalAbortedAtEnd: ${v.signalAbortedAtEnd === undefined ? '(none)' : String(v.signalAbortedAtEnd)}`,
+          `waitedMs: ${v.waitedMs === undefined ? '(none)' : String(v.waitedMs)}`,
         ]
         return [{ type: 'text' as const, text: lines.join('\n') }]
       },
     },
-    async execute(_args, exec) {
+    async execute(args, exec) {
+      const rawDelay = (args as { delayMs?: unknown } | undefined)?.delayMs
+      const delayMs = typeof rawDelay === 'number' && Number.isInteger(rawDelay) && rawDelay >= 0 && rawDelay <= 30000
+        ? rawDelay
+        : 0
+      const signal = exec.signal
+      const startedAt = new Date()
+      const signalAbortedAtStart = signal === undefined ? null : signal.aborted
+      const started = Date.now()
+      if (delayMs > 0 && signal?.aborted !== true) {
+        // Abort 感知的等待：cancel/steer 打断时立即返回，让探针观察 signal 前后状态。
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(finish, delayMs)
+          function finish(): void {
+            clearTimeout(timer)
+            signal?.removeEventListener?.('abort', finish)
+            resolve()
+          }
+          signal?.addEventListener?.('abort', finish, { once: true })
+        })
+      }
+      const waitedMs = Date.now() - started
       const observation: ConaToolObservation = {
         agentId: exec.agent === undefined ? null : String(exec.agent.id),
         callId: exec.callId === undefined ? null : String(exec.callId),
-        signalAborted: exec.signal === undefined ? null : exec.signal.aborted,
-        capturedAt: new Date().toISOString(),
+        signalAbortedAtStart,
+        signalAbortedAtEnd: signal === undefined ? null : signal.aborted,
+        waitedMs,
+        capturedAt: startedAt.toISOString(),
       }
       toolObservations.push(observation)
-      // 输出 schema 声明为可选 string 字段；null 形态以字段缺失表达。
-      const output: Record<string, string | boolean> = { capturedAt: observation.capturedAt }
+      // 宿主日志留直接证据（客户端会话日志之外的第二条观察面）。
+      console.log(
+        `[dsh-cona-project] tool exec; agent=${observation.agentId ?? 'none'}`
+        + ` callId=${observation.callId ?? 'none'}`
+        + ` abortedAtStart=${String(observation.signalAbortedAtStart)}`
+        + ` abortedAtEnd=${String(observation.signalAbortedAtEnd)}`
+        + ` waitedMs=${waitedMs}`,
+      )
+      // 输出 schema 声明为可选字段；null 形态以字段缺失表达。
+      const output: Record<string, string | boolean | number> = {
+        capturedAt: observation.capturedAt,
+        waitedMs: observation.waitedMs,
+      }
       if (observation.agentId !== null) output['agentId'] = observation.agentId
       if (observation.callId !== null) output['callId'] = observation.callId
-      if (observation.signalAborted !== null) output['signalAborted'] = observation.signalAborted
+      if (observation.signalAbortedAtStart !== null) output['signalAbortedAtStart'] = observation.signalAbortedAtStart
+      if (observation.signalAbortedAtEnd !== null) output['signalAbortedAtEnd'] = observation.signalAbortedAtEnd
       return output
     },
   })

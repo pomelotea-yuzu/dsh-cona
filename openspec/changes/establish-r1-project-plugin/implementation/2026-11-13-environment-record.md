@@ -97,4 +97,18 @@
 
 ### 仍未验证
 
-- non-owner principal、无 invocation 的 ToolRunContext、queue/steer/取消/重启映射（2.4）。
+- non-owner principal、agent 缺失／归属不唯一的绑定拒绝（2.4，均已实测记录为 blocked；其余 2.4 项已测，见下节）。
+
+
+## 2.4 映射实测（2026-11-13 晚，API 驱动真实会话）
+
+详细记录与事件序列见 [2.4 映射实测记录](2026-11-13-2.4-mapping-record.md)。要点：
+
+- **Remote invocation（owner）**：浏览器 cookie 与 `/connect` API cookie 均返回 `hasInvocation:true`、`peerPrincipal:{kind:"owner"}`、`service:"conaDiagnostic"`、`runtime.nodeVersion:"v24.21.0"`；`principalOfResult` 缺省符合协议（owner 时 `principalOf` 为 undefined）。
+- **无 invocation 的 ToolRunContext**：真实会话调 `cona_diag_context` 得 `agentId=SessionId`、`callId` 单次、`signalAborted*` 与 `waitedMs`；`ToolExecution` 本身只有 `callId/rootCallId/agent/signal`，没有 invocation/principal。
+- **queue**：运行中第二条 prompt 以 `agent/inbox/spliced target=next-turn` 排队，不打断当前 turn，turn 结束后作为下一 turn 消费。
+- **steer**：运行中 steer 以 `target=next-step` 在 step 边界注入；在飞工具不被 abort（实测 `delayMs=15000` 完整等满、`abortedAtEnd=false`），迟到工具结果仍进入同一 turn。
+- **cancel**：取消信号 112ms 内到达工具（`abortedAtEnd=true`），宿主把结果替换为 `Error: tool call aborted`，`turn/end {"kind":"aborted","reason":{"kind":"user"}}`。
+- **重启**：kill 后重启宿主（pid 17719→17882），resume 同一会话：历史保留，`agentId` 不变，`callId` 换代。
+- **blocked**：non-owner principal（`PrincipalMap` 仅 owner；唯一非 owner 面是需独立服务与 OAuth 的 liveshare `share-viewer`）；agent 缺失／归属不唯一的绑定拒绝（R1 无绑定层，属第 6 段）。
+- 上轮提交的 Client 自动探针已回退：洁净构建 `TS2307`（tsc 先于 generate）＋运行时 `require("@deepseek-ai/dsh-typert-protocol/remote-info")` 未在模块表而 `dsh.client.inject=[]`；2.4 的 Remote 证据改用真实 `/api` 载体。

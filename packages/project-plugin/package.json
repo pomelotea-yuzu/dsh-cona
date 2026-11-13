@@ -46,7 +46,7 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/generate-typert.mjs && node scripts/build-client.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/build-client.mjs && node scripts/generate-typert.mjs",
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.domain.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "check:boundaries": "node scripts/check-boundaries.mjs",

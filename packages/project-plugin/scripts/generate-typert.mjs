@@ -29,10 +29,7 @@ const root = existsSync(path.join(repoRoot, 'tsconfig.host.json'))
 const generator = new WorkspaceTypertGenerator(root, {
   // 仓库门禁已由 tsc 全量校验；生成器只保留 Typert 专属检查。
   checkDiagnostics: false,
-  // client face 有意消费生成产物（src/client/index.ts import lib/typert.remote-client.js
-  // 以挂载 conaDiagnostic Remote）——「face 不加载生成产物」的守卫不适用于这条设计边，
-  // 其余 workspace 源面仍由 tsc 门禁与 host face 守卫覆盖。
-  rejectBuildOutputs: false,
+  rejectBuildOutputs: true,
 });
 
 let artifacts;
