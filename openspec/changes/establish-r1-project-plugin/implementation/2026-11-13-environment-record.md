@@ -90,7 +90,11 @@
 
 证据文件（本机 `artifacts/r1-2.3-test/`，不入库）：`cleanroom.sh`（洁净检出脚本）、`boot-base.log`（无 Web 应用启动）、`boot-web.log`（web 应用启动与 URL）、`index.html`、`boot-graph.json`、`client-bundle.js`、`probe-browser-peer.json`、`repo-test*.log`；独立 home 为 `home-a`（base-only）、`home-b`（加 web-app）。
 
+### 浏览器内 Client 激活（2026-11-13 18:57，用户 Safari 实测）
+
+- 打开 `http://127.0.0.1:65337/?token=…` 后，Safari 控制台出现 `[dsh-cona-project] client factory loaded`，来源标为 `apply — index.ts:13`：Client factory 已在真实浏览器中加载并执行 apply，2.3 的 Client 观察闭合。
+- 同一控制台还有两类非插件故障，记录以免误判：WebSocket `ws://127.0.0.1:65337/api/remote.mux` 报 `closed due to suspension`（Safari 后台标签挂起；同一服务端 HTTP Remote probe 仍成功）；`/assets/*.js.map` 404（打包页面不提供 source map，仅因打开检查器才请求）。
+
 ### 仍未验证
 
-- 浏览器内 Client factory 实际激活与 console 日志（无浏览器控制；需要 GUI。`cona-r1-test` 已加 web-app 并起好临时服务，页面与 bundle 均已就绪，只差在真实浏览器 console 看到 `[dsh-cona-project] client factory loaded`）。
 - non-owner principal、无 invocation 的 ToolRunContext、queue/steer/取消/重启映射（2.4）。
