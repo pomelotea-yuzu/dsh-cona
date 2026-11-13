@@ -12,7 +12,7 @@
 
 用户要求项目资料可选项目／DSH／自定义目录，支持 Git 多人跨环境协作、其他 Agent 可读与新机器 DSH 接续。公开资料与本机会话、授权及回执分开，格式与恢复方案仍待验证。
 
-当前活动提案：`openspec/changes/establish-r1-project-plugin/`，覆盖 R1 插件贯通实验，第 1 轮外部审阅已完成并按意见修订；处理见 change 内的 `review-response.md`，尚未实施。
+当前活动提案：`openspec/changes/establish-r1-project-plugin/`，覆盖 R1 插件贯通实验；第 1 轮外部审阅已完成并按意见修订，2.1–2.3 完成，2.4 映射完成（范围修订待单次审阅），2.5 起未完成；处理见 change 内的 `review-response.md`。
 
 ## 权威性
 
@@ -46,4 +46,4 @@
 
 ## Change 工作流
 
-完整约定见 `docs/development/workflow.md`：写完 change 并校验后不立即提交，先交用户安排其他 Agent 审阅；审阅结果放入该 change 的 `review.md`。编写 Agent 阅读 review、按情况修订并在 `review-response.md` 记录处理依据，复查通过后再 Git 提交。不得预填 review 或把自查当外部审阅；没有 review 时保持待审阅、未提交。实施遵循已有用户授权，单纯编写提案不自动进入实现。
+完整约定见 `docs/development/workflow.md`：新建 change 采用双审——DSH 侧独立会话一遍、另一个 Agent 一遍，审阅结果分别写入该 change 的 `review.md`；作者逐条修订并在 `review-response.md` 记录依据，双审确认（或用户裁决）后再提交。作者不得审自己的 change（作者是 DSH 时用独立 DSH 子会话并如实标注），也不得预填 review 或把自查当外部审阅；双审未齐时保持待审阅、未提交。建立后的修订至少一名非作者审阅（微小修豁免）；实施由用户另选执行 Agent，默认不与作者同一角色，审阅者不执行。
