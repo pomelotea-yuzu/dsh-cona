@@ -37,10 +37,13 @@ stages:
         nodeVersion: 24.21.0
         commands:
           # ① 自装 Node 24（npmmirror 镜像；curl/wget 二选一，解到 /usr/local 使 node 入 PATH）
+          #    npm 11.19+ 默认拦截依赖的 install scripts；必须 --allow-scripts=pnpm，否则 pnpm 12 的
+          #    pre/postinstall 不执行，`pnpm -v` 会在 /root/.pnpm-home/.tools 切换失败（2026-11-13 实跑）。
           # 公共入口内部串行执行全部检查，任一步失败即返回非零。
           - >-
             (curl -fsSL https://npmmirror.com/mirrors/node/v24.21.0/node-v24.21.0-linux-x64.tar.gz -o /tmp/node.tar.gz
             || wget -q https://npmmirror.com/mirrors/node/v24.21.0/node-v24.21.0-linux-x64.tar.gz -O /tmp/node.tar.gz)
             && tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 && node -v
-            && npm i -g pnpm@12.18.0 --registry=https://registry.npmmirror.com && pnpm -v
+            && npm i -g pnpm@12.18.0 --allow-scripts=pnpm --registry=https://registry.npmmirror.com
+            && export PATH="$(npm prefix -g)/bin:$PATH" && pnpm -v
             && pnpm install --frozen-lockfile && pnpm check:ci
