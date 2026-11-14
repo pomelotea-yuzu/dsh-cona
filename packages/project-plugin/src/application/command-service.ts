@@ -159,8 +159,8 @@ export interface ProjectCommandDeps {
   queue?: InstanceCommandQueue;
   /** 故障注入（仅测试）。 */
   hooks?: { publish?: PublishHooksPort; body?: PublishHooksPort; state?: PublishHooksPort };
-  /** 提交后通知（第 5 段接变更流）；失败不撤回提交。 */
-  notify?: (result: CommittedCommand) => void | Promise<void>;
+  /** 提交后通知（第 5 段失效流）；失败不撤回提交。 */
+  notify?: (result: CommittedCommand, envelope: CommandEnvelope) => void | Promise<void>;
 }
 
 /** 规划命令（除记录追加外的五类）。 */
@@ -876,7 +876,7 @@ export class ProjectCommandService {
     // 通知在提交之后：失败不撤回事实，也不改变返回结果。
     if (this.deps.notify !== undefined) {
       try {
-        await this.deps.notify(committed);
+        await this.deps.notify(committed, envelope);
       } catch {
         // 通知失败不回滚、不重复执行。
       }

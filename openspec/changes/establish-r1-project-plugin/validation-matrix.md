@@ -1,6 +1,6 @@
 # R1 验证矩阵
 
-日期：2026-11-12（2026-11-13、2026-11-14 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V12／V25a `pass`，V25b `blocked`；V05／V10／V11／V13／V14／V15／V16／V17／V18／V19／V20／V21／V22／V33／V38 已有文件层部分证据但宿主层或后续阶段未做，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
+日期：2026-11-12（2026-11-13、2026-11-14 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V12／V25a `pass`，V25b `blocked`；V05／V10／V11／V13／V14／V15／V16／V17／V18／V19／V20／V21／V22／V30／V33／V38 已有自动化或文件层部分证据但宿主层或后续阶段未做，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
 
 方法：`A` 为自动业务／Client 测试，`F` 为实际文件后端与中断注入，`H` 为独立 profile 的真实 DSH 检查，`E` 为真实 Agent 端到端。含多种方法的条目须分别记录观察；替身通过不代替真实宿主。运行时追加实际版本、步骤、预期／观察、证据定位与限制，状态仅 `pass / fail / blocked / untested`。
 
@@ -36,7 +36,7 @@
 | V27 | project-conversation-context：终态及重启 | H | 结束／取消后拒绝新写，未知停止保持未知，Host 恢复历史不激活授权，Client 断线不取消 Host | untested |
 | V28 | project-conversation-context：来源与动态上下文 | A、H、E | 背景与实际绑定一致，决定／建议／未核查区分，新材料不静默改目标，授权内调整记录原因 | untested |
 | V29 | project-panel-sync：最小编辑与保存 | H、E | 用户编辑与 Agent 调整同树，失败保草稿不标已保存，重启身份／规划不变 | untested |
-| V30 | project-panel-sync：一致快照与初读竞态 | A、F、H | 不混合资料版本，先订阅后回读覆盖已知最新状态，树／摘要一致 | untested |
+| V30 | project-panel-sync：一致快照与初读竞态 | A、F、H | 不混合资料版本，先订阅后回读覆盖已知最新状态，树／摘要一致 | untested（2026-11-14 自动化层已实测：读取中提交触发重读且返回单一版本、正文改写／未知 schema 拒绝且不返回树、`follow → ready → snapshot(minStateRevision)` 覆盖水位、`summary` 与 `tree／dependencies／records` 同源、刷新换代后旧代际 `stale-connection`；H 层真实 Remote 入口与面板未接，待 5.2／5.3） |
 | V31 | project-panel-sync：旧连接／旧源／旧回执 | A、H | 迟到响应不覆盖新快照，历史回执不回滚当前树，跨实例不比较计数器 | untested |
 | V32 | project-panel-sync：重连与草稿 | A、H | 重新订阅／完整回读看到已提交事实，未提交编辑及基线保留 | untested |
 | V33 | project-panel-sync：外部变化及未知提示 | F、H | 无通知也在准备／刷新边界重读，待核对／隔离明确显示，对应写入关闭 | untested（2026-11-14 部分实测：`local refresh` 边界总重读并报告 changes；UI 提示与写入关闭待第 5 段） |

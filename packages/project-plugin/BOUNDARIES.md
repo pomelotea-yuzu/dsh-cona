@@ -7,7 +7,7 @@
 | 目录 | 依赖及职责 | 边界验证 |
 |---|---|---|
 | `src/domain/` | JSON 数据结构、纯变换、树／依赖／完成条件校验、v1-plan 指纹；**无 Node、Cordis、React** | `tsconfig.domain.json`（`types: []`、纯 ES2022 lib）+ `scripts/check-boundaries.mjs` |
-| `src/application/` | 命令、查询、可信调用上下文、提交及恢复；调用 ports 和领域核心 | 3.1 `SourceService`；3.2 `LocalStateService`；3.5 基线与 `refresh`；4.1 `ProjectCommandService` 与每实例队列；回执与恢复在 4.2–4.5 |
+| `src/application/` | 命令、查询、可信调用上下文、提交及恢复；调用 ports 和领域核心 | 3.1 `SourceService`；3.2 `LocalStateService`；3.5 基线与 `refresh`；4.1 `ProjectCommandService` 与每实例队列；回执与恢复在 4.2–4.5；5.1 `ProjectSnapshotService` 与 `InMemoryChangeStream` |
 | `src/adapters/` | 文件、本机状态、DSH 会话和身份映射、Remote／工具入口 | 3.1／3.2 位置、Git、资料头、本机状态与锁；3.3 范围解析；3.4 原子替换与三态发布；Remote 在 3.6 |
 | `src/client/` | 面板、编辑草稿、同步状态机、字典；不写文件或复制业务规则 | 第 5 段实现 |
 | `src/host/` | Cordis 服务装配、依赖注入和生命周期 | 第 2 段实现 |
@@ -100,3 +100,17 @@
 - **未决阻塞**：同实例存在 `prepared`／`publishing` 记录时不接受新命令（`instance-blocked`），由显式 `recover` 解除。
 - **恢复不重放业务命令**：只比对磁盘与候选；匹配才补回执，不匹配一律待核对。`prepared` 只标未发布，历史 `committed` 只返结果。
 - **隔离标记独立于聚合**：写在 `quarantine/<instanceId>.json`，因此聚合损坏时仍能读到原因与保留的 operationId；解除必须显式确认。
+
+## 5.1 落地的边界（快照与失效流）
+
+| 文件 | 责任 | 不做什么 |
+|---|---|---|
+| `src/application/change-stream.ts` | 进程内水位、连接代际、订阅分发、代际替换关闭旧流 | 不读磁盘、不做授权、不携带内容；跨进程与重启后恢复不在范围 |
+| `src/application/snapshot.ts` | 一致读取（两次聚合 + 完整基线）、追读已知修订、树／摘要同源派生、`read`／`follow` 编排 | 不写资料、不写聚合、不写隔离标记；不在追读失败时返回树 |
+
+四条约束：
+
+- **通知不是内容来源**：失效流只传修订号；内容必须回读快照，避免第二条内容来源与本地草稿冲突。
+- **不输出半新半旧快照**：两次聚合读取之间修订／源代际变化即重读；重试耗尽返回 `unsynced` 且无树。
+- **同步状态必须显式**：`source-drift` 时给磁盘一致内容但标 `not-synced + requiresRefresh`；本机无观察基线时标 `basis: current-read`，不冒充已验收基线。
+- **代际与修订分开**：`sourceEpoch` 是替换边界（不比较大小）；`stateRevision` 同代际内单调；旧代际请求 `stale-connection`。

@@ -195,6 +195,8 @@ export interface LocalStateDeps {
   store: LocalStateStorePort;
   clock: () => string;
   newInstanceId: () => string;
+  /** 刷新成功后发布失效通知（第 5 段）；失败不影响刷新结果。 */
+  notify?: (result: { entry: RegistryEntry; aggregate: InstanceAggregate; changes: RefreshChanges }) => void;
 }
 
 export interface EnsureLocalRootResult {
@@ -522,6 +524,12 @@ export class LocalStateService {
           ...registry,
           instances: registry.instances.map((item) => (item.instanceId === entry.instanceId ? nextEntry : item)),
         });
+        // 刷新推进了源代际：对订阅者是替换边界，通知失败不改变刷新结果。
+        try {
+          this.deps.notify?.({ entry: nextEntry, aggregate: nextAggregate, changes });
+        } catch {
+          // 失效通知只是信号，订阅方仍会在下次回读时看到新基线。
+        }
         return { ok: true as const, entry: nextEntry, aggregate: nextAggregate, changes };
       });
 

@@ -1,6 +1,6 @@
 # dsh-cona-project
 
-DSH-Cona 项目管理插件（R1）。当前已交付第 1 段（v1 公开资料格式、领域校验与无宿主校验命令）、第 3 段全部（位置与接入、本机根与注册表、路径范围、三态发布、基线与刷新）与 4.1（命令封套、访问校验、不可变变换、每实例队列）。
+DSH-Cona 项目管理插件（R1）。当前已交付第 1 段（v1 公开资料格式、领域校验与无宿主校验命令）、第 3 段全部（位置与接入、本机根与注册表、路径范围、三态发布、基线与刷新）、第 4 段全部（命令封套、幂等回执、持久阶段、候选恢复、unknown 隔离）与 5.1（完整快照与先订阅再回读）。
 
 - 边界与决定：[BOUNDARIES.md](BOUNDARIES.md)
 - 公开协议：[formats/v1/plan-canonicalization.md](formats/v1/plan-canonicalization.md)（随包分发，资料根携带副本）
@@ -167,6 +167,32 @@ node lib/cli/command.js run --local-root <目录> --instance <id> \
   - `local unisolate --confirm offline-reviewed`：必须显式确认已人工核对，插件不提供“一键忽略”。
   - 解除后先用 `command recover` 核对未决操作，再按当前修订发新命令；直接沿用旧基线会被 `plan-conflict` 拒绝。
 
+## 快照与订阅（5.1）
+
+```bash
+# 完整快照：一次读取内的一致内容（小树、依赖、记录索引、摘要）+ 本机修订 + 同步状态
+node lib/cli/snapshot.js read --local-root <目录> --instance <id> [--generation <n>] [--min-state-revision <n>]
+
+# 订阅失效流：只打印 ready（代际、源代际、已知最高修订）
+node lib/cli/snapshot.js follow --local-root <目录> --instance <id>
+```
+
+Remote 契约（Cona 自有，namespace `conaProject`）：
+
+| 方法 | 请求 | 结果 |
+|---|---|---|
+| `conaProject.snapshot` | `{instanceId, connectionGeneration, minStateRevision?}` | `{status:'snapshot',snapshot}`／`{status:'unsynced',reason,attempts,detail}`／`{status:'rejected',code,…}` |
+| `conaProject.follow` | `{instanceId, afterStateRevision?}` | 失效流：首个事件 `ready`，其后 `committed／refreshed／source-replaced`；`source-replaced` 后流结束 |
+
+要点：
+
+- **先订阅再回读**：`follow` 拿到 `ready`（含 `connectionGeneration／sourceEpoch／stateRevision`）后，才用 `minStateRevision = ready.stateRevision` 调 `snapshot`。通知只是失效信号，内容一律回读。
+- **一致读取**：先读本机聚合 → 读头与全部引用正文并复核哈希 → 再读聚合；两次之间修订／源代际变化就重读。追不上已知修订或存在未决发布时返回 `unsynced`，**不返回半新半旧的树**。
+- **同步状态**：`synced`（`basis: local-observation｜current-read`）；磁盘头与本机观察不一致时 `not-synced(source-drift)` + `requiresRefresh: true`，面板不得显示“已保存”。
+- **拒绝码**：`forbidden／stale-connection／unknown-state／binding-expired／unsupported-format／invalid-project／body-hash-mismatch／body-missing／source-conflict-markers`。混合资料（头与正文不同版）不返回半截快照。
+- **代际与修订**：`sourceEpoch` 变化是替换边界，不比较大小；`stateRevision` 只在同代际内单调。旧代际快照请求直接 `stale-connection`。
+- **失效流只在进程内**：Host 重启后水位丢失，靠“重连即完整回读”弥补；跨进程通道不在 R1 范围。
+
 ## 实现状态
 
-第 1 段（1.1–1.5）、第 3 段（3.1–3.5）与 4.1 完成；4.2 起未开始，见 change `openspec/changes/establish-r1-project-plugin/tasks.md`。
+第 1 段（1.1–1.5）、第 3 段（3.1–3.5）、第 4 段（4.1–4.5）与 5.1 完成；5.2 起未开始，见 change `openspec/changes/establish-r1-project-plugin/tasks.md`。
