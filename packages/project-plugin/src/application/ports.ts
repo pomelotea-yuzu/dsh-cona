@@ -4,6 +4,13 @@
 
 import type { ProjectDocument, Sha256Fn, ValidationIssue } from '../domain/types.js';
 import type { LocationIssue, LocationKind, LocationPlan, LocationRequest } from './location.js';
+import type {
+  InstanceAggregate,
+  LocalRootPlan,
+  LocalRootView,
+  PrivateRootCheck,
+  Registry,
+} from './local-state.js';
 
 /** 资料源：选择、登记、读取与刷新公开资料根（位置解析见 LocationResolverPort；登记在 3.2）。 */
 export interface ProjectSourcePort {
@@ -105,3 +112,50 @@ export interface SourceServiceDeps {
 }
 
 export type { LocationIssue, LocationKind, LocationPlan, LocationRequest };
+
+/** 本机运行数据的稳定问题码（与公开资料问题分开，避免把私有失败混进资料诊断）。 */
+export interface LocalIssue {
+  code: string;
+  message: string;
+  path?: string;
+}
+
+export type RootRelation = 'same' | 'nested' | 'disjoint';
+
+/** 本机根解析端口：绝对路径 + 显示路径 + 两个根的关系判定。 */
+export interface LocalRootResolverPort {
+  resolveLocal(plan: LocalRootPlan): { ok: true; root: LocalRootView } | { ok: false; issues: LocalIssue[] };
+  /** 判断 source 与 local 是否相同、互相包含或互不相关（3.3 补 realpath 与大小写细节）。 */
+  relation(sourceRoot: string, localRoot: string): RootRelation;
+}
+
+/** 私有根检查端口：本机根若在 Git 工作副本内，必须无已跟踪文件且被忽略。 */
+export interface GitPrivateRootPort {
+  inspect(localRoot: string): PrivateRootCheck;
+}
+
+/** 锁信息：只用于诊断与显式释放，不自动按超时抢占。 */
+export interface LocalLockInfo {
+  pid: number;
+  hostname: string;
+  token: string;
+  acquiredAt: string;
+  purpose?: string;
+}
+
+/** 本机状态文件端口：注册表、实例聚合与独占锁；不含公开资料读写。 */
+export interface LocalStateStorePort {
+  ensureDirs(localRoot: string): Promise<void>;
+  readRegistry(localRoot: string): Promise<Registry>;
+  writeRegistry(localRoot: string, registry: Registry): Promise<void>;
+  readAggregate(localRoot: string, instanceId: string): Promise<InstanceAggregate | null>;
+  writeAggregate(localRoot: string, aggregate: InstanceAggregate): Promise<void>;
+  /** 独占锁内执行；同进程重复写者或锁被占用时返回 false 与诊断，不等待、不抢占。 */
+  withLock<T>(localRoot: string, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; issues: LocalIssue[] }>;
+  lockInfo(localRoot: string): Promise<LocalLockInfo | null>;
+  /** 显式释放遗留锁：需 force 或持有者 token 匹配；不提供自动超时释放。 */
+  releaseLock(
+    localRoot: string,
+    options: { force?: boolean; expectedToken?: string },
+  ): Promise<{ ok: true; released: boolean } | { ok: false; issues: LocalIssue[] }>;
+}

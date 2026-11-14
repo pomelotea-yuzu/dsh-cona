@@ -1,6 +1,6 @@
 # R1 验证矩阵
 
-日期：2026-11-12（2026-11-13、2026-11-14 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V25a `pass`、V25b `blocked`；V05／V38 已有文件层实测证据但宿主层未测，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
+日期：2026-11-12（2026-11-13、2026-11-14 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V25a `pass`、V25b `blocked`；V05／V10／V12／V38 已有文件层实测证据但宿主层或范围检查未测，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
 
 方法：`A` 为自动业务／Client 测试，`F` 为实际文件后端与中断注入，`H` 为独立 profile 的真实 DSH 检查，`E` 为真实 Agent 端到端。含多种方法的条目须分别记录观察；替身通过不代替真实宿主。运行时追加实际版本、步骤、预期／观察、证据定位与限制，状态仅 `pass / fail / blocked / untested`。
 
@@ -15,9 +15,9 @@
 | V07 | portable-project-data：正文发布边界 | A、F | 未引用正文不算发布，资料指令／远程 schema 不自动执行或获取 | untested |
 | V08 | portable-project-data：树、依赖、身份 | A | 重复 id、缺父、树环、依赖环及非法引用拒绝，批量拆分全部接受或拒绝 | untested |
 | V09 | portable-project-data：完成语义 | A | 过程结束和子节点全完成不标父完成，显式完成核对条件与所需证据 | untested |
-| V10 | portable-project-data：公开／私有隔离 | F、H | 三种位置均不泄漏实际 Session、机器路径、授权、草稿或回执，外部结论非本机复测 | untested |
+| V10 | portable-project-data：公开／私有隔离 | F、H | 三种位置均不泄漏实际 Session、机器路径、授权、草稿或回执，外部结论非本机复测 | untested（2026-11-14 部分实测：登记后 `project.json` 字节不变且不含实例 id／本机根；会话与回执字段待第 4／6 段填充后复测） |
 | V11 | portable-project-data：指纹、未知格式 | A、F | 随格式分发的 v1-plan 正文／17 个强制向量可读；主实现及第二份独立实现得到同一字节／散列并拒绝负向输入，排版／记录追加不变、目标／顺序改变；伪造哈希或未知格式不覆盖 | untested |
-| V12 | portable-project-data：实例与路径 | A、F | 同项目双目录身份稳定但实例隔离，越界／symlink／hardlink／大小写／权限结果按平台实记 | untested |
+| V12 | portable-project-data：实例与路径 | A、F | 同项目双目录身份稳定但实例隔离，越界／symlink／hardlink／大小写／权限结果按平台实记 | untested（2026-11-14 部分实测：同项目双目录生成两个实例、聚合互不覆盖；越界／symlink／hardlink／大小写／权限待 3.3） |
 | V13 | project-command-commit：统一服务、双修订 | A、F | 过程追加只推进状态，原规划可合法提交且保留新记录；实际规划冲突拒绝 | untested |
 | V14 | project-command-commit：幂等响应丢失 | A、F、H | 原样重试及重启后查到原 id／版本，不重复创建，不因自身推进版本误冲突 | untested |
 | V15 | project-command-commit：操作归属与回执访问 | A、H | 同 id 不同参数／归属拒绝，无权主体不能读结果，重连可读历史不恢复新写资格 | untested |

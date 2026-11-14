@@ -7,8 +7,8 @@
 | 目录 | 依赖及职责 | 边界验证 |
 |---|---|---|
 | `src/domain/` | JSON 数据结构、纯变换、树／依赖／完成条件校验、v1-plan 指纹；**无 Node、Cordis、React** | `tsconfig.domain.json`（`types: []`、纯 ES2022 lib）+ `scripts/check-boundaries.mjs` |
-| `src/application/` | 命令、查询、可信调用上下文、提交及恢复；调用 ports 和领域核心 | 3.1 已落位置计划与 `SourceService`（preview／create／attach）；命令封套在 3.4 |
-| `src/adapters/` | 文件、本机状态、DSH 会话和身份映射、Remote／工具入口 | 3.1 已落 `fs/`（位置解析、Git 只读观察、资料头读写、格式资源）；本机状态与 Remote 在 3.2–3.6 |
+| `src/application/` | 命令、查询、可信调用上下文、提交及恢复；调用 ports 和领域核心 | 3.1 已落位置计划与 `SourceService`（preview／create／attach）；3.2 已落本机根计划与 `LocalStateService`（ensureRoot／register／list／show）；命令封套在 3.4 |
+| `src/adapters/` | 文件、本机状态、DSH 会话和身份映射、Remote／工具入口 | 3.1 已落 `fs/`（位置解析、Git 只读观察、资料头读写、格式资源）；3.2 已落本机状态存储、私有根检查与锁；Remote 在 3.6 |
 | `src/client/` | 面板、编辑草稿、同步状态机、字典；不写文件或复制业务规则 | 第 5 段实现 |
 | `src/host/` | Cordis 服务装配、依赖注入和生命周期 | 第 2 段实现 |
 | `src/cli/` | 独立校验命令：纯 Node，无 DSH 服务 | `test/cli.test.ts` |
@@ -26,7 +26,8 @@
 ## 尚未验证（保持 untested）
 
 - 独立包构建、tarball 安装与真实宿主加载（第 2 段）。
-- 文件发布、本机聚合替换与恢复状态机（第 3–4 段）。
+- 公开资料的 `not-published／published／unknown` 三态、意图日志与恢复状态机（3.4）；本机聚合已实现基本原子替换，中断注入未做。
+- 路径范围、符号链接、hardlink 与大小写（3.3）。
 - 面板同步、i18n、聊天绑定与真实 Agent 演示（第 5–6 段）。
 
 ## 3.1 落地的边界（资料位置与基础接入）
@@ -45,3 +46,19 @@
 - 创建即生成一个根节点：v1 领域校验要求至少一个根（`root-count`），空 `nodes` 不是合法资料；「空规划哨兵」属命令层（3.4），不是空树文件。
 - 接入是纯读取：不写注册表／回执／授权，返回 `registry: "pending-3.2"` 明示未持久化。
 - 位置解析在 application 与 adapters 之间分工：种类与分段是应用语义，绝对路径与分隔符是平台语义。
+
+## 3.2 落地的边界（本机根、注册表与实例聚合）
+
+| 文件 | 责任 | 不做什么 |
+|---|---|---|
+| `src/application/local-state.ts` | 本机根计划、根隔离判定、注册表／聚合形状、`register／list／show` 编排 | 不拼路径、不直接读写文件、不做命令回执（3.4） |
+| `src/adapters/fs/local-root.ts` | 绝对根解析与显示；`same／nested／disjoint` 关系 | 不做 realpath 与大小写归一（3.3） |
+| `src/adapters/fs/local-state.ts` | `registry.json`、`instances/<id>/state.json` 原子写、`lock.json` 独占锁、进程内写者登记 | 不按超时抢占遗留锁；不在锁外写注册表 |
+| `src/adapters/fs/git-guard.ts` | 私有根检查：仓库内必须无已跟踪文件且被 ignore 覆盖 | 不改 `.gitignore`、不 add；git 不可用时标 `checked: false` |
+| `src/adapters/fs/git-run.ts` | 只读 Git 子进程调用（状态与私有根共用） | 不封装任何写操作 |
+
+三条约束：
+
+- 公开资料与本机运行数据物理分离：注册表与聚合存放绝对路径、实例 id、修订号，这些字段一律不进 `project.json`。
+- 注册顺序：先写实例聚合，再写注册表；注册表不得指向不存在的聚合。发现注册表指向缺失聚合时拒绝复用，不自动重建实例。
+- 锁语义：进程内同根第二个写者直接拒绝（`local-writer-duplicate`）；跨进程用 `wx` 独占创建 `lock.json`（`local-lock-held`），遗留锁只能通过 `--force` 或持有者 token 显式释放。

@@ -29,13 +29,11 @@ function hasParentSegment(value: string): boolean {
 }
 
 /**
- * 解析定位计划。拒绝：含 NUL、含 `..` 段、非绝对基准。
- * 不静默把相对路径补成当前进程目录——那会让位置取决于启动目录。
+ * 用户输入的绝对路径基础检查：拒绝 NUL、`..` 段与相对路径。
+ * 资料根与本机根共用同一套输入规则；realpath／大小写／符号链接在 3.3 补。
  */
-export function resolveLocation(plan: LocationPlan, options: LocationAdapterOptions = {}): ResolveLocationResult {
-  const homeDir = options.homeDir ?? os.homedir();
+export function validateAbsoluteInput(basePath: string): LocationIssue[] {
   const issues: LocationIssue[] = [];
-  const basePath = plan.basePath;
   if (basePath.includes('\0')) {
     issues.push({ code: 'location-path-invalid', message: '位置路径含 NUL 字符' });
   }
@@ -45,9 +43,19 @@ export function resolveLocation(plan: LocationPlan, options: LocationAdapterOpti
   if (!path.isAbsolute(basePath)) {
     issues.push({ code: 'location-root-not-absolute', message: '位置基准必须是绝对路径，不接受相对路径或当前目录推断' });
   }
+  return issues;
+}
+
+/**
+ * 解析定位计划。拒绝：含 NUL、含 `..` 段、非绝对基准。
+ * 不静默把相对路径补成当前进程目录——那会让位置取决于启动目录。
+ */
+export function resolveLocation(plan: LocationPlan, options: LocationAdapterOptions = {}): ResolveLocationResult {
+  const homeDir = options.homeDir ?? os.homedir();
+  const issues = validateAbsoluteInput(plan.basePath);
   if (issues.length > 0) return { ok: false, issues };
 
-  const base = path.resolve(basePath);
+  const base = path.resolve(plan.basePath);
   const root = plan.segments.length === 0 ? base : path.join(base, ...plan.segments);
   return {
     ok: true,
