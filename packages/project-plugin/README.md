@@ -144,7 +144,11 @@ node lib/cli/command.js run --local-root <目录> --instance <id> \
 - **原样重发**：摘要包含输入基线，因此重试必须用原请求的 `expectedPlanVersion／expectedPlanRevision／sourceEpoch`。记录里保存了这三项，`--operation` 重试时 CLI 会自动取回；否则重读当前基线会被判 `operation-mismatch`（这是正确行为，不是缺陷）。
 - **无业务变化**：规划命令未改变 `planVersion` 时只保存回执并推进 `stateRevision`，不重写资料头；重试不再推进修订。
 - **回执查询**：按归属隔离——`agent-work` 只能读同一 `workRunId` 的回执，owner 也不能读工具回执。
-- **本阶段未做**：`prepared／publishing／committed` 持久阶段、崩溃后候选核对、unknown-state 隔离（4.3–4.5）。
+- **持久阶段（4.3）**：`prepared`（候选头全文、候选哈希、正文清单、预算结果先落盘）→ `publishing`（明确可能已开始写文件）→ `committed`／`rejected`。正文在 `publishing` 之后写入，先正文后头；回执与双修订在同一次聚合替换中完成。
+- **未决即阻塞**：同一实例存在 `prepared`／`publishing` 记录时，新命令返回 `pending-reconciliation(instance-blocked)`，不继续写入；同 `operationId` 重试也只返回待核对。
+- **失败结局**：意图或 publishing 落盘失败 → `persistence-failed` 且不写任何文件；正文失败或头 `not-published` → 标 `rejected`（明确未发布）；头 `unknown` → 停在 `publishing`；回执未落盘 → `pending-reconciliation(stage=receipt)`。
+- **通知失败不撤回**：提交后的通知异常被吞掉，结果仍是 `committed`，回执可查。
+- **本阶段未做**：崩溃后按候选自动核对／补齐回执（4.4）、unknown-state 隔离与只读诊断（4.5）。
 
 ## 实现状态
 

@@ -263,12 +263,12 @@ test('未决意图：头结果未知后重试仍待核对，不重复发布', as
   const unknown = await failing.execute(OWNER, envelope);
   assert.equal(unknown.status, 'pending-reconciliation', JSON.stringify(unknown));
   const bytesAfterUnknown = fx.bytes();
-  assert.equal(aggregateOf(fx).operations[0]?.status, 'pending');
+  assert.equal(aggregateOf(fx).operations[0]?.status, 'publishing', '头结果未知时停在 publishing 阶段');
 
   // 正常服务重试同一 operationId：应返回待核对，而不是再发布一次。
   const retry = await fx.service.execute(OWNER, envelope);
   assert.equal(retry.status, 'pending-reconciliation', JSON.stringify(retry));
-  assert.equal(retry.status === 'pending-reconciliation' ? retry.stage : '', 'intent');
+  assert.equal(retry.status === 'pending-reconciliation' ? retry.stage : '', 'publishing');
   assert.deepEqual(fx.bytes(), bytesAfterUnknown, '不得重复发布');
 });
 
@@ -291,10 +291,14 @@ test('意图持久化失败：不发布资料，返回 persistence-failed', asyn
       },
     },
   });
-  const result = await failing.execute(OWNER, fx.envelope({ type: 'add-nodes', nodes: [] }));
+  const result = await failing.execute(
+    OWNER,
+    fx.envelope({ type: 'update-node', nodeId: ROOT_NODE, patch: { goal: '意图失败' } }),
+  );
   assert.equal(result.status, 'rejected', JSON.stringify(result));
   assert.equal(result.status === 'rejected' ? result.code : '', 'persistence-failed');
   assert.deepEqual(fx.bytes(), before, '意图未保存时不得发布资料');
+  assert.equal(aggregateOf(fx).operations.length, 0, '聚合写入失败时不留记录');
 });
 
 test('稳定生成 id：记录 id 在意图中固定并与回执一致', async () => {

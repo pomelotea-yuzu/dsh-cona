@@ -25,6 +25,7 @@ function usage(): string {
     "  command.js run --local-root <dir> --instance <id> --command '<json>'",
     '                [--source <dir>] [--epoch <n>] [--expected-plan-version <sha>] [--expected-plan-revision <n>]',
     '                [--trusted remote-owner|agent-work] [--work-run <id>] [--binding-version <n>] [--operation <uuid>]',
+    '  command.js receipt --local-root <dir> --instance <id> --operation <uuid> [--trusted …]',
   ].join('\n') + '\n';
 }
 
@@ -46,15 +47,19 @@ async function main(): Promise<number> {
     },
   });
   const commandName = positionals[0];
-  if (commandName !== 'run') {
+  if (commandName !== 'run' && commandName !== 'receipt') {
     process.stderr.write(usage());
     return 2;
   }
   const localRoot = values['local-root'];
   const instanceId = values['instance'];
   const commandJson = values['command'];
-  if (typeof localRoot !== 'string' || typeof instanceId !== 'string' || typeof commandJson !== 'string') {
-    process.stderr.write('run 需要 --local-root、--instance 与 --command\n' + usage());
+  if (typeof localRoot !== 'string' || typeof instanceId !== 'string') {
+    process.stderr.write('需要 --local-root 与 --instance\n' + usage());
+    return 2;
+  }
+  if (commandName === 'run' && typeof commandJson !== 'string') {
+    process.stderr.write('run 需要 --command\n' + usage());
     return 2;
   }
 
@@ -71,9 +76,28 @@ async function main(): Promise<number> {
     newRecordId: () => randomUUID(),
   });
 
+  if (commandName === 'receipt') {
+    if (typeof values['operation'] !== 'string') {
+      process.stderr.write('receipt 需要 --operation\n' + usage());
+      return 2;
+    }
+    const trustedReceipt: TrustedContext =
+      values['trusted'] === 'agent-work'
+        ? {
+            kind: 'agent-work',
+            workRunId: typeof values['work-run'] === 'string' ? values['work-run'] : '',
+            bindingVersion: typeof values['binding-version'] === 'string' ? Number(values['binding-version']) : 0,
+            instanceId,
+          }
+        : { kind: 'remote-owner' };
+    const receipt = await service.getReceipt(trustedReceipt, { instanceId, operationId: values['operation'] });
+    process.stdout.write(JSON.stringify({ command: commandName, ...receipt }) + '\n');
+    return receipt.status === 'not-found' || receipt.status === 'rejected' ? 1 : 0;
+  }
+
   let command: Command;
   try {
-    command = JSON.parse(commandJson) as Command;
+    command = JSON.parse(commandJson as string) as Command;
   } catch (error) {
     process.stderr.write(`命令 JSON 无法解析：${(error as Error).message}\n`);
     return 2;

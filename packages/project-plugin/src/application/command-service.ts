@@ -117,6 +117,8 @@ export interface ProjectCommandDeps {
   queue?: InstanceCommandQueue;
   /** 故障注入（仅测试）。 */
   hooks?: { publish?: PublishHooksPort; body?: PublishHooksPort; state?: PublishHooksPort };
+  /** 提交后通知（第 5 段接变更流）；失败不撤回提交。 */
+  notify?: (result: CommittedCommand) => void | Promise<void>;
 }
 
 /** 规划命令（除记录追加外的五类）。 */
@@ -277,8 +279,8 @@ export class ProjectCommandService {
     return {
       status: 'pending-reconciliation',
       operationId: record.operationId,
-      stage: 'intent',
-      message: '该操作已有未决意图；核对实际资料后再处理，不按新命令重跑',
+      stage: record.status,
+      message: `该操作处于 ${record.status} 阶段、尚未完成；先核对实际资料再按恢复流程处理，不按新命令重跑`,
     };
   }
 
@@ -309,6 +311,19 @@ export class ProjectCommandService {
     const digest = this.requestDigest(envelope);
     const existing = aggregate.operations.find((item) => item.operationId === envelope.operationId);
     if (existing !== undefined) return this.replay(existing, digest, origin);
+
+    // 同一实例最多一个未决发布意图；未决时阻止后续写入（先核对，不自动续写）。
+    const blocked = aggregate.operations.find(
+      (item) => item.status === 'prepared' || item.status === 'publishing',
+    );
+    if (blocked !== undefined) {
+      return {
+        status: 'pending-reconciliation',
+        operationId: blocked.operationId,
+        stage: 'instance-blocked',
+        message: `该实例存在未决操作 ${blocked.operationId}（${blocked.status}）；先核对实际资料，不接受新命令`,
+      };
+    }
 
     if (aggregate.revisions.plan !== envelope.expectedPlanRevision) {
       return {
@@ -354,12 +369,30 @@ export class ProjectCommandService {
 
     // 稳定生成 id：先落意图，重启或核对时复用同一批 id，不重复创建。
     const generated = this.allocateIds(envelope.command);
+    const candidate = this.buildCandidate(envelope.command, baseline.doc, baseline.baseline.records, generated);
+    if ('rejected' in candidate) return candidate.rejected;
+
+    const planning = envelope.command.type !== 'append-record';
+    const noBusinessChange = planning && candidate.doc.planVersion === baseline.baseline.planVersion;
+    const impact: 'plan' | 'state' = noBusinessChange ? 'state' : planning ? 'plan' : 'state';
+    const planRevision = impact === 'plan' ? aggregate.revisions.plan + 1 : aggregate.revisions.plan;
+    const stateRevision = aggregate.revisions.state + 1;
+    const rendered = this.deps.files.renderHead(candidate.doc);
+    const result: OperationResultSnapshot = {
+      impact,
+      planVersion: candidate.doc.planVersion,
+      planRevision,
+      stateRevision,
+      sourceEpoch: entry.sourceGeneration,
+      ...(candidate.recordId === undefined ? {} : { recordId: candidate.recordId }),
+      ...(candidate.recordPath === undefined ? {} : { recordPath: candidate.recordPath }),
+    };
     const now = this.deps.clock();
-    const intent: OperationRecord = {
+    const record: OperationRecord = {
       operationId: envelope.operationId,
       requestDigest: digest,
       origin,
-      status: 'pending',
+      status: 'prepared',
       createdAt: now,
       updatedAt: now,
       baseline: {
@@ -368,45 +401,77 @@ export class ProjectCommandService {
         sourceEpoch: envelope.sourceEpoch,
       },
       generated,
+      prepared: {
+        candidateHead: rendered.text,
+        candidateHeadHash: rendered.headHash,
+        candidatePlanVersion: candidate.doc.planVersion,
+        bodies: candidate.bodies,
+        impact,
+        planRevision,
+        stateRevision,
+        result,
+        writeHead: !noBusinessChange,
+      },
     };
-    const intentAggregate: InstanceAggregate = { ...aggregate, operations: [...aggregate.operations, intent] };
-    const intentSaved = await this.deps.store.replaceAggregateChecked(root, intentAggregate, this.deps.hooks?.state);
-    if (intentSaved.status !== 'saved') {
+
+    // 阶段 1：prepared（候选头与正文清单先持久化；失败则不发布任何内容）。
+    let working: InstanceAggregate = { ...aggregate, operations: [...aggregate.operations, record] };
+    const preparedSaved = await this.deps.store.replaceAggregateChecked(root, working, this.deps.hooks?.state);
+    if (preparedSaved.status !== 'saved') {
       return {
         status: 'rejected',
         code: 'persistence-failed',
-        message: `意图未能明确持久化（${intentSaved.stage}）；不开始资料发布`,
+        message: `prepared 意图未能持久化（${preparedSaved.stage}）；不开始发布`,
       };
     }
 
-    const prepared = await this.prepare(
-      envelope.command,
-      baseline.doc,
-      baseline.baseline.records,
-      entry.sourceRoot,
-      generated,
-    );
-    if ('rejected' in prepared) {
-      await this.finishRejected(root, intentAggregate, envelope.operationId, prepared.rejected);
-      return prepared.rejected;
-    }
-    if ('pending' in prepared) {
-      return {
-        status: 'pending-reconciliation',
-        operationId: envelope.operationId,
-        stage: prepared.pending.stage,
-        message: prepared.pending.message,
+    // 阶段 2：publishing（明确“可能已开始写文件”，恢复时按候选核对）。
+    working = this.withRecord(working, envelope.operationId, (item) => ({ ...item, status: 'publishing', updatedAt: this.deps.clock() }));
+    const publishingSaved = await this.deps.store.replaceAggregateChecked(root, working, this.deps.hooks?.state);
+    if (publishingSaved.status !== 'saved') {
+      const rejected: RejectedCommand = {
+        status: 'rejected',
+        code: 'persistence-failed',
+        message: `publishing 阶段未能持久化（${publishingSaved.stage}）；未写任何文件`,
       };
+      await this.finishRejected(root, working, envelope.operationId, rejected);
+      return rejected;
     }
 
-    const planning = envelope.command.type !== 'append-record';
-    const noBusinessChange = planning && prepared.doc.planVersion === baseline.baseline.planVersion;
+    // 阶段 3：先写不可变正文，再发布资料头。
+    for (const body of candidate.bodies) {
+      const outcome = await this.deps.files.writeBody(
+        entry.sourceRoot,
+        body.recordId,
+        body.contentHash,
+        body.bytesData,
+        this.deps.hooks?.body,
+      );
+      if (outcome.status === 'conflict' || outcome.status === 'not-published') {
+        const rejected: RejectedCommand = {
+          status: 'rejected',
+          code: 'persistence-failed',
+          message: `正文写入未完成（${outcome.status}）：${outcome.detail ?? ''}`,
+        };
+        await this.finishRejected(root, working, envelope.operationId, rejected);
+        return rejected;
+      }
+      if (outcome.status === 'unknown') {
+        return {
+          status: 'pending-reconciliation',
+          operationId: envelope.operationId,
+          stage: 'body',
+          message: '正文写入结果未知；保留原操作 id，先核对资料根',
+        };
+      }
+    }
+
     let headHash = baseline.baseline.headHash;
-    if (!noBusinessChange) {
-      const written = await this.deps.files.writeDocument(entry.sourceRoot, prepared.doc, this.deps.hooks?.publish);
+    if (record.prepared?.writeHead !== false) {
+      const written = await this.deps.files.writeDocument(entry.sourceRoot, candidate.doc, this.deps.hooks?.publish);
       if (!written.ok) {
         if (written.status === 'unknown') {
-          // unknown 不能当作未提交：资料可能已替换，必须保留原操作 id 待核对。
+          // unknown 不能当作未提交：资料可能已替换，保留 publishing 意图待核对。
           return {
             status: 'pending-reconciliation',
             operationId: envelope.operationId,
@@ -420,46 +485,38 @@ export class ProjectCommandService {
           message: '资料头发布未完成',
           issues: written.issues,
         };
-        await this.finishRejected(root, intentAggregate, envelope.operationId, rejected);
+        await this.finishRejected(root, working, envelope.operationId, rejected);
         return rejected;
       }
       headHash = written.headHash;
     }
 
-    // 无业务变化：首次仅保存回执并推进状态修订（不改规划修订，也不重写资料头）。
-    const impact: 'plan' | 'state' = noBusinessChange ? 'state' : planning ? 'plan' : 'state';
-    const nextPlanRevision = impact === 'plan' ? aggregate.revisions.plan + 1 : aggregate.revisions.plan;
-    const nextStateRevision = aggregate.revisions.state + 1;
-
-    const result: OperationResultSnapshot = {
-      impact,
-      planVersion: prepared.doc.planVersion,
-      planRevision: nextPlanRevision,
-      stateRevision: nextStateRevision,
-      sourceEpoch: entry.sourceGeneration,
-      ...(prepared.recordId === undefined ? {} : { recordId: prepared.recordId }),
-      ...(prepared.recordPath === undefined ? {} : { recordPath: prepared.recordPath }),
+    // 阶段 4：完成回执与双修订在同一次聚合替换中保存。
+    const receipt: OperationRecord = {
+      ...(record as OperationRecord),
+      status: 'committed',
+      updatedAt: this.deps.clock(),
+      result,
     };
-    const receipt: OperationRecord = { ...intent, status: 'committed', updatedAt: this.deps.clock(), result };
     const receiptAggregate: InstanceAggregate = {
-      ...intentAggregate,
-      revisions: { plan: nextPlanRevision, state: nextStateRevision },
+      ...working,
+      revisions: { plan: planRevision, state: stateRevision },
       lastObservation: {
-        planVersion: prepared.doc.planVersion,
+        planVersion: candidate.doc.planVersion,
         headHash,
-        records: prepared.records,
+        records: candidate.records,
         observedAt: this.deps.clock(),
       },
-      operations: intentAggregate.operations.map((item) =>
-        item.operationId === envelope.operationId ? receipt : item,
-      ),
+      operations: this.withRecord(working, envelope.operationId, () => receipt).operations,
     };
     const saved = await this.deps.store.replaceAggregateChecked(root, receiptAggregate, this.deps.hooks?.state);
     if (saved.status === 'not-saved') {
+      // 资料已发布、回执未落盘：属于待核对，不能返回“可重试的失败”。
       return {
-        status: 'rejected',
-        code: 'persistence-failed',
-        message: `资料已发布但本机回执未保存（${saved.stage}）：${saved.detail ?? ''}`,
+        status: 'pending-reconciliation',
+        operationId: envelope.operationId,
+        stage: 'receipt',
+        message: `资料已发布但本机回执未保存（${saved.stage}）：${saved.detail ?? ''}；保留原操作 id 核对`,
       };
     }
     if (saved.status === 'unknown-state') {
@@ -471,7 +528,27 @@ export class ProjectCommandService {
       };
     }
 
-    return { status: 'committed', operationId: envelope.operationId, ...result };
+    const committed: CommittedCommand = { status: 'committed', operationId: envelope.operationId, ...result };
+    // 通知在提交之后：失败不撤回事实，也不改变返回结果。
+    if (this.deps.notify !== undefined) {
+      try {
+        await this.deps.notify(committed);
+      } catch {
+        // 通知失败不回滚、不重复执行。
+      }
+    }
+    return committed;
+  }
+
+  private withRecord(
+    aggregate: InstanceAggregate,
+    operationId: string,
+    update: (record: OperationRecord) => OperationRecord,
+  ): InstanceAggregate {
+    return {
+      ...aggregate,
+      operations: aggregate.operations.map((item) => (item.operationId === operationId ? update(item) : item)),
+    };
   }
 
   /** 明确拒绝也要留回执：重试同一 operationId 不得重新执行。 */
@@ -482,38 +559,34 @@ export class ProjectCommandService {
     rejected: RejectedCommand,
   ): Promise<void> {
     const now = this.deps.clock();
-    const next: InstanceAggregate = {
-      ...aggregate,
-      operations: aggregate.operations.map((item) =>
-        item.operationId === operationId
-          ? {
-              ...item,
-              status: 'rejected' as const,
-              updatedAt: now,
-              rejection: { code: rejected.code, message: rejected.message },
-            }
-          : item,
-      ),
-    };
+    const next = this.withRecord(aggregate, operationId, (item) => ({
+      ...item,
+      status: 'rejected',
+      updatedAt: now,
+      rejection: { code: rejected.code, message: rejected.message },
+    }));
     // 回执写入失败不改变“明确拒绝”的事实：没有发布任何内容，重试仍是安全的。
     await this.deps.store.replaceAggregateChecked(root, next);
   }
 
   /**
-   * 构造候选文档。记录命令先写不可变正文；规划命令只做变换。
-   * 发布资料头由 commit 统一处理（无业务变化时不重写）。
+   * 构造候选文档与待写正文（不写文件）。
+   * 记录命令在此计算哈希与路径，正文实际写入发生在 publishing 阶段之后。
    */
-  private async prepare(
+  private buildCandidate(
     command: Command,
     doc: ProjectDocument,
     baselineRecords: { path: string; contentHash: string; observedHash: string }[],
-    sourceRoot: string,
     generated: { recordId?: string; nodeIds?: string[] },
-  ): Promise<
-    | { doc: ProjectDocument; records: typeof baselineRecords; recordId?: string; recordPath?: string }
-    | { rejected: RejectedCommand }
-    | { pending: { stage: string; message: string } }
-  > {
+  ):
+    | {
+        doc: ProjectDocument;
+        records: typeof baselineRecords;
+        bodies: { recordId: string; contentHash: string; path: string; bytes: number; bytesData: Uint8Array }[];
+        recordId?: string;
+        recordPath?: string;
+      }
+    | { rejected: RejectedCommand } {
     if (command.type !== 'append-record') {
       const applied = applyPlanCommand(doc, this.materialize(command, generated.nodeIds ?? []), this.deps.sha256);
       if (!applied.ok) {
@@ -526,35 +599,13 @@ export class ProjectCommandService {
           },
         };
       }
-      return { doc: applied.doc, records: baselineRecords };
+      return { doc: applied.doc, records: baselineRecords, bodies: [] };
     }
 
-    const bodyBytes = new TextEncoder().encode(command.body);
-    const contentHash = 'sha256:' + this.deps.sha256(bodyBytes);
+    const bytesData = new TextEncoder().encode(command.body);
+    const contentHash = 'sha256:' + this.deps.sha256(bytesData);
     const id = generated.recordId ?? this.deps.newRecordId();
     const recordPath = `records/${id}/${contentHash.slice('sha256:'.length)}.md`;
-    const body: BodyWriteOutcome = await this.deps.files.writeBody(
-      sourceRoot,
-      id,
-      contentHash,
-      bodyBytes,
-      this.deps.hooks?.body,
-    );
-    if (body.status === 'conflict' || body.status === 'not-published') {
-      return {
-        rejected: {
-          status: 'rejected',
-          code: 'persistence-failed',
-          message: `正文写入未完成（${body.status}）：${body.detail ?? ''}`,
-        },
-      };
-    }
-    if (body.status === 'unknown') {
-      return {
-        pending: { stage: 'body', message: '正文写入结果未知；保留原操作 id，先核对资料根' },
-      };
-    }
-
     const appended = appendRecordIndex(doc.records, {
       id,
       kind: command.kind,
@@ -579,6 +630,7 @@ export class ProjectCommandService {
     return {
       doc: validated.doc,
       records: [...baselineRecords, { path: recordPath, contentHash, observedHash: contentHash }],
+      bodies: [{ recordId: id, contentHash, path: recordPath, bytes: bytesData.length, bytesData }],
       recordId: id,
       recordPath,
     };

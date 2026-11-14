@@ -91,6 +91,8 @@ export interface SourceFilesPort {
   ): Promise<
     { ok: true; headHash: string } | { ok: false; status: 'not-published' | 'unknown'; issues: ValidationIssue[] }
   >;
+  /** 渲染资料头文本与其哈希（用于 prepared 意图保存候选字节，发布前不含磁盘状态）。 */
+  renderHead(doc: ProjectDocument): { text: string; headHash: string };
   /** 不可变正文写入（内容寻址）；已存在同字节为幂等，不同字节为冲突。 */
   writeBody(
     root: string,

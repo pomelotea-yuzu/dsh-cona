@@ -91,8 +91,34 @@ export interface OperationResultSnapshot {
   recordPath?: string;
 }
 
+/** prepared 意图中登记的正文写入项（内容寻址，可重放核对）。 */
+export interface PreparedBody {
+  recordId: string;
+  contentHash: string;
+  path: string;
+  bytes: number;
+}
+
 /**
- * 操作记录（tasks 4.2）：执行前写 pending 意图，完成后写回执。
+ * prepared 意图（tasks 4.3，design §6 步骤 4）：候选头字节、正文清单、生成 id 与预算结果。
+ * 保存候选头全文，恢复时可判断“当前内容是否精确对应候选”，不必猜。
+ */
+export interface PreparedIntent {
+  candidateHead: string;
+  candidateHeadHash: string;
+  candidatePlanVersion: string;
+  bodies: PreparedBody[];
+  impact: 'plan' | 'state';
+  planRevision: number;
+  stateRevision: number;
+  /** 预算好的回执结果；写入回执时直接采用，不重算。 */
+  result: OperationResultSnapshot;
+  /** 无业务变化时不重写资料头。 */
+  writeHead: boolean;
+}
+
+/**
+ * 操作记录（tasks 4.2／4.3）：`prepared` → `publishing` → `committed`／`rejected`。
  * `requestDigest` 覆盖命令、业务参数与输入基线，不含 operationId 或重连临时标识。
  * `generated` 保存本操作的稳定生成 id，重启后核对或补写时复用，不重新生成。
  */
@@ -100,12 +126,13 @@ export interface OperationRecord {
   operationId: string;
   requestDigest: string;
   origin: OperationOrigin;
-  status: 'pending' | 'committed' | 'rejected';
+  status: 'prepared' | 'publishing' | 'committed' | 'rejected';
   createdAt: string;
   updatedAt: string;
   /** 原请求的输入基线：响应丢失后要“原样重发”，必须能取回这三项，而不是重读当前基线。 */
   baseline: { expectedPlanVersion: string; expectedPlanRevision: number; sourceEpoch: number };
   generated: { recordId?: string; nodeIds?: string[] };
+  prepared?: PreparedIntent;
   result?: OperationResultSnapshot;
   rejection?: { code: string; message: string };
 }

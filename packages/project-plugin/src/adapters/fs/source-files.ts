@@ -9,6 +9,7 @@ import type { Sha256Fn } from '../../domain/types.js';
 import { readProjectDocument } from './project-json.js';
 import { readInScope } from './path-scope.js';
 import { publishProjectDocument, writeBodyImmutable } from './publish.js';
+import { serializeProjectDocument } from './project-json.js';
 
 /** 随包格式资源在资料根内的相对落点（design §3）。 */
 export const FORMAT_ASSET_FILES: readonly { source: string; target: string }[] = [
@@ -98,6 +99,10 @@ export function createSourceFiles(formatsDir: string, sha256: Sha256Fn): SourceF
           },
         ],
       };
+    },
+    renderHead: (doc) => {
+      const text = serializeProjectDocument(doc);
+      return { text, headHash: 'sha256:' + sha256(new TextEncoder().encode(text)) };
     },
     writeBody: (root, recordId, contentHash, bytes, hooks) =>
       writeBodyImmutable(root, recordId, contentHash, bytes, hooks === undefined ? {} : { hooks }),
