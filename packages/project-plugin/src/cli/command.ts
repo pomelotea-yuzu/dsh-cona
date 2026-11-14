@@ -26,6 +26,7 @@ function usage(): string {
     '                [--source <dir>] [--epoch <n>] [--expected-plan-version <sha>] [--expected-plan-revision <n>]',
     '                [--trusted remote-owner|agent-work] [--work-run <id>] [--binding-version <n>] [--operation <uuid>]',
     '  command.js receipt --local-root <dir> --instance <id> --operation <uuid> [--trusted …]',
+    '  command.js recover --local-root <dir> --instance <id> --operation <uuid> [--trusted …]',
   ].join('\n') + '\n';
 }
 
@@ -47,7 +48,7 @@ async function main(): Promise<number> {
     },
   });
   const commandName = positionals[0];
-  if (commandName !== 'run' && commandName !== 'receipt') {
+  if (commandName !== 'run' && commandName !== 'receipt' && commandName !== 'recover') {
     process.stderr.write(usage());
     return 2;
   }
@@ -76,7 +77,7 @@ async function main(): Promise<number> {
     newRecordId: () => randomUUID(),
   });
 
-  if (commandName === 'receipt') {
+  if (commandName === 'receipt' || commandName === 'recover') {
     if (typeof values['operation'] !== 'string') {
       process.stderr.write('receipt 需要 --operation\n' + usage());
       return 2;
@@ -90,9 +91,13 @@ async function main(): Promise<number> {
             instanceId,
           }
         : { kind: 'remote-owner' };
-    const receipt = await service.getReceipt(trustedReceipt, { instanceId, operationId: values['operation'] });
-    process.stdout.write(JSON.stringify({ command: commandName, ...receipt }) + '\n');
-    return receipt.status === 'not-found' || receipt.status === 'rejected' ? 1 : 0;
+    const request = { instanceId, operationId: values['operation'] };
+    const result =
+      commandName === 'recover'
+        ? await service.recover(trustedReceipt, request)
+        : await service.getReceipt(trustedReceipt, request);
+    process.stdout.write(JSON.stringify({ command: commandName, ...result }) + '\n');
+    return result.status === 'committed' ? 0 : 1;
   }
 
   let command: Command;

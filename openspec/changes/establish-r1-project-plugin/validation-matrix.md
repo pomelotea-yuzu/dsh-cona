@@ -1,6 +1,6 @@
 # R1 验证矩阵
 
-日期：2026-11-12（2026-11-13、2026-11-14 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V12／V25a `pass`，V25b `blocked`；V05／V10／V11／V13／V14／V15／V16／V17／V18／V21／V22／V33／V38 已有文件层部分证据但宿主层或后续阶段未做，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
+日期：2026-11-12（2026-11-13、2026-11-14 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V12／V25a `pass`，V25b `blocked`；V05／V10／V11／V13／V14／V15／V16／V17／V18／V19／V21／V22／V33／V38 已有文件层部分证据但宿主层或后续阶段未做，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
 
 方法：`A` 为自动业务／Client 测试，`F` 为实际文件后端与中断注入，`H` 为独立 profile 的真实 DSH 检查，`E` 为真实 Agent 端到端。含多种方法的条目须分别记录观察；替身通过不代替真实宿主。运行时追加实际版本、步骤、预期／观察、证据定位与限制，状态仅 `pass / fail / blocked / untested`。
 
@@ -23,8 +23,8 @@
 | V15 | project-command-commit：操作归属与回执访问 | A、H | 同 id 不同参数／归属拒绝，无权主体不能读结果，重连可读历史不恢复新写资格 | untested（2026-11-14 部分实测：缺可信上下文、空 WorkRun、实例不符均 `forbidden`；同 id 换归属拒绝、`getReceipt` 按 `workRunId` 隔离、owner 不能读工具回执均已测。重连后的真实权限边界待 6.x） |
 | V16 | project-command-commit：无变化、纯查询 | A | 首次无业务变化仅保存新回执并推进状态；查询／已完成重试不推进修订 | untested（2026-11-14 已实测：无业务变化 `impact=state`、planRevision 不变、资料字节不变；重试不再推进修订） |
 | V17 | project-command-commit：意图／正文／头中断 | F | 意图失败不发布，正文先于头，孤立正文不显示，头可能发布时不能误报未提交 | untested（2026-11-14 已实测文件层：prepared／publishing 写入失败均不写文件；正文先于头；头 not-published 时正文已写但索引未引用；rename 后 unknown 停在 publishing。崩溃后自动核对属 4.4） |
-| V18 | project-command-commit：候选核对／回执中断 | F | 精确候选可补原回执且修订只推进一次，恢复来源明确，不虚构作者或外部动作 | untested（2026-11-14 部分实测：回执写入失败返回 `pending-reconciliation(stage=receipt)` 且停在 publishing，不误报未提交；自动补回执属 4.4） |
-| V19 | project-command-commit：旧基线、分叉及 Git 回退 | F | publishing 后原基线重现仍待核对；完成旧回执只作历史，不重放到当前资料 | untested |
+| V18 | project-command-commit：候选核对／回执中断 | F | 精确候选可补原回执且修订只推进一次，恢复来源明确，不虚构作者或外部动作 | untested（2026-11-14 文件层已实测：候选头与正文精确匹配后补回执 `recovered:true`、双修订取 max 只推一次、重复恢复返历史；`prepared` 标 `not-published`；回执未落盘 `stage=receipt`。真实入口待 5／6 段） |
+| V19 | project-command-commit：旧基线、分叉及 Git 回退 | F | publishing 后原基线重现仍待核对；完成旧回执只作历史，不重放到当前资料 | untested（2026-11-14 文件层已实测：退回原基线 `stage=reverted`、分叉 `stage=diverged` 均待核对；committed 后资料回退，重试／查询／恢复只返历史且不重放） |
 | V20 | project-command-commit：unknown-state | F、H | 文件未知停止源新写，本机未知停止实例读写，UI 标未同步，不换 id 盲重试 | untested |
 | V21 | project-command-commit：外部顺序编辑 | F | 追加索引保留，冲突标记／非法树／未知 schema 不被旧内存覆盖，源重载使旧绑定失效 | untested（2026-11-14 部分实测：外部追加记录被刷新接纳且不重复计数；冲突标记／非法树／未知 schema 拒绝且不推进基线；旧绑定失效待 4.x） |
 | V22 | project-command-commit：通知失败和发布中取消 | F、H | 已提交事实仍可查，发布中取消按实际结果核对，不回滚或重复应用 | untested（2026-11-14 部分实测：通知抛错仍 `committed` 且回执可查；发布中取消未做，待 6.x 与 UI 入口） |

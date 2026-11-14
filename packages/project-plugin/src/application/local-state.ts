@@ -106,6 +106,8 @@ export interface PreparedBody {
 export interface PreparedIntent {
   candidateHead: string;
   candidateHeadHash: string;
+  /** 提交前磁盘头的哈希：恢复时用于区分“候选已发布”与“退回原基线”。 */
+  originalHeadHash: string;
   candidatePlanVersion: string;
   bodies: PreparedBody[];
   impact: 'plan' | 'state';
@@ -135,6 +137,8 @@ export interface OperationRecord {
   prepared?: PreparedIntent;
   result?: OperationResultSnapshot;
   rejection?: { code: string; message: string };
+  /** true 表示回执由恢复核对补齐，不证明作者或文件外动作。 */
+  recovered?: boolean;
 }
 
 /**

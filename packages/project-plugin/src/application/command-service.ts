@@ -105,6 +105,19 @@ export type CommandResult = CommittedCommand | RejectedCommand | PendingCommand;
 
 export type ReceiptResult = CommandResult | { status: 'not-found' };
 
+/**
+ * 恢复结论（tasks 4.4）：
+ * - committed + `history`：直接返回历史回执，不重放；
+ * - committed + `candidate-matched`：磁盘内容精确对应候选，已补回执并一次性补修订；
+ * - rejected + `not-published`：prepared 阶段被终止，标记未发布，保留原 operationId；
+ * - pending-reconciliation：原基线重现或已分叉，无法判定，不自动重试。
+ */
+export type RecoveryResult =
+  | (CommittedCommand & { replayed: true; recovery: 'history' | 'candidate-matched' })
+  | (RejectedCommand & { recovery?: 'history' | 'not-published' })
+  | PendingCommand
+  | { status: 'not-found' };
+
 export interface ProjectCommandDeps {
   /** R1 单一本机根；多根部署不在支持范围。 */
   localRoot: string;
@@ -233,6 +246,138 @@ export class ProjectCommandService {
       return { status: 'rejected', code: 'forbidden', message: '该回执属于其他调用归属，不提供正文或结果' };
     }
     return this.replay(record, record.requestDigest, origin);
+  }
+
+  /**
+   * 显式恢复核对（tasks 4.4）：只核对磁盘与意图，不重放业务命令。
+   * 必须在实例队列内执行，保证与正常提交串行。
+   */
+  async recover(
+    ctx: TrustedContext | undefined,
+    request: { instanceId: string; operationId: string },
+  ): Promise<RecoveryResult> {
+    const authorized = checkTrustedContext(ctx);
+    if (!authorized.ok) return { status: 'rejected', code: authorized.code, message: authorized.message };
+    return this.queue.run(request.instanceId, async () => {
+      const root = this.deps.localRoot;
+      const registry = await this.deps.store.readRegistry(root);
+      const entry = registry.instances.find((item) => item.instanceId === request.instanceId);
+      if (entry === undefined) return { status: 'not-found' };
+      const aggregate = await this.deps.store.readAggregate(root, request.instanceId);
+      if (aggregate === null) return { status: 'not-found' };
+      const record = aggregate.operations.find((item) => item.operationId === request.operationId);
+      if (record === undefined) return { status: 'not-found' };
+      const origin = originOf(ctx as TrustedContext);
+      if (!sameOrigin(record.origin, origin)) {
+        return { status: 'rejected', code: 'forbidden', message: '该操作属于其他调用归属，不提供恢复或结果' };
+      }
+
+      const replayed = this.replay(record, record.requestDigest, origin);
+      if (record.status === 'committed' || record.status === 'rejected') {
+        return { ...replayed, recovery: 'history' } as RecoveryResult;
+      }
+
+      if (record.status === 'prepared') {
+        // 仍在 prepared：可证明未进入发布阶段。标记终止，保留 operationId，不隐式重放。
+        const rejected: RejectedCommand = {
+          status: 'rejected',
+          code: 'not-published',
+          message: '该操作停在 prepared，未进入发布；已标记为未发布。如需重做请使用明确的新命令',
+        };
+        await this.finishRejected(root, aggregate, record.operationId, rejected);
+        return { ...rejected, recovery: 'not-published' };
+      }
+
+      // publishing：逐项比对当前磁盘与候选，不猜“已提交”或“未提交”。
+      const prepared = record.prepared;
+      if (prepared === undefined) {
+        return {
+          status: 'pending-reconciliation',
+          operationId: record.operationId,
+          stage: 'missing-candidate',
+          message: '操作处于 publishing 但缺少候选记录；无法核对，保持待核对',
+        };
+      }
+      const current = await readSourceBaseline(this.deps.files, entry.sourceRoot, this.deps.sha256, this.deps.clock);
+      if (!current.ok) {
+        return {
+          status: 'pending-reconciliation',
+          operationId: record.operationId,
+          stage: 'invalid-project',
+          message: '恢复时资料不可读或不合法；保留待核对并停止该源写入',
+        };
+      }
+      const headMatched = current.baseline.headHash === prepared.candidateHeadHash;
+      const bodiesMatched = prepared.bodies.every((body) =>
+        current.baseline.records.some((item) => item.path === body.path && item.observedHash === body.contentHash),
+      );
+      if (headMatched && bodiesMatched) {
+        const mergedRevisions = {
+          plan: Math.max(aggregate.revisions.plan, prepared.planRevision),
+          state: Math.max(aggregate.revisions.state, prepared.stateRevision),
+        };
+        const receipt: OperationRecord = {
+          ...record,
+          status: 'committed',
+          updatedAt: this.deps.clock(),
+          result: prepared.result,
+          recovered: true,
+        };
+        const next: InstanceAggregate = {
+          ...aggregate,
+          revisions: mergedRevisions,
+          lastObservation: {
+            planVersion: current.baseline.planVersion,
+            headHash: current.baseline.headHash,
+            records: current.baseline.records.map((item) => ({
+              path: item.path,
+              contentHash: item.contentHash,
+              observedHash: item.observedHash,
+            })),
+            observedAt: this.deps.clock(),
+          },
+          operations: aggregate.operations.map((item) =>
+            item.operationId === record.operationId ? receipt : item,
+          ),
+        };
+        const saved = await this.deps.store.replaceAggregateChecked(root, next, this.deps.hooks?.state);
+        if (saved.status === 'not-saved') {
+          return {
+            status: 'pending-reconciliation',
+            operationId: record.operationId,
+            stage: 'receipt',
+            message: `候选已匹配但回执未保存（${saved.stage}）；保留原操作 id 再核对`,
+          };
+        }
+        if (saved.status === 'unknown-state') {
+          return {
+            status: 'pending-reconciliation',
+            operationId: record.operationId,
+            stage: 'local-state',
+            message: '候选已匹配，但本机聚合写入结果未知；先核对本机数据',
+          };
+        }
+        return {
+          status: 'committed',
+          operationId: record.operationId,
+          ...prepared.result,
+          planRevision: mergedRevisions.plan,
+          stateRevision: mergedRevisions.state,
+          replayed: true,
+          recovery: 'candidate-matched',
+        };
+      }
+
+      const reverted = current.baseline.headHash === prepared.originalHeadHash;
+      return {
+        status: 'pending-reconciliation',
+        operationId: record.operationId,
+        stage: reverted ? 'reverted' : 'diverged',
+        message: reverted
+          ? '当前资料等于原基线，无法排除“发布后被回退”；保持待核对，不宣称未提交'
+          : '当前资料既不匹配候选也不等于原基线（部分匹配或分叉）；保持待核对，不自动覆盖',
+      };
+    });
   }
 
   private checkEnvelope(envelope: CommandEnvelope): CommandResult | null {
@@ -404,6 +549,7 @@ export class ProjectCommandService {
       prepared: {
         candidateHead: rendered.text,
         candidateHeadHash: rendered.headHash,
+        originalHeadHash: baseline.baseline.headHash,
         candidatePlanVersion: candidate.doc.planVersion,
         bodies: candidate.bodies,
         impact,
@@ -566,7 +712,7 @@ export class ProjectCommandService {
       rejection: { code: rejected.code, message: rejected.message },
     }));
     // 回执写入失败不改变“明确拒绝”的事实：没有发布任何内容，重试仍是安全的。
-    await this.deps.store.replaceAggregateChecked(root, next);
+    await this.deps.store.replaceAggregateChecked(root, next, this.deps.hooks?.state);
   }
 
   /**

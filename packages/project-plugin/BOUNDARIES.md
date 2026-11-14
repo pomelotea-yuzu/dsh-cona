@@ -86,7 +86,7 @@
 |---|---|---|
 | `src/domain/commands.ts` | `update-node`／`set-node-status`／记录索引追加的不可变变换；`applyPlanCommand` 重算指纹并跑完整校验 | 不生成 id、不读写文件、不做授权 |
 | `src/application/command-queue.ts` | 每实例串行队列（失败不阻塞后续） | 不自动重试、不合并命令 |
-| `src/application/command-service.ts` | 可信上下文判据、封套形态校验、提交前重读、双修订推进、三态结局；4.2 幂等重放与回执查询；4.3 `prepared／publishing／committed／rejected` 阶段、未决阻塞、通知失败不回滚 | 不做崩溃后自动核对与 unknown 隔离（4.4–4.5） |
+| `src/application/command-service.ts` | 可信上下文判据、封套形态校验、提交前重读、双修订推进、三态结局；4.2 幂等重放与回执查询；4.3 四阶段与未决阻塞；4.4 候选核对与恢复 | 不做 unknown 隔离与只读诊断（4.5） |
 
 四条约束：
 
@@ -97,4 +97,5 @@
 - **幂等在冲突判断之前**：先查 `(instanceId, operationId)`，同摘要同归属返回历史结果；不同摘要或归属拒绝；未决保持待核对。
 - **原样重发需要原基线**：记录保存 `expectedPlanVersion／expectedPlanRevision／sourceEpoch`，不接受“重读当前基线再当重试”。
 - **阶段先落盘再写文件**：`prepared` 保存候选头全文与正文清单，`publishing` 之后才写正文与头；任一阶段未确认即停在原阶段，不自动续写。
-- **未决阻塞**：同实例存在 `prepared`／`publishing` 记录时不接受新命令（`instance-blocked`），由 4.4 的显式核对解除。
+- **未决阻塞**：同实例存在 `prepared`／`publishing` 记录时不接受新命令（`instance-blocked`），由显式 `recover` 解除。
+- **恢复不重放业务命令**：只比对磁盘与候选；匹配才补回执，不匹配一律待核对。`prepared` 只标未发布，历史 `committed` 只返结果。

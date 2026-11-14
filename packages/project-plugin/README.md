@@ -84,6 +84,9 @@ node lib/cli/local.js show --local-root <目录> --instance <instanceId>
 # 显式刷新：重读磁盘完整基线（头字节哈希 + 每条正文哈希），推进源代际
 node lib/cli/local.js refresh --local-root <目录> --instance <instanceId> --source <资料根>
 
+# 恢复核对：prepared 标记未发布；publishing 精确匹配候选则补回执
+node lib/cli/command.js recover --local-root <目录> --instance <id> --operation <uuid>
+
 # 遗留锁必须显式释放（不按超时抢占）
 node lib/cli/local.js release-lock --local-root <目录> (--force | --token <token>)
 ```
@@ -148,7 +151,13 @@ node lib/cli/command.js run --local-root <目录> --instance <id> \
 - **未决即阻塞**：同一实例存在 `prepared`／`publishing` 记录时，新命令返回 `pending-reconciliation(instance-blocked)`，不继续写入；同 `operationId` 重试也只返回待核对。
 - **失败结局**：意图或 publishing 落盘失败 → `persistence-failed` 且不写任何文件；正文失败或头 `not-published` → 标 `rejected`（明确未发布）；头 `unknown` → 停在 `publishing`；回执未落盘 → `pending-reconciliation(stage=receipt)`。
 - **通知失败不撤回**：提交后的通知异常被吞掉，结果仍是 `committed`，回执可查。
-- **本阶段未做**：崩溃后按候选自动核对／补齐回执（4.4）、unknown-state 隔离与只读诊断（4.5）。
+- **恢复（4.4）**：`command recover` 显式核对，不自动重放。
+  - `prepared`：可证明未进入发布 → 标记 `not-published`，保留 operationId，需重做时用新命令。
+  - `publishing` 且当前资料**精确匹配候选**（头字节哈希 + 每条正文哈希）→ 补回执，双修订按意图预算一次性补齐（`recovery: candidate-matched`），重复恢复只返历史。
+  - `publishing` 但当前等于原基线 → `reverted` 待核对（不排除发布后被回退，不宣称未提交）。
+  - `publishing` 但已分叉 → `diverged` 待核对，不自动覆盖。
+  - `committed` 之后资料被回退（Git 回退）→ 重试／查询／恢复都只返回历史，不重新应用到当前分支。
+- **本阶段未做**：unknown-state 隔离与只读诊断（4.5）。
 
 ## 实现状态
 
