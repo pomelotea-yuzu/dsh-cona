@@ -12,7 +12,7 @@
 
 用户要求项目资料可选项目／DSH／自定义目录，支持 Git 多人跨环境协作、其他 Agent 可读与新机器 DSH 接续。公开资料与本机会话、授权及回执分开，格式与恢复方案仍待验证。
 
-当前活动提案：`openspec/changes/establish-r1-project-plugin/`，覆盖 R1 插件贯通实验；第 1 轮外部审阅已完成并按意见修订，第 2 段完成（2.1–2.5；2.4b 的绑定/归属复测待第 6 段，non-owner 为 R1 边界），第 3 段未开始；处理见 change 内的 `review-response.md`。
+当前活动提案：`openspec/changes/establish-r1-project-plugin/`，覆盖 R1 插件贯通实验；第 1 轮外部审阅已完成并按意见修订，第 2 段完成（2.1–2.5；2.4b 的绑定/归属复测待第 6 段，non-owner 为 R1 边界），第 3 段 3.1 完成（三种资料位置、实际路径与 Git 只读状态、外部 v1 基础接入，见 change 内 `implementation/2026-11-14-3.1-positions.md`），3.2 起未开始；处理见 change 内的 `review-response.md`。
 
 ## 权威性
 

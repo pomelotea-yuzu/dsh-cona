@@ -1,6 +1,6 @@
 # R1 验证矩阵
 
-日期：2026-11-12（2026-11-13 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前仅 V25a `pass`、V25b `blocked`，其余未动）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
+日期：2026-11-12（2026-11-13、2026-11-14 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V25a `pass`、V25b `blocked`；V05／V38 已有文件层实测证据但宿主层未测，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
 
 方法：`A` 为自动业务／Client 测试，`F` 为实际文件后端与中断注入，`H` 为独立 profile 的真实 DSH 检查，`E` 为真实 Agent 端到端。含多种方法的条目须分别记录观察；替身通过不代替真实宿主。运行时追加实际版本、步骤、预期／观察、证据定位与限制，状态仅 `pass / fail / blocked / untested`。
 
@@ -10,7 +10,7 @@
 | V02 | plugin-integration：Host／Client 加载 | H | 实际安装包含两端及资源，共享实例无重复，Client 缺入口的反例明确失败 | untested |
 | V03 | plugin-integration：Remote | H | 自有 contribution 往返可用，未挂载或断线不显示保存成功 | untested |
 | V04 | plugin-integration：隔离、卸载及重载 | H、F | 个人 profile 不改，入口／监听／字典无重复且可清理，资料和回执不删，在途命令保留结果 | untested |
-| V05 | portable-project-data：三种位置 | F、H | 同格式同语义，实际位置和可得 Git 状态可见，不静默改位置或自动 Git 操作 | untested |
+| V05 | portable-project-data：三种位置 | F、H | 同格式同语义，实际位置和可得 Git 状态可见，不静默改位置或自动 Git 操作 | untested（2026-11-14 文件层已实测：三位置同格式字节一致、实际路径与 Git 四态只读可见、非空目标拒绝，见 [3.1 记录](implementation/2026-11-14-3.1-positions.md)；H 待第 5 段面板接入后复测） |
 | V06 | portable-project-data：无代码目录、无 DSH 阅读 | A、F | 可先建逻辑项目；README／schema／独立校验足够，不依赖宿主数据库／模型服务 | untested |
 | V07 | portable-project-data：正文发布边界 | A、F | 未引用正文不算发布，资料指令／远程 schema 不自动执行或获取 | untested |
 | V08 | portable-project-data：树、依赖、身份 | A | 重复 id、缺父、树环、依赖环及非法引用拒绝，批量拆分全部接受或拒绝 | untested |
@@ -44,7 +44,7 @@
 | V35 | plugin-localization：切换与重启 | A、H | 导航／已开面板更新，节点选择／输入保留，重启跟随宿主选择，字典卸载重载无重复 | untested |
 | V36 | plugin-localization：内容和时间隔离 | A、H | 项目原文、协议码、指纹与修订不变；长文本、数量、时区可用，语言不改日期或 Agent 授权 | untested |
 | V37 | 六能力整体闭环，必含 V32／V04 | E、H | 预构建安装→小树保存→聊天→真实 Agent 授权内调整并记原因→UI 已提交→Client 断线重连完整回读（V32）→重启恢复→卸载及重新安装（V04）→原资料／历史回执一致且旧 WorkRun 不恢复授权，可重复 | untested |
-| V38 | portable-project-data：外部 v1 首次接入 | F、H | 全新本机根无原注册表／数据库时取得外部合法 v1 文件，沿用原项目／节点 id，新建本机实例，不重建项目，不导入旧授权或回执；仅基础接入，非 R2 Git 或 R6 跨机试用 | untested |
+| V38 | portable-project-data：外部 v1 首次接入 | F、H | 全新本机根无原注册表／数据库时取得外部合法 v1 文件，沿用原项目／节点 id，新建本机实例，不重建项目，不导入旧授权或回执；仅基础接入，非 R2 Git 或 R6 跨机试用 | untested（2026-11-14 文件层已实测：外部 sample 接入沿用 project／node id 与 planVersion，资料根不新增文件；本机实例登记待 3.2、H 待第 5／6 段） |
 
 ## 路线图 R1 必须反例映射
 

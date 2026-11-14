@@ -22,6 +22,7 @@
     ".": "./lib/host/index.js",
     "./client": "./lib/client/index.js",
     "./cli/validate": "./lib/cli/validate.js",
+    "./cli/source": "./lib/cli/source.js",
     "./types": {
       "types": "./lib/types.d.ts",
       "default": "./lib/types.js"
@@ -55,6 +56,7 @@
     "generate:typert": "node scripts/generate-typert.mjs",
     "test": "npm run build && npm run test:run",
     "validate": "node lib/cli/validate.js",
+    "source": "node lib/cli/source.js",
     "test:run": "tsc -p tsconfig.test.json && node --test lib-test/test/*.test.js"
   },
   "peerDependencies": {

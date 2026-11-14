@@ -1,6 +1,6 @@
 # R1 实现任务
 
-状态：已收到[第 1 轮外部 review](review.md)并按意见修订，处理见 [review-response](review-response.md)；2026-11-13 起按用户授权进入实施，第 1 段（格式、领域与无宿主校验）完成，第 2 段中 2.1／2.2 完成（npm 已发布 0.2.2-rc.2 类型包与 typert-generator，类型与生成改走 npm 精确版本 + vendored protocol 源面，typert.host／remote-client 产物已生成，build／typecheck／test 79 项／check:manifest／仓库门禁全过），2.3 已完成（洁净构建/打包、独立 home 安装、宿主与 Remote 探针、浏览器内 Client 激活，见环境记录第二轮），2.4a 完成（第 2 轮 review 放行，见 [范围修订](scope-amendment.md)），2.4b 拆口径（绑定／归属部分 6.2／6.5 复测计入 R1，non-owner 为 R1 边界），2.5 完成（`pnpm check:ci` 接入，本地以 Node v24.21.0 实跑通过；远端流水线未实跑），见 [接手记录](implementation/2026-11-13-handoff.md)，第 3 段起未开始。协议正文和向量是已交付的提案工件，其复算不勾选实现任务；不得把工件齐备或静态校验当成产品已完成。
+状态：已收到[第 1 轮外部 review](review.md)并按意见修订，处理见 [review-response](review-response.md)；2026-11-13 起按用户授权进入实施，第 1 段（格式、领域与无宿主校验）完成，第 2 段中 2.1／2.2 完成（npm 已发布 0.2.2-rc.2 类型包与 typert-generator，类型与生成改走 npm 精确版本 + vendored protocol 源面，typert.host／remote-client 产物已生成，build／typecheck／test 79 项／check:manifest／仓库门禁全过），2.3 已完成（洁净构建/打包、独立 home 安装、宿主与 Remote 探针、浏览器内 Client 激活，见环境记录第二轮），2.4a 完成（第 2 轮 review 放行，见 [范围修订](scope-amendment.md)），2.4b 拆口径（绑定／归属部分 6.2／6.5 复测计入 R1，non-owner 为 R1 边界），2.5 完成（`pnpm check:ci` 接入，本地以 Node v24.21.0 实跑通过；远端流水线未实跑），见 [接手记录](implementation/2026-11-13-handoff.md)；第 3 段 3.1 完成（三种资料位置、实际路径与 Git 只读状态、外部 v1 基础接入，见 [3.1 记录](implementation/2026-11-14-3.1-positions.md)），3.2 起未开始。协议正文和向量是已交付的提案工件，其复算不勾选实现任务；不得把工件齐备或静态校验当成产品已完成。
 
 ## 1. 格式、领域与无宿主校验
 
@@ -21,7 +21,7 @@
 
 ## 3. 公开资料与本机文件后端
 
-- [ ] 3.1 实现三种资料位置选择、实际路径展示与 Git 状态只读检测；分别创建／接入同格式资料，另用全新本机根首次接入外部 v1 资料，验证沿用原 project／node id、不要求原数据库、不导入旧实例回执或授权；核对无代码目录可建项目、非空目标不覆盖，补位置与基础接入说明，不能以此代替 R2／R6 协作试用。
+- [x] 3.1 实现三种资料位置选择、实际路径展示与 Git 状态只读检测；分别创建／接入同格式资料，另用全新本机根首次接入外部 v1 资料，验证沿用原 project／node id、不要求原数据库、不导入旧实例回执或授权；核对无代码目录可建项目、非空目标不覆盖，补位置与基础接入说明，不能以此代替 R2／R6 协作试用。（2026-11-14：`application/location.ts` + `source-service.ts`、`adapters/fs/{location,git-status,project-json,source-files}.ts`、`cli/source.ts`；三位置同格式字节一致、`validate.js check` 通过、外部 v1 接入沿用原 id 且目录不新增文件、非空目标拒绝、Git 四态只读观察；10 项新测试，Node v22.22.2 与宿主 Node v24.21.0 各 89/89，`pnpm check:ci` 全过。真实宿主 profile（V05／V38 的 H 部分）未做，矩阵保持 untested；见[3.1 记录](implementation/2026-11-14-3.1-positions.md)）
 - [ ] 3.2 实现本机根配置、注册表和单实例聚合存储；测试根隔离、私有内容不入公开头、项目内已跟踪私有根被拒绝、同项目双目录隔离、重复写者及遗留锁处理，补本机数据边界说明。
 - [ ] 3.3 实现根范围／相对引用校验与文件读取；测试越界、symlink、hardlink、大小写及权限错误，记录实际平台结果，未测平台保持 untested。
 - [ ] 3.4 实现不可变正文写入、同目录头替换及本机聚合替换，返回明确三态；注入写入前、rename 前后、回读和本机确认失败，观察 not-published／published／unknown 及隔离行为，并写明断电保证限制。
