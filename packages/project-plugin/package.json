@@ -24,6 +24,7 @@
     "./cli/validate": "./lib/cli/validate.js",
     "./cli/source": "./lib/cli/source.js",
     "./cli/local": "./lib/cli/local.js",
+    "./cli/command": "./lib/cli/command.js",
     "./types": {
       "types": "./lib/types.d.ts",
       "default": "./lib/types.js"
@@ -59,6 +60,7 @@
     "validate": "node lib/cli/validate.js",
     "source": "node lib/cli/source.js",
     "local": "node lib/cli/local.js",
+    "command": "node lib/cli/command.js",
     "test:run": "tsc -p tsconfig.test.json && node --test lib-test/test/*.test.js"
   },
   "peerDependencies": {

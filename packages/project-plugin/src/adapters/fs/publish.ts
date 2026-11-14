@@ -17,6 +17,8 @@ export interface PublishResult {
   /** 失败或中止发生的阶段；done 表示完整发布。 */
   stage: AtomicStage;
   detail?: string;
+  /** 实际尝试写入的字节哈希（published 时即磁盘内容）；unknown 时用于核对候选。 */
+  headHash?: string;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -43,10 +45,13 @@ export async function publishProjectDocument(
       detail: scoped.issues.map((issue) => issue.code).join(', '),
     };
   }
-  const result = await replaceAtomicallyChecked(scoped.absolutePath, serializeProjectDocument(doc), hooks);
+  const text = serializeProjectDocument(doc);
+  const headHash = 'sha256:' + createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
+  const result = await replaceAtomicallyChecked(scoped.absolutePath, text, hooks);
   return {
     status: result.status === 'saved' ? 'published' : result.status === 'not-saved' ? 'not-published' : 'unknown',
     stage: result.stage,
+    headHash,
     ...(result.detail === undefined ? {} : { detail: result.detail }),
   };
 }
@@ -115,7 +120,13 @@ export async function writeBodyImmutable(
   const target = targetScoped.absolutePath;
 
   try {
+    // 注入钩子在写入前抛错：正文尚未落盘，结果明确为未发布。
     await options.hooks?.beforeTempWrite?.();
+  } catch (error) {
+    return { status: 'not-published', path: protocolPath, detail: `hook: ${(error as Error).message}` };
+  }
+
+  try {
     await writeFile(target, bytes, { flag: 'wx' });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

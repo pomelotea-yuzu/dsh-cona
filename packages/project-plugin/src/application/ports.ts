@@ -87,7 +87,33 @@ export interface SourceFilesPort {
   writeDocument(
     root: string,
     doc: ProjectDocument,
-  ): Promise<{ ok: true } | { ok: false; issues: ValidationIssue[] }>;
+    hooks?: PublishHooksPort,
+  ): Promise<
+    { ok: true; headHash: string } | { ok: false; status: 'not-published' | 'unknown'; issues: ValidationIssue[] }
+  >;
+  /** 不可变正文写入（内容寻址）；已存在同字节为幂等，不同字节为冲突。 */
+  writeBody(
+    root: string,
+    recordId: string,
+    contentHash: string,
+    bytes: Uint8Array,
+    hooks?: PublishHooksPort,
+  ): Promise<BodyWriteOutcome>;
+}
+
+/** 故障注入钩子（仅测试使用）；生产调用不传。 */
+export interface PublishHooksPort {
+  beforeTempWrite?: () => void | Promise<void>;
+  beforeRename?: () => void | Promise<void>;
+  afterRename?: () => void | Promise<void>;
+  beforeReread?: () => void | Promise<void>;
+}
+
+export interface BodyWriteOutcome {
+  status: 'written' | 'already-present' | 'conflict' | 'not-published' | 'unknown';
+  /** 协议路径 `records/<recordId>/<contentHash-hex>.md`。 */
+  path: string;
+  detail?: string;
 }
 
 export type GitTrackState = 'tracked' | 'untracked' | 'ignored' | 'unknown';

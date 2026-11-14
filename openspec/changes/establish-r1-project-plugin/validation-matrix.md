@@ -1,6 +1,6 @@
 # R1 验证矩阵
 
-日期：2026-11-12（2026-11-13、2026-11-14 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V12／V25a `pass`，V25b `blocked`；V05／V10／V11／V17／V21／V33／V38 已有文件层部分证据但宿主层未测，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
+日期：2026-11-12（2026-11-13、2026-11-14 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V12／V25a `pass`，V25b `blocked`；V05／V10／V11／V13／V15／V17／V21／V33／V38 已有文件层部分证据但宿主层或后续阶段未做，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
 
 方法：`A` 为自动业务／Client 测试，`F` 为实际文件后端与中断注入，`H` 为独立 profile 的真实 DSH 检查，`E` 为真实 Agent 端到端。含多种方法的条目须分别记录观察；替身通过不代替真实宿主。运行时追加实际版本、步骤、预期／观察、证据定位与限制，状态仅 `pass / fail / blocked / untested`。
 
@@ -18,9 +18,9 @@
 | V10 | portable-project-data：公开／私有隔离 | F、H | 三种位置均不泄漏实际 Session、机器路径、授权、草稿或回执，外部结论非本机复测 | untested（2026-11-14 部分实测：登记后 `project.json` 字节不变且不含实例 id／本机根；会话与回执字段待第 4／6 段填充后复测） |
 | V11 | portable-project-data：指纹、未知格式 | A、F | 随格式分发的 v1-plan 正文／17 个强制向量可读；主实现及第二份独立实现得到同一字节／散列并拒绝负向输入，排版／记录追加不变、目标／顺序改变；伪造哈希或未知格式不覆盖 | untested（2026-11-14 补证：仅排版变化 headChanged 而 planVersion 不变；schemaVersion=2 与伪造 planVersion 均拒绝且不覆盖原文件；A 层已过，H 层未测） |
 | V12 | portable-project-data：实例与路径 | A、F | 同项目双目录身份稳定但实例隔离，越界／symlink／hardlink／大小写／权限结果按平台实记 | pass（2026-11-14，macOS APFS：双目录两实例且聚合隔离；越界／symlink／hardlink／FIFO／chmod 000 均以稳定码拒绝；大小写不可并存已实记。Linux／Windows 未测，不继承该结论） |
-| V13 | project-command-commit：统一服务、双修订 | A、F | 过程追加只推进状态，原规划可合法提交且保留新记录；实际规划冲突拒绝 | untested |
+| V13 | project-command-commit：统一服务、双修订 | A、F | 过程追加只推进状态，原规划可合法提交且保留新记录；实际规划冲突拒绝 | untested（2026-11-14 文件层已实测：记录命令仅 state+1 且 planVersion 不变，随后用原规划基线提交成功并保留记录；过期 planVersion／revision 均 `plan-conflict`。统一服务与 Remote／工具入口待 5／6 段） |
 | V14 | project-command-commit：幂等响应丢失 | A、F、H | 原样重试及重启后查到原 id／版本，不重复创建，不因自身推进版本误冲突 | untested |
-| V15 | project-command-commit：操作归属与回执访问 | A、H | 同 id 不同参数／归属拒绝，无权主体不能读结果，重连可读历史不恢复新写资格 | untested |
+| V15 | project-command-commit：操作归属与回执访问 | A、H | 同 id 不同参数／归属拒绝，无权主体不能读结果，重连可读历史不恢复新写资格 | untested（2026-11-14 部分实测：缺可信上下文、空 WorkRun、实例不符均 `forbidden`；同 id 参数比对与回执读取属 4.2） |
 | V16 | project-command-commit：无变化、纯查询 | A | 首次无业务变化仅保存新回执并推进状态；查询／已完成重试不推进修订 | untested |
 | V17 | project-command-commit：意图／正文／头中断 | F | 意图失败不发布，正文先于头，孤立正文不显示，头可能发布时不能误报未提交 | untested（2026-11-14 部分实测：正文先于头、孤立正文报 orphan-body、rename 后与回读前一律 unknown 不误报；意图日志与“意图失败不发布”属 4.1） |
 | V18 | project-command-commit：候选核对／回执中断 | F | 精确候选可补原回执且修订只推进一次，恢复来源明确，不虚构作者或外部动作 | untested |

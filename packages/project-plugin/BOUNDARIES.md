@@ -7,7 +7,7 @@
 | 目录 | 依赖及职责 | 边界验证 |
 |---|---|---|
 | `src/domain/` | JSON 数据结构、纯变换、树／依赖／完成条件校验、v1-plan 指纹；**无 Node、Cordis、React** | `tsconfig.domain.json`（`types: []`、纯 ES2022 lib）+ `scripts/check-boundaries.mjs` |
-| `src/application/` | 命令、查询、可信调用上下文、提交及恢复；调用 ports 和领域核心 | 3.1 位置计划与 `SourceService`；3.2 本机根与 `LocalStateService`；3.5 基线读取（`baseline.ts`）与 `refresh`；命令封套与回执在 4.x |
+| `src/application/` | 命令、查询、可信调用上下文、提交及恢复；调用 ports 和领域核心 | 3.1 `SourceService`；3.2 `LocalStateService`；3.5 基线与 `refresh`；4.1 `ProjectCommandService` 与每实例队列；回执与恢复在 4.2–4.5 |
 | `src/adapters/` | 文件、本机状态、DSH 会话和身份映射、Remote／工具入口 | 3.1／3.2 位置、Git、资料头、本机状态与锁；3.3 范围解析；3.4 原子替换与三态发布；Remote 在 3.6 |
 | `src/client/` | 面板、编辑草稿、同步状态机、字典；不写文件或复制业务规则 | 第 5 段实现 |
 | `src/host/` | Cordis 服务装配、依赖注入和生命周期 | 第 2 段实现 |
@@ -79,3 +79,18 @@
 - **unknown 不是失败**：`unknown`／`unknown-state` 表示无法确认，不得当“未提交”重试，也不得标成“已提交”。
 - **顺序由命令层负责**：3.4 提供单步可观察结果，正文 → 头 → 本机回执的整体顺序与恢复在 4.x。
 - **范围校验在每次读写**：读资料头、读正文、写头、写正文都经 `path-scope`，不缓存“已检查”结论。
+
+## 4.1 落地的边界（命令封套与访问校验）
+
+| 文件 | 责任 | 不做什么 |
+|---|---|---|
+| `src/domain/commands.ts` | `update-node`／`set-node-status`／记录索引追加的不可变变换；`applyPlanCommand` 重算指纹并跑完整校验 | 不生成 id、不读写文件、不做授权 |
+| `src/application/command-queue.ts` | 每实例串行队列（失败不阻塞后续） | 不自动重试、不合并命令 |
+| `src/application/command-service.ts` | 可信上下文判据、封套形态校验、提交前重读、双修订推进、三态结局 | 不写意图日志、不做幂等查询、不实现恢复（4.2–4.5） |
+
+四条约束：
+
+- **两种入口、两套判据**：`remote-owner` 与 `agent-work` 分别校验，缺上下文不降级；业务参数不能伪造身份或归属。
+- **提交前必重读**：不信任内存或命令自报的规划内容；磁盘 `planVersion` 与封套不一致即 `plan-conflict`。
+- **先正文后头**：记录命令先写不可变正文，失败则不发布头；头结果 `unknown` 返回 `pending-reconciliation`，不改修订。
+- **修订语义**：规划命令 `plan+1 / state+1`；记录命令仅 `state+1`，`planVersion` 不变。

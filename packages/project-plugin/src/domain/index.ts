@@ -27,3 +27,5 @@ export { encodeCanonicalAlt, computePlanVersionAlt, planVersionFromJsonTextAlt }
 export { utf8Encode, Utf8EncodeError } from './canonical/utf8.js';
 export { validateRelativePath } from './relative-path.js';
 export type { RelativePathError, RelativePathErrorCode, RelativePathResult } from './relative-path.js';
+export { updateNode, setNodeStatus, appendRecordIndex, applyPlanCommand } from './commands.js';
+export type { NodePatch, PlanCommand } from './commands.js';

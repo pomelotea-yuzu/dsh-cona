@@ -8,7 +8,7 @@ import type { SourceFilesPort, RootInspection } from '../../application/ports.js
 import type { Sha256Fn } from '../../domain/types.js';
 import { readProjectDocument } from './project-json.js';
 import { readInScope } from './path-scope.js';
-import { publishProjectDocument } from './publish.js';
+import { publishProjectDocument, writeBodyImmutable } from './publish.js';
 
 /** 随包格式资源在资料根内的相对落点（design §3）。 */
 export const FORMAT_ASSET_FILES: readonly { source: string; target: string }[] = [
@@ -84,11 +84,12 @@ export function createSourceFiles(formatsDir: string, sha256: Sha256Fn): SourceF
       }
       return { ok: true, bytes: scoped.bytes };
     },
-    writeDocument: async (root, doc) => {
-      const result = await publishProjectDocument(root, doc);
-      if (result.status === 'published') return { ok: true };
+    writeDocument: async (root, doc, hooks) => {
+      const result = await publishProjectDocument(root, doc, hooks);
+      if (result.status === 'published') return { ok: true, headHash: result.headHash ?? '' };
       return {
         ok: false,
+        status: result.status === 'not-published' ? 'not-published' : 'unknown',
         issues: [
           {
             code: result.status === 'not-published' ? 'publish-not-published' : 'publish-unknown',
@@ -98,5 +99,7 @@ export function createSourceFiles(formatsDir: string, sha256: Sha256Fn): SourceF
         ],
       };
     },
+    writeBody: (root, recordId, contentHash, bytes, hooks) =>
+      writeBodyImmutable(root, recordId, contentHash, bytes, hooks === undefined ? {} : { hooks }),
   };
 }

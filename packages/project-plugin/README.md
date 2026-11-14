@@ -1,6 +1,6 @@
 # dsh-cona-project
 
-DSH-Cona 项目管理插件（R1）。当前已交付第 1 段（v1 公开资料格式、领域校验与无宿主校验命令）与第 3 段全部（资料位置与接入、本机根与注册表、路径范围、三态发布、基线与显式刷新）。
+DSH-Cona 项目管理插件（R1）。当前已交付第 1 段（v1 公开资料格式、领域校验与无宿主校验命令）、第 3 段全部（位置与接入、本机根与注册表、路径范围、三态发布、基线与刷新）与 4.1（命令封套、访问校验、不可变变换、每实例队列）。
 
 - 边界与决定：[BOUNDARIES.md](BOUNDARIES.md)
 - 公开协议：[formats/v1/plan-canonicalization.md](formats/v1/plan-canonicalization.md)（随包分发，资料根携带副本）
@@ -117,6 +117,31 @@ node lib/cli/local.js release-lock --local-root <目录> (--force | --token <tok
 
 刷新始终重读磁盘，不复用旧缓存；失败不推进源代际，也不改动既有基线。
 
+## 命令封套（4.1）
+
+```bash
+# 规划命令：add-nodes / update-node / split-node / set-dependencies / set-node-status
+node lib/cli/command.js run --local-root <目录> --instance <id> \
+  --command '{"type":"add-nodes","nodes":[{"parentId":"<父节点>","order":1,"title":"新节点","goal":"目标","completionCriteria":[]}]}'
+
+# 记录命令：正文哈希与路径由应用层计算
+node lib/cli/command.js run --local-root <目录> --instance <id> \
+  --command '{"type":"append-record","kind":"analysis-note","subjectNodeIds":["<节点>"],"summary":"结论","sources":[],"body":"# 正文\n"}'
+```
+
+可选参数：`--expected-plan-version`／`--expected-plan-revision`（覆盖默认的当前基线，用于复现冲突）、`--epoch`、`--trusted remote-owner|agent-work`、`--work-run`、`--binding-version`。
+
+要点：
+
+- **封套**：`operationId`、`projectId`、`instanceId`、`sourceEpoch`、`expectedPlanVersion`、`expectedPlanRevision`、`command`。缺字段或形态非法一律 `operation-mismatch`。
+- **访问校验**：UI Remote 与 Agent 工具是两条判据；缺可信上下文直接 `forbidden`，不降级为进程内 owner。工具要求真实 `workRunId`、正数绑定版本且实例一致。
+- **同一提交序列**：两种入口都经 `ProjectCommandService`，先核对实例 → 源代际 → 双修订 → 重读权威资料 → 变换 → 先正文后头 → 本机聚合。入口不同不改变任何校验。
+- **双修订**：规划命令推进 `planRevision + stateRevision`；记录命令只推进 `stateRevision`，`planVersion` 不变，因此记录之后仍可用原规划基线提交规划修改。
+- **不可变变换**：命令只描述结构，新节点 id 由应用层生成；变换不修改输入，失败整体拒绝。
+- **队列**：同一实例串行、不同实例并行；并发命令中只有基线成立的那条成功，其余 `plan-conflict`，不会交错写坏资料。
+- **结局**：`committed` 表示资料与本机聚合都明确成功；`rejected` 带稳定码与当前基线；`pending-reconciliation` 表示发布结果未知，必须保留原 operationId 核对，不换 id 重试。
+- **本阶段未做**：幂等回执与 `(instanceId, operationId)` 查询、`prepared／publishing／committed` 持久阶段、崩溃恢复与 unknown-state 隔离（4.2–4.5）。
+
 ## 实现状态
 
-第 1 段（tasks 1.1–1.5）与第 3 段（3.1–3.5）完成；第 4–7 段未开始，见 change `openspec/changes/establish-r1-project-plugin/tasks.md`。
+第 1 段（1.1–1.5）、第 3 段（3.1–3.5）与 4.1 完成；4.2 起未开始，见 change `openspec/changes/establish-r1-project-plugin/tasks.md`。
