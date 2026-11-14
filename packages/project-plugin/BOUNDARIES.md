@@ -86,7 +86,7 @@
 |---|---|---|
 | `src/domain/commands.ts` | `update-node`／`set-node-status`／记录索引追加的不可变变换；`applyPlanCommand` 重算指纹并跑完整校验 | 不生成 id、不读写文件、不做授权 |
 | `src/application/command-queue.ts` | 每实例串行队列（失败不阻塞后续） | 不自动重试、不合并命令 |
-| `src/application/command-service.ts` | 可信上下文判据、封套形态校验、提交前重读、双修订推进、三态结局 | 不写意图日志、不做幂等查询、不实现恢复（4.2–4.5） |
+| `src/application/command-service.ts` | 可信上下文判据、封套形态校验、提交前重读、双修订推进、三态结局；4.2 起写 pending 意图与回执、按 `(instanceId, operationId)` 幂等重放、回执按归属查询 | 不做 prepared／publishing 阶段与崩溃核对（4.3–4.5） |
 
 四条约束：
 
@@ -94,3 +94,5 @@
 - **提交前必重读**：不信任内存或命令自报的规划内容；磁盘 `planVersion` 与封套不一致即 `plan-conflict`。
 - **先正文后头**：记录命令先写不可变正文，失败则不发布头；头结果 `unknown` 返回 `pending-reconciliation`，不改修订。
 - **修订语义**：规划命令 `plan+1 / state+1`；记录命令仅 `state+1`，`planVersion` 不变。
+- **幂等在冲突判断之前**：先查 `(instanceId, operationId)`，同摘要同归属返回历史结果；不同摘要或归属拒绝；未决保持待核对。
+- **原样重发需要原基线**：记录保存 `expectedPlanVersion／expectedPlanRevision／sourceEpoch`，不接受“重读当前基线再当重试”。

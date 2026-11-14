@@ -129,7 +129,7 @@ node lib/cli/command.js run --local-root <目录> --instance <id> \
   --command '{"type":"append-record","kind":"analysis-note","subjectNodeIds":["<节点>"],"summary":"结论","sources":[],"body":"# 正文\n"}'
 ```
 
-可选参数：`--expected-plan-version`／`--expected-plan-revision`（覆盖默认的当前基线，用于复现冲突）、`--epoch`、`--trusted remote-owner|agent-work`、`--work-run`、`--binding-version`。
+可选参数：`--expected-plan-version`／`--expected-plan-revision`（覆盖默认基线，用于复现冲突）、`--epoch`、`--trusted remote-owner|agent-work`、`--work-run`、`--binding-version`、`--operation <uuid>`（固定操作 id，用于重试）。
 
 要点：
 
@@ -140,7 +140,11 @@ node lib/cli/command.js run --local-root <目录> --instance <id> \
 - **不可变变换**：命令只描述结构，新节点 id 由应用层生成；变换不修改输入，失败整体拒绝。
 - **队列**：同一实例串行、不同实例并行；并发命令中只有基线成立的那条成功，其余 `plan-conflict`，不会交错写坏资料。
 - **结局**：`committed` 表示资料与本机聚合都明确成功；`rejected` 带稳定码与当前基线；`pending-reconciliation` 表示发布结果未知，必须保留原 operationId 核对，不换 id 重试。
-- **本阶段未做**：幂等回执与 `(instanceId, operationId)` 查询、`prepared／publishing／committed` 持久阶段、崩溃恢复与 unknown-state 隔离（4.2–4.5）。
+- **幂等（4.2）**：执行前先写 `pending` 意图（含请求摘要、归属、原始输入基线与稳定生成 id），完成后写回执。同 `operationId` 且同摘要、同归属 → 返回历史结果（`replayed: true`），不再写资料、不再推进修订；摘要或归属不同 → `operation-mismatch`／`forbidden`；已有未决意图 → `pending-reconciliation`，不按新命令重跑。
+- **原样重发**：摘要包含输入基线，因此重试必须用原请求的 `expectedPlanVersion／expectedPlanRevision／sourceEpoch`。记录里保存了这三项，`--operation` 重试时 CLI 会自动取回；否则重读当前基线会被判 `operation-mismatch`（这是正确行为，不是缺陷）。
+- **无业务变化**：规划命令未改变 `planVersion` 时只保存回执并推进 `stateRevision`，不重写资料头；重试不再推进修订。
+- **回执查询**：按归属隔离——`agent-work` 只能读同一 `workRunId` 的回执，owner 也不能读工具回执。
+- **本阶段未做**：`prepared／publishing／committed` 持久阶段、崩溃后候选核对、unknown-state 隔离（4.3–4.5）。
 
 ## 实现状态
 

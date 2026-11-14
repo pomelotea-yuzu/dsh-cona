@@ -74,9 +74,45 @@ export interface ObservationBaseline {
   observedAt: string;
 }
 
+/** 操作归属：仅说明来源，不构成授权；回执读取按此隔离。 */
+export interface OperationOrigin {
+  kind: 'remote-owner' | 'agent-work';
+  workRunId?: string;
+}
+
+/** 已提交结果快照：重放时返回原版本，而不是当前快照。 */
+export interface OperationResultSnapshot {
+  impact: 'plan' | 'state';
+  planVersion: string;
+  planRevision: number;
+  stateRevision: number;
+  sourceEpoch: number;
+  recordId?: string;
+  recordPath?: string;
+}
+
+/**
+ * 操作记录（tasks 4.2）：执行前写 pending 意图，完成后写回执。
+ * `requestDigest` 覆盖命令、业务参数与输入基线，不含 operationId 或重连临时标识。
+ * `generated` 保存本操作的稳定生成 id，重启后核对或补写时复用，不重新生成。
+ */
+export interface OperationRecord {
+  operationId: string;
+  requestDigest: string;
+  origin: OperationOrigin;
+  status: 'pending' | 'committed' | 'rejected';
+  createdAt: string;
+  updatedAt: string;
+  /** 原请求的输入基线：响应丢失后要“原样重发”，必须能取回这三项，而不是重读当前基线。 */
+  baseline: { expectedPlanVersion: string; expectedPlanRevision: number; sourceEpoch: number };
+  generated: { recordId?: string; nodeIds?: string[] };
+  result?: OperationResultSnapshot;
+  rejection?: { code: string; message: string };
+}
+
 /**
  * 单实例聚合：双修订、聊天关系、WorkRun 历史、意图／回执与最近有效观察同存一处。
- * 3.2 落形状与基本读写，3.5 补完整基线；意图／回执内容在 4.x、聊天在 3.6 细化。
+ * 3.2 落形状与基本读写，3.5 补完整基线，4.2 补操作意图／回执；聊天在 3.6 细化。
  */
 export interface InstanceAggregate {
   schemaVersion: 1;
@@ -86,7 +122,7 @@ export interface InstanceAggregate {
   revisions: { plan: number; state: number };
   conversations: readonly unknown[];
   workRuns: readonly unknown[];
-  operations: readonly unknown[];
+  operations: OperationRecord[];
   lastObservation: ObservationBaseline | null;
 }
 

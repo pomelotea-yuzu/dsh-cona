@@ -24,7 +24,7 @@ function usage(): string {
     '用法:',
     "  command.js run --local-root <dir> --instance <id> --command '<json>'",
     '                [--source <dir>] [--epoch <n>] [--expected-plan-version <sha>] [--expected-plan-revision <n>]',
-    '                [--trusted remote-owner|agent-work] [--work-run <id>] [--binding-version <n>]',
+    '                [--trusted remote-owner|agent-work] [--work-run <id>] [--binding-version <n>] [--operation <uuid>]',
   ].join('\n') + '\n';
 }
 
@@ -42,6 +42,7 @@ async function main(): Promise<number> {
       trusted: { type: 'string' },
       'work-run': { type: 'string' },
       'binding-version': { type: 'string' },
+      operation: { type: 'string' },
     },
   });
   const commandName = positionals[0];
@@ -93,15 +94,23 @@ async function main(): Promise<number> {
     process.stdout.write(JSON.stringify({ command: commandName, status: 'rejected', code: 'invalid-project', issues: head.issues }) + '\n');
     return 1;
   }
+  // 原样重试：未显式给基线时，优先取该 operationId 记录里的原请求基线，而不是重读当前基线。
+  const priorOperation =
+    typeof values['operation'] === 'string'
+      ? aggregate?.operations.find((item) => item.operationId === values['operation'])
+      : undefined;
   const planVersion =
     typeof values['expected-plan-version'] === 'string'
       ? values['expected-plan-version']
-      : ((JSON.parse(head.text) as { planVersion: string }).planVersion);
+      : (priorOperation?.baseline.expectedPlanVersion ?? (JSON.parse(head.text) as { planVersion: string }).planVersion);
   const planRevision =
     typeof values['expected-plan-revision'] === 'string'
       ? Number(values['expected-plan-revision'])
-      : (aggregate?.revisions.plan ?? 0);
-  const epoch = typeof values['epoch'] === 'string' ? Number(values['epoch']) : entry.sourceGeneration;
+      : (priorOperation?.baseline.expectedPlanRevision ?? aggregate?.revisions.plan ?? 0);
+  const epoch =
+    typeof values['epoch'] === 'string'
+      ? Number(values['epoch'])
+      : (priorOperation?.baseline.sourceEpoch ?? entry.sourceGeneration);
 
   const trusted = values['trusted'] === 'agent-work'
     ? ({
@@ -112,8 +121,9 @@ async function main(): Promise<number> {
       } satisfies TrustedContext)
     : ({ kind: 'remote-owner' } satisfies TrustedContext);
 
+  const operationId = typeof values['operation'] === 'string' ? values['operation'] : randomUUID();
   const result = await service.execute(trusted, {
-    operationId: randomUUID(),
+    operationId,
     projectId: entry.projectId,
     instanceId,
     sourceEpoch: epoch,

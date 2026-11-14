@@ -187,6 +187,7 @@ export interface LocalStateStorePort {
   replaceAggregateChecked(
     localRoot: string,
     aggregate: InstanceAggregate,
+    hooks?: PublishHooksPort,
   ): Promise<{ status: 'saved' | 'not-saved' | 'unknown-state'; stage: string; detail?: string }>;
   /** 独占锁内执行；同进程重复写者或锁被占用时返回 false 与诊断，不等待、不抢占。 */
   withLock<T>(localRoot: string, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; issues: LocalIssue[] }>;
