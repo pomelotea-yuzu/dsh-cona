@@ -157,6 +157,23 @@ export interface InstanceAggregate {
   lastObservation: ObservationBaseline | null;
 }
 
+/**
+ * 实例隔离标记（tasks 4.5）：本机聚合写入结果未知或不可读时，停止该实例读写。
+ * 标记与聚合分开保存，因此聚合本身不可信时仍能读到隔离原因。
+ */
+export interface QuarantineInfo {
+  schemaVersion: 1;
+  instanceId: string;
+  reason: 'unknown-state' | 'aggregate-unreadable';
+  /** 触发隔离的阶段（如 receipt／local-state／recover）。 */
+  stage: string;
+  /** 保留原操作 id，便于离线核对后继续。 */
+  operationId?: string;
+  createdAt: string;
+  detail?: string;
+  requires: 'offline-review';
+}
+
 export interface LocalRootView {
   root: string;
   displayPath: string;

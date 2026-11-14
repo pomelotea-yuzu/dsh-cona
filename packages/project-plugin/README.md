@@ -84,6 +84,11 @@ node lib/cli/local.js show --local-root <目录> --instance <instanceId>
 # 显式刷新：重读磁盘完整基线（头字节哈希 + 每条正文哈希），推进源代际
 node lib/cli/local.js refresh --local-root <目录> --instance <instanceId> --source <资料根>
 
+# 隔离诊断与解除（unknown-state 后停止该实例读写）
+node lib/cli/local.js diagnostics --local-root <目录> --instance <id>
+node lib/cli/local.js quarantined --local-root <目录>
+node lib/cli/local.js unisolate --local-root <目录> --instance <id> --confirm offline-reviewed
+
 # 恢复核对：prepared 标记未发布；publishing 精确匹配候选则补回执
 node lib/cli/command.js recover --local-root <目录> --instance <id> --operation <uuid>
 
@@ -157,7 +162,10 @@ node lib/cli/command.js run --local-root <目录> --instance <id> \
   - `publishing` 但当前等于原基线 → `reverted` 待核对（不排除发布后被回退，不宣称未提交）。
   - `publishing` 但已分叉 → `diverged` 待核对，不自动覆盖。
   - `committed` 之后资料被回退（Git 回退）→ 重试／查询／恢复都只返回历史，不重新应用到当前分支。
-- **本阶段未做**：unknown-state 隔离与只读诊断（4.5）。
+- **隔离与诊断（4.5）**：本机聚合写入结果未知（`unknown-state`）或不可读时，写独立标记 `quarantine/<instanceId>.json`，该实例的**命令、回执读取、恢复全部停止**；标记与聚合分开保存，聚合损坏时仍可读原因与保留的 operationId。
+  - `local diagnostics`：只读报告——隔离状态、未决操作、当前磁盘基线与候选比对、诊断建议；不写任何文件。
+  - `local unisolate --confirm offline-reviewed`：必须显式确认已人工核对，插件不提供“一键忽略”。
+  - 解除后先用 `command recover` 核对未决操作，再按当前修订发新命令；直接沿用旧基线会被 `plan-conflict` 拒绝。
 
 ## 实现状态
 

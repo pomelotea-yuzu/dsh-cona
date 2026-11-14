@@ -86,7 +86,7 @@
 |---|---|---|
 | `src/domain/commands.ts` | `update-node`／`set-node-status`／记录索引追加的不可变变换；`applyPlanCommand` 重算指纹并跑完整校验 | 不生成 id、不读写文件、不做授权 |
 | `src/application/command-queue.ts` | 每实例串行队列（失败不阻塞后续） | 不自动重试、不合并命令 |
-| `src/application/command-service.ts` | 可信上下文判据、封套形态校验、提交前重读、双修订推进、三态结局；4.2 幂等重放与回执查询；4.3 四阶段与未决阻塞；4.4 候选核对与恢复 | 不做 unknown 隔离与只读诊断（4.5） |
+| `src/application/command-service.ts` | 可信上下文判据、封套形态校验、提交前重读、双修订推进、三态结局；4.2 幂等重放与回执查询；4.3 四阶段与未决阻塞；4.4 候选核对与恢复；4.5 隔离触发与只读诊断 | 隔离只有显式解除，不做一键忽略或自动清理 |
 
 四条约束：
 
@@ -99,3 +99,4 @@
 - **阶段先落盘再写文件**：`prepared` 保存候选头全文与正文清单，`publishing` 之后才写正文与头；任一阶段未确认即停在原阶段，不自动续写。
 - **未决阻塞**：同实例存在 `prepared`／`publishing` 记录时不接受新命令（`instance-blocked`），由显式 `recover` 解除。
 - **恢复不重放业务命令**：只比对磁盘与候选；匹配才补回执，不匹配一律待核对。`prepared` 只标未发布，历史 `committed` 只返结果。
+- **隔离标记独立于聚合**：写在 `quarantine/<instanceId>.json`，因此聚合损坏时仍能读到原因与保留的 operationId；解除必须显式确认。

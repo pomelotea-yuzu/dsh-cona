@@ -1,7 +1,7 @@
 // 规划与记录命令封套（tasks 4.1／4.2，design §5–§6）。
 // 本文件负责：可信入口校验、每实例提交队列、提交前重读、不可变变换、三态发布、双修订推进，
 // 以及 (instanceId, operationId) 幂等：先写 pending 意图、完成后写回执，重试返回原结果。
-// 未包含（4.3–4.5）：prepared／publishing 阶段、崩溃后候选核对、unknown-state 隔离。
+// 4.5 增补：unknown-state／聚合不可读时写隔离标记，停止该实例读写，并提供只读诊断与显式解除。
 
 import { applyPlanCommand, appendRecordIndex, type NodePatch, type PlanCommand } from '../domain/commands.js';
 import type {
@@ -18,7 +18,13 @@ import type {
 import { validateProjectDocument } from '../domain/validate.js';
 import { readSourceBaseline } from './baseline.js';
 import { InstanceCommandQueue } from './command-queue.js';
-import type { InstanceAggregate, OperationOrigin, OperationRecord, OperationResultSnapshot } from './local-state.js';
+import type {
+  InstanceAggregate,
+  OperationOrigin,
+  OperationRecord,
+  OperationResultSnapshot,
+  QuarantineInfo,
+} from './local-state.js';
 import type { BodyWriteOutcome, LocalStateStorePort, PublishHooksPort, SourceFilesPort } from './ports.js';
 
 /** 可信主体来源：两条入口分别判据，不共用一个“owner 或为空即放行”的判断。 */
@@ -104,6 +110,29 @@ export interface PendingCommand {
 export type CommandResult = CommittedCommand | RejectedCommand | PendingCommand;
 
 export type ReceiptResult = CommandResult | { status: 'not-found' };
+
+/** 只读诊断报告（tasks 4.5）：不写文件，不改变任何状态。 */
+export interface DiagnosticsReport {
+  instanceId: string;
+  quarantined: QuarantineInfo | null;
+  operations: {
+    operationId: string;
+    status: string;
+    createdAt: string;
+    candidateHeadHash?: string;
+    candidateHead?: string;
+  }[];
+  current: { planVersion: string; headHash: string; recordCount: number } | null;
+  comparisons: {
+    operationId: string;
+    headMatched: boolean;
+    bodiesMatched: boolean;
+    reverted: boolean;
+    diverged: boolean;
+  }[];
+  issues: { code: string; message: string }[];
+  guidance: string[];
+}
 
 /**
  * 恢复结论（tasks 4.4）：
@@ -237,7 +266,21 @@ export class ProjectCommandService {
   ): Promise<ReceiptResult> {
     const authorized = checkTrustedContext(ctx);
     if (!authorized.ok) return { status: 'rejected', code: authorized.code, message: authorized.message };
-    const aggregate = await this.deps.store.readAggregate(this.deps.localRoot, request.instanceId);
+    const quarantine = await this.deps.store.readQuarantine(this.deps.localRoot, request.instanceId);
+    if (quarantine !== null) {
+      return {
+        status: 'rejected',
+        code: 'unknown-state',
+        message: `该实例已隔离（${quarantine.reason}）；只提供只读诊断，不提供回执读取`,
+      };
+    }
+    let aggregate: InstanceAggregate | null;
+    try {
+      aggregate = await this.deps.store.readAggregate(this.deps.localRoot, request.instanceId);
+    } catch (error) {
+      await this.isolate(request.instanceId, 'aggregate-unreadable', 'read-receipt', undefined, (error as Error).message);
+      return { status: 'rejected', code: 'unknown-state', message: '本机聚合不可读；实例已隔离，只提供只读诊断' };
+    }
     if (aggregate === null) return { status: 'not-found' };
     const record = aggregate.operations.find((item) => item.operationId === request.operationId);
     if (record === undefined) return { status: 'not-found' };
@@ -258,12 +301,26 @@ export class ProjectCommandService {
   ): Promise<RecoveryResult> {
     const authorized = checkTrustedContext(ctx);
     if (!authorized.ok) return { status: 'rejected', code: authorized.code, message: authorized.message };
+    const quarantine = await this.deps.store.readQuarantine(this.deps.localRoot, request.instanceId);
+    if (quarantine !== null) {
+      return {
+        status: 'rejected',
+        code: 'unknown-state',
+        message: `该实例已隔离（${quarantine.reason}，阶段 ${quarantine.stage}）；先离线核对并解除隔离后再恢复`,
+      };
+    }
     return this.queue.run(request.instanceId, async () => {
       const root = this.deps.localRoot;
       const registry = await this.deps.store.readRegistry(root);
       const entry = registry.instances.find((item) => item.instanceId === request.instanceId);
       if (entry === undefined) return { status: 'not-found' };
-      const aggregate = await this.deps.store.readAggregate(root, request.instanceId);
+      let aggregate: InstanceAggregate | null;
+      try {
+        aggregate = await this.deps.store.readAggregate(root, request.instanceId);
+      } catch (error) {
+        await this.isolate(request.instanceId, 'aggregate-unreadable', 'read-recover', undefined, (error as Error).message);
+        return { status: 'rejected', code: 'unknown-state', message: '本机聚合不可读；实例已隔离' };
+      }
       if (aggregate === null) return { status: 'not-found' };
       const record = aggregate.operations.find((item) => item.operationId === request.operationId);
       if (record === undefined) return { status: 'not-found' };
@@ -350,11 +407,12 @@ export class ProjectCommandService {
           };
         }
         if (saved.status === 'unknown-state') {
+          await this.isolate(request.instanceId, 'unknown-state', 'recover', record.operationId, saved.detail);
           return {
             status: 'pending-reconciliation',
             operationId: record.operationId,
             stage: 'local-state',
-            message: '候选已匹配，但本机聚合写入结果未知；先核对本机数据',
+            message: '候选已匹配，但本机聚合写入结果未知；实例已隔离，先离线核对再解除',
           };
         }
         return {
@@ -378,6 +436,107 @@ export class ProjectCommandService {
           : '当前资料既不匹配候选也不等于原基线（部分匹配或分叉）；保持待核对，不自动覆盖',
       };
     });
+  }
+
+  /** 写隔离标记（best-effort）：即使标记写不进去，调用方仍会停止后续操作。 */
+  private async isolate(
+    instanceId: string,
+    reason: QuarantineInfo['reason'],
+    stage: string,
+    operationId?: string,
+    detail?: string,
+  ): Promise<void> {
+    try {
+      await this.deps.store.quarantine(this.deps.localRoot, {
+        schemaVersion: 1,
+        instanceId,
+        reason,
+        stage,
+        createdAt: this.deps.clock(),
+        requires: 'offline-review',
+        ...(operationId === undefined ? {} : { operationId }),
+        ...(detail === undefined ? {} : { detail }),
+      });
+    } catch {
+      // 标记失败不改变“停止读写”的结论；由调用方返回待核对。
+    }
+  }
+
+  /**
+   * 只读诊断（tasks 4.5）：列出隔离状态、未决操作、当前磁盘基线与候选比对。
+   * 不写任何文件；聚合不可读时仍返回隔离原因与诊断建议。
+   */
+  async diagnostics(instanceId: string): Promise<DiagnosticsReport> {
+    const root = this.deps.localRoot;
+    const issues: { code: string; message: string }[] = [];
+    const quarantined = await this.deps.store.readQuarantine(root, instanceId);
+
+    let aggregate: InstanceAggregate | null = null;
+    try {
+      aggregate = await this.deps.store.readAggregate(root, instanceId);
+    } catch (error) {
+      issues.push({
+        code: (error as { code?: string }).code ?? 'local-aggregate-unreadable',
+        message: (error as Error).message,
+      });
+    }
+
+    const registry = await this.deps.store.readRegistry(root);
+    const entry = registry.instances.find((item) => item.instanceId === instanceId);
+    let current: DiagnosticsReport['current'] = null;
+    let currentRecords: { path: string; contentHash: string; observedHash: string }[] = [];
+    if (entry === undefined) {
+      issues.push({ code: 'registry-instance-not-found', message: '本机注册表中没有该实例' });
+    } else {
+      const baseline = await readSourceBaseline(this.deps.files, entry.sourceRoot, this.deps.sha256, this.deps.clock);
+      if (baseline.ok) {
+        current = {
+          planVersion: baseline.baseline.planVersion,
+          headHash: baseline.baseline.headHash,
+          recordCount: baseline.baseline.records.length,
+        };
+        currentRecords = baseline.baseline.records.map((item) => ({
+          path: item.path,
+          contentHash: item.contentHash,
+          observedHash: item.observedHash,
+        }));
+      } else {
+        issues.push(...baseline.issues.map((issue) => ({ code: issue.code, message: issue.message })));
+      }
+    }
+
+    const operations = (aggregate?.operations ?? []).map((item) => ({
+      operationId: item.operationId,
+      status: item.status,
+      createdAt: item.createdAt,
+      ...(item.prepared === undefined
+        ? {}
+        : { candidateHeadHash: item.prepared.candidateHeadHash, candidateHead: item.prepared.candidateHead }),
+    }));
+
+    const comparisons = (aggregate?.operations ?? [])
+      .filter((item) => item.status === 'publishing' && item.prepared !== undefined)
+      .map((item) => {
+        const prepared = item.prepared as NonNullable<OperationRecord['prepared']>;
+        const headMatched = current !== null && current.headHash === prepared.candidateHeadHash;
+        const reverted = current !== null && current.headHash === prepared.originalHeadHash;
+        const bodiesMatched =
+          current !== null &&
+          prepared.bodies.every((body) =>
+            currentRecords.some((record) => record.path === body.path && record.observedHash === body.contentHash),
+          );
+        return { operationId: item.operationId, headMatched, bodiesMatched, reverted, diverged: !headMatched && !reverted };
+      });
+
+    const guidance = [
+      quarantined === null
+        ? '实例未隔离；如存在未决操作，先运行 recover 核对，不要直接重发业务命令。'
+        : `实例已隔离（${quarantined.reason}）：停止所有命令与回执读取。人工核对资料根与本机数据后，用 local unisolate --confirm offline-reviewed 解除。`,
+      '核对顺序：看本报告的 current.headHash 与 comparisons；必要时对比 Git 历史确认资料是否被回退。',
+      '隔离解除后先用 recover 核对未决操作；匹配候选会补回执，不匹配会保持待核对。',
+    ];
+
+    return { instanceId, quarantined, operations, current, comparisons, issues, guidance };
   }
 
   private checkEnvelope(envelope: CommandEnvelope): CommandResult | null {
@@ -431,6 +590,16 @@ export class ProjectCommandService {
 
   private async commit(ctx: TrustedContext, envelope: CommandEnvelope): Promise<CommandResult> {
     const root = this.deps.localRoot;
+    const quarantine = await this.deps.store.readQuarantine(root, envelope.instanceId);
+    if (quarantine !== null) {
+      return {
+        status: 'rejected',
+        code: 'unknown-state',
+        message: `该实例已隔离（${quarantine.reason}，阶段 ${quarantine.stage}${
+          quarantine.operationId === undefined ? '' : `，保留操作 ${quarantine.operationId}`
+        }）；先离线核对再用 local unisolate 解除`,
+      };
+    }
     const registry = await this.deps.store.readRegistry(root);
     const entry = registry.instances.find((item) => item.instanceId === envelope.instanceId);
     if (entry === undefined) {
@@ -446,7 +615,17 @@ export class ProjectCommandService {
         message: `资料源代际已变为 ${entry.sourceGeneration}，命令基线为 ${envelope.sourceEpoch}`,
       };
     }
-    const aggregate = await this.deps.store.readAggregate(root, envelope.instanceId);
+    let aggregate: InstanceAggregate | null;
+    try {
+      aggregate = await this.deps.store.readAggregate(root, envelope.instanceId);
+    } catch (error) {
+      await this.isolate(envelope.instanceId, 'aggregate-unreadable', 'read', undefined, (error as Error).message);
+      return {
+        status: 'rejected',
+        code: 'unknown-state',
+        message: '本机聚合不可读；实例已隔离，先用 local diagnostics 核对',
+      };
+    }
     if (aggregate === null) {
       return { status: 'rejected', code: 'binding-expired', message: '实例聚合缺失；不自动重建' };
     }
@@ -564,6 +743,15 @@ export class ProjectCommandService {
     let working: InstanceAggregate = { ...aggregate, operations: [...aggregate.operations, record] };
     const preparedSaved = await this.deps.store.replaceAggregateChecked(root, working, this.deps.hooks?.state);
     if (preparedSaved.status !== 'saved') {
+      if (preparedSaved.status === 'unknown-state') {
+        await this.isolate(envelope.instanceId, 'unknown-state', 'prepared', envelope.operationId, preparedSaved.detail);
+        return {
+          status: 'pending-reconciliation',
+          operationId: envelope.operationId,
+          stage: 'prepared',
+          message: 'prepared 意图写入结果未知；实例已隔离，先核对本机数据',
+        };
+      }
       return {
         status: 'rejected',
         code: 'persistence-failed',
@@ -575,6 +763,15 @@ export class ProjectCommandService {
     working = this.withRecord(working, envelope.operationId, (item) => ({ ...item, status: 'publishing', updatedAt: this.deps.clock() }));
     const publishingSaved = await this.deps.store.replaceAggregateChecked(root, working, this.deps.hooks?.state);
     if (publishingSaved.status !== 'saved') {
+      if (publishingSaved.status === 'unknown-state') {
+        await this.isolate(envelope.instanceId, 'unknown-state', 'publishing', envelope.operationId, publishingSaved.detail);
+        return {
+          status: 'pending-reconciliation',
+          operationId: envelope.operationId,
+          stage: 'publishing',
+          message: 'publishing 阶段写入结果未知；实例已隔离，先核对资料与本机数据',
+        };
+      }
       const rejected: RejectedCommand = {
         status: 'rejected',
         code: 'persistence-failed',
@@ -666,11 +863,12 @@ export class ProjectCommandService {
       };
     }
     if (saved.status === 'unknown-state') {
+      await this.isolate(envelope.instanceId, 'unknown-state', 'receipt', envelope.operationId, saved.detail);
       return {
         status: 'pending-reconciliation',
         operationId: envelope.operationId,
         stage: 'local-state',
-        message: '资料已发布，本机聚合写入结果未知；不要换 id 重试，先核对本机数据',
+        message: '资料已发布，本机聚合写入结果未知；实例已隔离，先离线核对再解除',
       };
     }
 

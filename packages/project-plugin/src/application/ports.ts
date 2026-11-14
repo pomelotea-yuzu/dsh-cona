@@ -9,6 +9,7 @@ import type {
   LocalRootPlan,
   LocalRootView,
   PrivateRootCheck,
+  QuarantineInfo,
   Registry,
 } from './local-state.js';
 
@@ -194,6 +195,13 @@ export interface LocalStateStorePort {
   /** 独占锁内执行；同进程重复写者或锁被占用时返回 false 与诊断，不等待、不抢占。 */
   withLock<T>(localRoot: string, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; issues: LocalIssue[] }>;
   lockInfo(localRoot: string): Promise<LocalLockInfo | null>;
+  /** 读隔离标记（只读诊断可用；不因聚合损坏而不可读）。 */
+  readQuarantine(localRoot: string, instanceId: string): Promise<QuarantineInfo | null>;
+  /** 写隔离标记：实例进入停止读写状态，直到显式解除。 */
+  quarantine(localRoot: string, info: QuarantineInfo): Promise<void>;
+  /** 解除隔离（调用方必须已取得用户明确的离线核对确认）。 */
+  releaseQuarantine(localRoot: string, instanceId: string): Promise<boolean>;
+  listQuarantined(localRoot: string): Promise<QuarantineInfo[]>;
   /** 显式释放遗留锁：需 force 或持有者 token 匹配；不提供自动超时释放。 */
   releaseLock(
     localRoot: string,

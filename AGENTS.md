@@ -6,13 +6,13 @@
 
 ## 一句话
 
-以 DSH 为 Agent 底座、以项目代码开发为主要场景的项目管理插件，支持用户直接搭建与拼接项目树、流程／骨架模板、多对多聊天关联和 Agent 自主规划；视频制作等偶发需求可按需加入项目。当前已有公开资料格式、三种资料位置、本机注册表与实例聚合、三态发布与显式刷新（第 1、3 段）；面板、聊天绑定与 Agent 工具未实现。
+以 DSH 为 Agent 底座、以项目代码开发为主要场景的项目管理插件，支持用户直接搭建与拼接项目树、流程／骨架模板、多对多聊天关联和 Agent 自主规划；视频制作等偶发需求可按需加入项目。当前已有公开资料格式、三种资料位置、本机注册表与实例聚合、三态发布与显式刷新（第 1、3 段），以及命令封套、幂等回执、持久阶段、候选恢复与 unknown 隔离（第 4 段）；面板、i18n、聊天绑定与 Agent 工具未实现。
 
 用户已认可项目树与目标／时间路线图共用规划的整体设计；首版 i18n 完整支持简体中文与英文，其他宿主语言回退英文。具体实现仍待验证。
 
 用户要求项目资料可选项目／DSH／自定义目录，支持 Git 多人跨环境协作、其他 Agent 可读与新机器 DSH 接续。公开资料与本机会话、授权及回执分开，格式与恢复方案仍待验证。
 
-当前活动提案：`openspec/changes/establish-r1-project-plugin/`，覆盖 R1 插件贯通实验；第 1 轮外部审阅已完成并按意见修订，第 2 段完成（2.1–2.5；2.4b 的绑定/归属复测待第 6 段，non-owner 为 R1 边界），第 3 段 3.1 完成（三种资料位置、实际路径与 Git 只读状态、外部 v1 基础接入，见 change 内 `implementation/2026-11-14-3.1-positions.md`），3.2 完成（本机根、注册表、实例聚合、锁与私有根检查，见 `implementation/2026-11-14-3.2-local-state.md`），3.3–3.5 完成（路径范围、三态发布与中断注入、完整基线与显式刷新，见 `implementation/2026-11-14-3.3-3.5-scope-publish-refresh.md`），第 3 段收口；4.1 完成（命令封套、访问校验、不可变变换、每实例队列，见 `implementation/2026-11-14-4.1-command-envelope.md`），4.2 完成（意图／回执幂等与稳定生成 id，见 `implementation/2026-11-14-4.2-idempotency.md`），4.3 完成（prepared／publishing／committed 阶段与中断注入，见 `implementation/2026-11-14-4.3-phases.md`），4.4 完成（候选核对与恢复回执，见 `implementation/2026-11-14-4.4-recovery.md`），4.5 起未开始；处理见 change 内的 `review-response.md`。
+当前活动提案：`openspec/changes/establish-r1-project-plugin/`，覆盖 R1 插件贯通实验；第 1 轮外部审阅已完成并按意见修订，第 2 段完成（2.1–2.5；2.4b 的绑定/归属复测待第 6 段，non-owner 为 R1 边界），第 3 段 3.1 完成（三种资料位置、实际路径与 Git 只读状态、外部 v1 基础接入，见 change 内 `implementation/2026-11-14-3.1-positions.md`），3.2 完成（本机根、注册表、实例聚合、锁与私有根检查，见 `implementation/2026-11-14-3.2-local-state.md`），3.3–3.5 完成（路径范围、三态发布与中断注入、完整基线与显式刷新，见 `implementation/2026-11-14-3.3-3.5-scope-publish-refresh.md`），第 3 段收口；4.1 完成（命令封套、访问校验、不可变变换、每实例队列，见 `implementation/2026-11-14-4.1-command-envelope.md`），4.2 完成（意图／回执幂等与稳定生成 id，见 `implementation/2026-11-14-4.2-idempotency.md`），4.3 完成（prepared／publishing／committed 阶段与中断注入，见 `implementation/2026-11-14-4.3-phases.md`），4.4 完成（候选核对与恢复回执，见 `implementation/2026-11-14-4.4-recovery.md`），4.5 完成（unknown-state 隔离与只读诊断，见 `implementation/2026-11-14-4.5-quarantine.md`），第 4 段收口，第 5 段未开始；处理见 change 内的 `review-response.md`。
 
 ## 权威性
 

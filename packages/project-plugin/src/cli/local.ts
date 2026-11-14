@@ -14,6 +14,7 @@ import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { readSourceBaseline } from '../application/baseline.js';
+import { ProjectCommandService } from '../application/command-service.js';
 import { LocalStateService } from '../application/local-state.js';
 import type { LocationKind } from '../application/location.js';
 import { LocalStateStore } from '../adapters/fs/local-state.js';
@@ -32,6 +33,9 @@ function usage(): string {
     '  local.js list    --local-root <dir>',
     '  local.js show    --local-root <dir> --instance <instanceId>',
     '  local.js refresh --local-root <dir> --instance <instanceId> --source <资料根>',
+    '  local.js diagnostics --local-root <dir> --instance <instanceId>',
+    '  local.js unisolate --local-root <dir> --instance <instanceId> --confirm offline-reviewed',
+    '  local.js quarantined --local-root <dir>',
     '  local.js release-lock --local-root <dir> (--force | --token <token>)',
   ].join('\n') + '\n';
 }
@@ -64,6 +68,7 @@ async function main(): Promise<number> {
       kind: { type: 'string' },
       instance: { type: 'string' },
       token: { type: 'string' },
+      confirm: { type: 'string' },
       force: { type: 'boolean', default: false },
     },
   });
@@ -139,6 +144,63 @@ async function main(): Promise<number> {
       const result = await service.show({ ...rootRequest(values), instanceId: values['instance'] });
       process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
       return result.ok ? 0 : 1;
+    }
+    if (command === 'diagnostics') {
+      const localRoot = values['local-root'];
+      const instanceId = values['instance'];
+      if (typeof localRoot !== 'string' || typeof instanceId !== 'string') {
+        process.stderr.write('diagnostics 需要 --local-root 与 --instance\n' + usage());
+        return 2;
+      }
+      // 只读诊断不写文件；本机 CLI 视为 owner 语境，将来经 Remote 暴露时需另加准入。
+      const commandService = new ProjectCommandService({
+        localRoot,
+        store: new LocalStateStore(),
+        files: createSourceFiles(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'formats', 'v1'), sha256),
+        sha256,
+        clock: () => new Date().toISOString(),
+        newNodeId: () => randomUUID(),
+        newRecordId: () => randomUUID(),
+      });
+      const report = await commandService.diagnostics(instanceId);
+      process.stdout.write(JSON.stringify({ command, ok: true, ...report }) + '\n');
+      return 0;
+    }
+    if (command === 'unisolate') {
+      const localRoot = values['local-root'];
+      const instanceId = values['instance'];
+      if (typeof localRoot !== 'string' || typeof instanceId !== 'string') {
+        process.stderr.write('unisolate 需要 --local-root 与 --instance\n' + usage());
+        return 2;
+      }
+      if (values['confirm'] !== 'offline-reviewed') {
+        process.stdout.write(
+          JSON.stringify({
+            command,
+            ok: false,
+            issues: [
+              {
+                code: 'quarantine-release-unconfirmed',
+                message: '必须确认已人工核对：--confirm offline-reviewed；本插件不提供一键忽略',
+              },
+            ],
+          }) + '\n',
+        );
+        return 1;
+      }
+      const released = await new LocalStateStore().releaseQuarantine(localRoot, instanceId);
+      process.stdout.write(JSON.stringify({ command, ok: true, released }) + '\n');
+      return 0;
+    }
+    if (command === 'quarantined') {
+      const localRoot = values['local-root'];
+      if (typeof localRoot !== 'string') {
+        process.stderr.write('quarantined 需要 --local-root\n' + usage());
+        return 2;
+      }
+      const entries = await new LocalStateStore().listQuarantined(localRoot);
+      process.stdout.write(JSON.stringify({ command, ok: true, entries }) + '\n');
+      return 0;
     }
     if (command === 'release-lock') {
       const localRoot = values['local-root'];

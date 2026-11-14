@@ -3,16 +3,17 @@
 // 只用 node:fs 与 node:crypto；不写公开资料，不执行 Git 写操作。
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { InstanceAggregate, Registry } from '../../application/local-state.js';
+import type { InstanceAggregate, QuarantineInfo, Registry } from '../../application/local-state.js';
 import type { LocalIssue, LocalLockInfo, LocalStateStorePort } from '../../application/ports.js';
 import { replaceAtomicallyChecked, type AtomicHooks, type AtomicStage } from './atomic-write.js';
 
 const REGISTRY_FILE = 'registry.json';
 const LOCK_FILE = 'lock.json';
 const INSTANCES_DIR = 'instances';
+const QUARANTINE_DIR = 'quarantine';
 
 /** 稳定错误码的本机状态失败；由服务层转成 issue，不向用户抛裸异常。 */
 export class LocalStateError extends Error {
@@ -151,6 +152,64 @@ export class LocalStateStore implements LocalStateStorePort {
       stage: result.stage,
       ...(result.detail === undefined ? {} : { detail: result.detail }),
     };
+  }
+
+  /** 隔离标记与聚合分开保存：聚合损坏时仍能读到原因与保留的操作 id。 */
+  async readQuarantine(localRoot: string, instanceId: string): Promise<QuarantineInfo | null> {
+    try {
+      const text = await readFile(path.join(localRoot, QUARANTINE_DIR, `${instanceId}.json`), 'utf8');
+      const parsed = JSON.parse(text) as Partial<QuarantineInfo>;
+      if (parsed.schemaVersion !== 1 || parsed.instanceId !== instanceId || parsed.requires !== 'offline-review') {
+        return null;
+      }
+      return {
+        schemaVersion: 1,
+        instanceId,
+        reason: parsed.reason === 'aggregate-unreadable' ? 'aggregate-unreadable' : 'unknown-state',
+        stage: typeof parsed.stage === 'string' ? parsed.stage : 'unknown',
+        createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : 'unknown',
+        requires: 'offline-review',
+        ...(typeof parsed.operationId === 'string' ? { operationId: parsed.operationId } : {}),
+        ...(typeof parsed.detail === 'string' ? { detail: parsed.detail } : {}),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async quarantine(localRoot: string, info: QuarantineInfo): Promise<void> {
+    const dir = path.join(localRoot, QUARANTINE_DIR);
+    try {
+      await mkdir(dir, { recursive: true });
+    } catch (error) {
+      throw new LocalStateError('local-quarantine-failed', (error as Error).message);
+    }
+    await writeJsonAtomic(path.join(dir, `${info.instanceId}.json`), info);
+  }
+
+  async releaseQuarantine(localRoot: string, instanceId: string): Promise<boolean> {
+    try {
+      await rm(path.join(localRoot, QUARANTINE_DIR, `${instanceId}.json`));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async listQuarantined(localRoot: string): Promise<QuarantineInfo[]> {
+    let names: string[];
+    try {
+      names = await readdir(path.join(localRoot, QUARANTINE_DIR));
+    } catch {
+      return [];
+    }
+    const out: QuarantineInfo[] = [];
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      const info = await this.readQuarantine(localRoot, name.slice(0, -'.json'.length));
+      if (info !== null) out.push(info);
+    }
+    return out;
   }
 
   async lockInfo(localRoot: string): Promise<LocalLockInfo | null> {
