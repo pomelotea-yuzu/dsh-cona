@@ -77,6 +77,13 @@ export interface SourceFilesPort {
   readDocument(
     root: string,
   ): Promise<{ ok: true; doc: ProjectDocument } | { ok: false; issues: ValidationIssue[] }>;
+  /** 读取资料头原始字节（基线需要字节哈希，解析结果不代替原字节）。 */
+  readHead(root: string): Promise<{ ok: true; bytes: Uint8Array; text: string } | { ok: false; issues: ValidationIssue[] }>;
+  /** 读取根内单个文件（走范围校验）；用于引用正文。 */
+  readScopedFile(
+    root: string,
+    relativePath: string,
+  ): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; issues: ValidationIssue[] }>;
   writeDocument(
     root: string,
     doc: ProjectDocument,
@@ -150,6 +157,11 @@ export interface LocalStateStorePort {
   writeRegistry(localRoot: string, registry: Registry): Promise<void>;
   readAggregate(localRoot: string, instanceId: string): Promise<InstanceAggregate | null>;
   writeAggregate(localRoot: string, aggregate: InstanceAggregate): Promise<void>;
+  /** 三态替换（tasks 3.4）：saved／not-saved／unknown-state，不能把 unknown 当失败重试。 */
+  replaceAggregateChecked(
+    localRoot: string,
+    aggregate: InstanceAggregate,
+  ): Promise<{ status: 'saved' | 'not-saved' | 'unknown-state'; stage: string; detail?: string }>;
   /** 独占锁内执行；同进程重复写者或锁被占用时返回 false 与诊断，不等待、不抢占。 */
   withLock<T>(localRoot: string, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; issues: LocalIssue[] }>;
   lockInfo(localRoot: string): Promise<LocalLockInfo | null>;

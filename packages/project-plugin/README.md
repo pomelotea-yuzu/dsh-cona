@@ -1,6 +1,6 @@
 # dsh-cona-project
 
-DSH-Cona 项目管理插件（R1）。当前已交付第 1 段（v1 公开资料格式、领域校验与无宿主校验命令）、3.1（三种资料位置与基础接入）与 3.2（本机根、注册表与实例聚合）。
+DSH-Cona 项目管理插件（R1）。当前已交付第 1 段（v1 公开资料格式、领域校验与无宿主校验命令）与第 3 段全部（资料位置与接入、本机根与注册表、路径范围、三态发布、基线与显式刷新）。
 
 - 边界与决定：[BOUNDARIES.md](BOUNDARIES.md)
 - 公开协议：[formats/v1/plan-canonicalization.md](formats/v1/plan-canonicalization.md)（随包分发，资料根携带副本）
@@ -81,6 +81,9 @@ node lib/cli/local.js register --local-root <目录> --source <资料根> --proj
 node lib/cli/local.js list --local-root <目录>
 node lib/cli/local.js show --local-root <目录> --instance <instanceId>
 
+# 显式刷新：重读磁盘完整基线（头字节哈希 + 每条正文哈希），推进源代际
+node lib/cli/local.js refresh --local-root <目录> --instance <instanceId> --source <资料根>
+
 # 遗留锁必须显式释放（不按超时抢占）
 node lib/cli/local.js release-lock --local-root <目录> (--force | --token <token>)
 ```
@@ -93,6 +96,27 @@ node lib/cli/local.js release-lock --local-root <目录> (--force | --token <tok
 - **身份**：同一资料根已登记为另一个 `projectId` 时拒绝静默复用（`registry-project-identity-changed`）；注册表损坏或版本不受支持时只读拒绝，不覆盖原文件。
 - **范围外**：不同 `localDataRoot` 管同一公开根、多人同时写同一目录、跨机同步均不在 R1 支持范围；真实宿主 profile 与面板展示待第 5／6 段。
 
+## 路径范围与发布语义
+
+- **相对引用**：统一 `/` 分段；拒绝绝对路径、盘符、反斜杠、NUL、空段、`.`／`..` 与百分号编码绕过。
+- **范围解析**：逐段拒绝符号链接，中间段必须是目录，目标须是常规文件；写目标若有多硬链接拒绝（`scope-hardlink`）；realpath 复核最终位置仍在根内。
+- **正文**：内容寻址 `records/<recordId>/<contentHash-hex>.md`，已存在必须字节一致（`already-present`），不一致报 `conflict` 且不覆盖。
+- **三态发布**：`published`（回读一致）／`not-published`（可证明未替换）／`unknown`（rename 后无法确认、回读不一致）。`unknown` 不等于失败，也不代表已提交；不要据此换 id 重试。
+- **本机聚合三态**：`saved`／`not-saved`／`unknown-state`，同样不把 unknown 当失败重试。
+- **孤立正文**：正文写入但资料头未引用时，校验报 `orphan-body`，查询不当作已发布记录。
+- **断电限制**：以上只有“同目录临时文件 + rename + 回读”，没有目录 fsync，也不跨目录／跨介质成事务；进程被强杀或突然断电时的持久性未证明，不宣称断电安全。
+
+## 外部编辑与刷新
+
+外部（Git checkout、其他 Agent、手工编辑）改动资料后按固定顺序处理，不自动合并、不自动重放：
+
+1. **暂停**：停止对该资料源的插件写入（未提交草稿留在 Client，不写入资料头）。
+2. **校验**：`node lib/cli/validate.js check <资料根>`；冲突标记、未知 schema、非法树、正文哈希不符都以稳定码拒绝。
+3. **刷新**：`node lib/cli/local.js refresh --local-root <目录> --instance <id> --source <资料根>`，以磁盘重读为准更新本机基线，返回 `changes`（头／规划指纹变化、记录新增／删除／改写）。
+4. **重新开始**：刷新成功后才继续写入；同路径项目身份变化（`source-identity-changed`）拒绝刷新，需人工核对后另建实例。
+
+刷新始终重读磁盘，不复用旧缓存；失败不推进源代际，也不改动既有基线。
+
 ## 实现状态
 
-第 1 段（tasks 1.1–1.5）、3.1、3.2 完成；3.3–3.5、第 4–7 段未开始，见 change `openspec/changes/establish-r1-project-plugin/tasks.md`。
+第 1 段（tasks 1.1–1.5）与第 3 段（3.1–3.5）完成；第 4–7 段未开始，见 change `openspec/changes/establish-r1-project-plugin/tasks.md`。

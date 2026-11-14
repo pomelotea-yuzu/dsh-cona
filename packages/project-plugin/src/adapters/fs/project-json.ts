@@ -1,12 +1,10 @@
-// 公开资料头（project.json）的读写适配器（tasks 3.1）。
+// 公开资料头（project.json）的读取与序列化（tasks 3.1／3.4）。
 // 序列化只影响排版，不改变协议语义：planVersion 由规划投影计算，与键序／缩进无关。
-// 写入采用同目录临时文件 + rename，并回读核对；失败注入与三态结果在 3.4 补。
+// 写入（三态发布）见 publish.ts；读取经 path-scope 范围校验。
 
-import { randomUUID } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { strictParse } from '../../domain/strict-json.js';
 import { validateProjectDocument } from '../../domain/validate.js';
+import { readInScope } from './path-scope.js';
 import type {
   DependencyEdge,
   ProjectDocument,
@@ -86,13 +84,15 @@ export type ReadProjectDocumentResult =
 
 /** 读取并完整校验资料头；BOM、非法 UTF-8、未知字段都以稳定码拒绝。 */
 export async function readProjectDocument(root: string, sha256?: Sha256Fn): Promise<ReadProjectDocumentResult> {
-  const filePath = path.join(root, PROJECT_FILE);
-  let bytes: Uint8Array;
-  try {
-    bytes = new Uint8Array(await readFile(filePath));
-  } catch (error) {
-    return { ok: false, issues: [{ code: 'file-unreadable', path: PROJECT_FILE, message: (error as Error).message }] };
+  // 读取走范围校验：拒绝越界引用、symlink、非常规文件与超限文件。
+  const scoped = await readInScope(root, PROJECT_FILE);
+  if (!scoped.ok) {
+    return {
+      ok: false,
+      issues: scoped.issues.map((issue) => ({ code: issue.code, path: PROJECT_FILE, message: issue.message })),
+    };
   }
+  const bytes = scoped.bytes;
   if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
     return { ok: false, issues: [{ code: 'bom', path: PROJECT_FILE, message: 'project.json 带 UTF-8 BOM，协议拒绝' }] };
   }
@@ -110,38 +110,4 @@ export async function readProjectDocument(root: string, sha256?: Sha256Fn): Prom
   const validated = validateProjectDocument(parsed.value, sha256 === undefined ? {} : { sha256 });
   if (!validated.ok) return { ok: false, issues: validated.issues };
   return { ok: true, doc: validated.doc, text };
-}
-
-export type WriteProjectDocumentResult = { ok: true } | { ok: false; issues: ValidationIssue[] };
-
-/**
- * 原子替换资料头：临时文件与目标同目录（不跨盘），rename 后逐字节回读核对。
- * 本函数不宣称断电安全；rename 后、回读前的异常在 3.4 以 unknown 表达。
- */
-export async function writeProjectDocument(root: string, doc: ProjectDocument): Promise<WriteProjectDocumentResult> {
-  const target = path.join(root, PROJECT_FILE);
-  const temp = path.join(root, `.${PROJECT_FILE}.tmp-${randomUUID()}`);
-  const text = serializeProjectDocument(doc);
-  try {
-    await writeFile(temp, text, { encoding: 'utf8', flag: 'wx' });
-    await rename(temp, target);
-  } catch (error) {
-    await rm(temp, { force: true });
-    return {
-      ok: false,
-      issues: [{ code: 'persistence-failed', path: PROJECT_FILE, message: (error as Error).message }],
-    };
-  }
-  try {
-    const readBack = await readFile(target, 'utf8');
-    if (readBack !== text) {
-      return {
-        ok: false,
-        issues: [{ code: 'persistence-reread-mismatch', path: PROJECT_FILE, message: '回读字节与写入内容不一致' }],
-      };
-    }
-  } catch (error) {
-    return { ok: false, issues: [{ code: 'persistence-failed', path: PROJECT_FILE, message: (error as Error).message }] };
-  }
-  return { ok: true };
 }

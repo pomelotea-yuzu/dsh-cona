@@ -25,3 +25,5 @@ export {
 } from './canonical/plan-fingerprint.js';
 export { encodeCanonicalAlt, computePlanVersionAlt, planVersionFromJsonTextAlt } from './canonical/plan-fingerprint-alt.js';
 export { utf8Encode, Utf8EncodeError } from './canonical/utf8.js';
+export { validateRelativePath } from './relative-path.js';
+export type { RelativePathError, RelativePathErrorCode, RelativePathResult } from './relative-path.js';

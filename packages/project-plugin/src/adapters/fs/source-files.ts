@@ -6,7 +6,9 @@ import { copyFile, mkdir, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { SourceFilesPort, RootInspection } from '../../application/ports.js';
 import type { Sha256Fn } from '../../domain/types.js';
-import { readProjectDocument, writeProjectDocument } from './project-json.js';
+import { readProjectDocument } from './project-json.js';
+import { readInScope } from './path-scope.js';
+import { publishProjectDocument } from './publish.js';
 
 /** 随包格式资源在资料根内的相对落点（design §3）。 */
 export const FORMAT_ASSET_FILES: readonly { source: string; target: string }[] = [
@@ -57,6 +59,44 @@ export function createSourceFiles(formatsDir: string, sha256: Sha256Fn): SourceF
       const result = await readProjectDocument(root, sha256);
       return result.ok ? { ok: true, doc: result.doc } : { ok: false, issues: result.issues };
     },
-    writeDocument: (root: string, doc) => writeProjectDocument(root, doc),
+    readHead: async (root: string) => {
+      const scoped = await readInScope(root, 'project.json');
+      if (!scoped.ok) {
+        return {
+          ok: false,
+          issues: scoped.issues.map((issue) => ({ code: issue.code, path: 'project.json', message: issue.message })),
+        };
+      }
+      try {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(scoped.bytes);
+        return { ok: true, bytes: scoped.bytes, text };
+      } catch {
+        return { ok: false, issues: [{ code: 'invalid-utf8', path: 'project.json', message: 'project.json 不是合法 UTF-8' }] };
+      }
+    },
+    readScopedFile: async (root: string, relativePath: string) => {
+      const scoped = await readInScope(root, relativePath);
+      if (!scoped.ok) {
+        return {
+          ok: false,
+          issues: scoped.issues.map((issue) => ({ code: issue.code, path: relativePath, message: issue.message })),
+        };
+      }
+      return { ok: true, bytes: scoped.bytes };
+    },
+    writeDocument: async (root, doc) => {
+      const result = await publishProjectDocument(root, doc);
+      if (result.status === 'published') return { ok: true };
+      return {
+        ok: false,
+        issues: [
+          {
+            code: result.status === 'not-published' ? 'publish-not-published' : 'publish-unknown',
+            path: 'project.json',
+            message: `${result.stage}${result.detail === undefined ? '' : `：${result.detail}`}`,
+          },
+        ],
+      };
+    },
   };
 }

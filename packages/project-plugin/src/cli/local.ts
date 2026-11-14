@@ -8,14 +8,21 @@
 // 输出一行 JSON；失败退出码 1，用法错误 2。
 // 不写公开资料、不执行 Git 提交；遗留锁必须显式释放，不自动按超时抢占。
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { readSourceBaseline } from '../application/baseline.js';
 import { LocalStateService } from '../application/local-state.js';
 import type { LocationKind } from '../application/location.js';
 import { LocalStateStore } from '../adapters/fs/local-state.js';
 import { inspectPrivateRoot } from '../adapters/fs/git-guard.js';
 import { resolveLocalRoot, rootRelation } from '../adapters/fs/local-root.js';
+import { createSourceFiles } from '../adapters/fs/source-files.js';
+import type { Sha256Fn } from '../domain/types.js';
+
+const sha256: Sha256Fn = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 function usage(): string {
   return [
@@ -24,6 +31,7 @@ function usage(): string {
     '  local.js register --local-root <dir> --source <资料根> --project-id <uuid> --kind <kind>',
     '  local.js list    --local-root <dir>',
     '  local.js show    --local-root <dir> --instance <instanceId>',
+    '  local.js refresh --local-root <dir> --instance <instanceId> --source <资料根>',
     '  local.js release-lock --local-root <dir> (--force | --token <token>)',
   ].join('\n') + '\n';
 }
@@ -54,7 +62,6 @@ async function main(): Promise<number> {
       source: { type: 'string' },
       'project-id': { type: 'string' },
       kind: { type: 'string' },
-      'plan-version': { type: 'string' },
       instance: { type: 'string' },
       token: { type: 'string' },
       force: { type: 'boolean', default: false },
@@ -91,7 +98,30 @@ async function main(): Promise<number> {
         sourceRoot: values['source'],
         sourceKind: values['kind'] as LocationKind,
         projectId: values['project-id'],
-        ...(typeof values['plan-version'] === 'string' ? { planVersion: values['plan-version'] } : {}),
+      });
+      process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
+      return result.ok ? 0 : 1;
+    }
+    if (command === 'refresh') {
+      if (
+        typeof values['local-root'] !== 'string' ||
+        typeof values['instance'] !== 'string' ||
+        typeof values['source'] !== 'string'
+      ) {
+        process.stderr.write('refresh 需要 --local-root、--instance 与 --source\n' + usage());
+        return 2;
+      }
+      const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+      const files = createSourceFiles(path.join(packageRoot, 'formats', 'v1'), sha256);
+      const baseline = await readSourceBaseline(files, path.resolve(values['source']), sha256, () => new Date().toISOString());
+      if (!baseline.ok) {
+        process.stdout.write(JSON.stringify({ command, ok: false, issues: baseline.issues }) + '\n');
+        return 1;
+      }
+      const result = await service.refresh({
+        localDataRoot: values['local-root'],
+        instanceId: values['instance'],
+        baseline: baseline.baseline,
       });
       process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
       return result.ok ? 0 : 1;

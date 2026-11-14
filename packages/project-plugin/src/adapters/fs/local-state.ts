@@ -3,11 +3,12 @@
 // 只用 node:fs 与 node:crypto；不写公开资料，不执行 Git 写操作。
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { InstanceAggregate, Registry } from '../../application/local-state.js';
 import type { LocalIssue, LocalLockInfo, LocalStateStorePort } from '../../application/ports.js';
+import { replaceAtomicallyChecked, type AtomicHooks, type AtomicStage } from './atomic-write.js';
 
 const REGISTRY_FILE = 'registry.json';
 const LOCK_FILE = 'lock.json';
@@ -39,13 +40,12 @@ function emptyRegistry(): Registry {
 }
 
 async function writeJsonAtomic(target: string, value: unknown): Promise<void> {
-  const temp = `${target}.tmp-${randomUUID()}`;
-  try {
-    await writeFile(temp, JSON.stringify(value, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' });
-    await rename(temp, target);
-  } catch (error) {
-    await rm(temp, { force: true });
-    throw new LocalStateError('local-state-write-failed', (error as Error).message);
+  const result = await replaceAtomicallyChecked(target, JSON.stringify(value, null, 2) + '\n');
+  if (result.status !== 'saved') {
+    throw new LocalStateError(
+      result.status === 'not-saved' ? 'local-state-write-failed' : 'local-state-unknown',
+      result.detail ?? '本机状态写入失败',
+    );
   }
 }
 
@@ -124,6 +124,33 @@ export class LocalStateStore implements LocalStateStorePort {
       throw new LocalStateError('local-root-unwritable', (error as Error).message);
     }
     await writeJsonAtomic(path.join(dir, 'state.json'), aggregate);
+  }
+
+  /**
+   * 单实例聚合替换的三态结果（tasks 3.4）：saved／not-saved／unknown-state。
+   * 回执与双修订必须在同一次替换中保存；崩溃恢复语义由 4.x 命令层承接。
+   */
+  async replaceAggregateChecked(
+    localRoot: string,
+    aggregate: InstanceAggregate,
+    hooks: AtomicHooks = {},
+  ): Promise<{ status: 'saved' | 'not-saved' | 'unknown-state'; stage: AtomicStage; detail?: string }> {
+    const dir = path.join(localRoot, INSTANCES_DIR, aggregate.instanceId);
+    try {
+      await mkdir(dir, { recursive: true });
+    } catch (error) {
+      return { status: 'not-saved', stage: 'temp', detail: (error as Error).message };
+    }
+    const result = await replaceAtomicallyChecked(
+      path.join(dir, 'state.json'),
+      JSON.stringify(aggregate, null, 2) + '\n',
+      hooks,
+    );
+    return {
+      status: result.status === 'saved' ? 'saved' : result.status === 'not-saved' ? 'not-saved' : 'unknown-state',
+      stage: result.stage,
+      ...(result.detail === undefined ? {} : { detail: result.detail }),
+    };
   }
 
   async lockInfo(localRoot: string): Promise<LocalLockInfo | null> {

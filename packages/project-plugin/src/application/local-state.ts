@@ -2,6 +2,7 @@
 // 边界：本文件只描述语义（位置、注册、聚合形状）与编排；路径拼接、锁与文件读写由 adapters 落实。
 // 公开资料根与本机运行根必须互不包含；本机数据不写回公开头。
 
+import type { SourceBaseline } from './baseline.js';
 import type { LocationKind } from './location.js';
 import type { LocalIssue, LocalStateStorePort, LocalRootResolverPort, GitPrivateRootPort } from './ports.js';
 
@@ -59,9 +60,23 @@ export interface Registry {
   instances: RegistryEntry[];
 }
 
+/** 最近一次有效观察：规划指纹之外另记头字节哈希与逐条正文哈希（3.5）。 */
+export interface ObservationRecord {
+  path: string;
+  contentHash: string;
+  observedHash: string;
+}
+
+export interface ObservationBaseline {
+  planVersion: string;
+  headHash: string;
+  records: ObservationRecord[];
+  observedAt: string;
+}
+
 /**
  * 单实例聚合：双修订、聊天关系、WorkRun 历史、意图／回执与最近有效观察同存一处。
- * 3.2 只落形状与基本读写；意图／回执字段内容在 3.4、聊天在 3.6 细化。
+ * 3.2 落形状与基本读写，3.5 补完整基线；意图／回执内容在 4.x、聊天在 3.6 细化。
  */
 export interface InstanceAggregate {
   schemaVersion: 1;
@@ -72,7 +87,7 @@ export interface InstanceAggregate {
   conversations: readonly unknown[];
   workRuns: readonly unknown[];
   operations: readonly unknown[];
-  lastObservation: { planVersion: string; observedAt: string } | null;
+  lastObservation: ObservationBaseline | null;
 }
 
 export interface LocalRootView {
@@ -109,8 +124,6 @@ export interface RegisterRequest extends LocalRootRequest {
   sourceRoot: string;
   sourceKind: LocationKind;
   projectId: string;
-  /** 最近一次观察到的规划指纹；可选，仅作为聚合基线。 */
-  planVersion?: string;
 }
 
 export interface RegisterResult {
@@ -119,6 +132,30 @@ export interface RegisterResult {
   entry: RegistryEntry;
   aggregate: InstanceAggregate;
   reused: boolean;
+}
+
+export interface RefreshRequest extends LocalRootRequest {
+  instanceId: string;
+  /** 由调用方先用 `readSourceBaseline` 重读磁盘得到的完整基线。 */
+  baseline: SourceBaseline;
+}
+
+export interface RefreshChanges {
+  /** 首次建立基线：没有旧观察可比较。 */
+  initial: boolean;
+  headChanged: boolean;
+  planVersionChanged: boolean;
+  recordsAdded: string[];
+  recordsRemoved: string[];
+  recordsChanged: string[];
+}
+
+export interface RefreshResult {
+  ok: true;
+  root: LocalRootView;
+  entry: RegistryEntry;
+  aggregate: InstanceAggregate;
+  changes: RefreshChanges;
 }
 
 export interface ListResult {
@@ -286,10 +323,8 @@ export class LocalStateService {
         conversations: [],
         workRuns: [],
         operations: [],
-        lastObservation:
-          typeof request.planVersion === 'string'
-            ? { planVersion: request.planVersion, observedAt: now }
-            : null,
+        // 完整基线由显式刷新（3.5）建立；登记不写半截观察，避免被误当作已核查基线。
+        lastObservation: null,
       };
       // 先写聚合再写注册表：注册表是权威索引，不能指向不存在的聚合。
       await this.deps.store.writeAggregate(rootView.root, aggregate);
@@ -304,6 +339,115 @@ export class LocalStateService {
     const value = locked.value;
     if (value.ok === false) return { ok: false, issues: value.issues };
     return { ok: true, root: value.root, entry: value.entry, aggregate: value.aggregate, reused: value.reused };
+  }
+
+  /**
+   * 显式刷新（tasks 3.5）：以磁盘重读的完整基线更新本机观察与源代际。
+   * 始终以磁盘为准，不复用旧缓存；项目身份变化时拒绝刷新，不覆盖既有聚合。
+   */
+  async refresh(request: RefreshRequest): Promise<LocalResult<RefreshResult>> {
+    try {
+      const planned = planLocalRoot(request);
+      if (!planned.ok) return { ok: false, issues: planned.issues };
+      const resolved = this.deps.resolver.resolveLocal(planned.plan);
+      if (!resolved.ok) return resolved;
+      const rootPath = resolved.root.root;
+
+      const locked = await this.deps.store.withLock(rootPath, async () => {
+        const registry = await this.deps.store.readRegistry(rootPath);
+        const entry = registry.instances.find((item) => item.instanceId === request.instanceId);
+        if (entry === undefined) {
+          return {
+            ok: false as const,
+            issues: [
+              { code: 'registry-instance-not-found', message: `本机注册表中没有实例 ${request.instanceId}`, path: rootPath },
+            ],
+          };
+        }
+        if (entry.projectId !== request.baseline.projectId) {
+          return {
+            ok: false as const,
+            issues: [
+              {
+                code: 'source-identity-changed',
+                message: `同一资料路径的项目 id 已变为 ${request.baseline.projectId}（原 ${entry.projectId}）；拒绝刷新，请核对来源后另建实例`,
+                path: entry.sourceRoot,
+              },
+            ],
+          };
+        }
+        const aggregate = await this.deps.store.readAggregate(rootPath, entry.instanceId);
+        if (aggregate === null) {
+          return {
+            ok: false as const,
+            issues: [
+              { code: 'registry-aggregate-missing', message: '注册表指向的实例聚合缺失；不自动重建', path: rootPath },
+            ],
+          };
+        }
+
+        const previous = aggregate.lastObservation;
+        const previousRecords = new Map((previous?.records ?? []).map((record) => [record.path, record.observedHash]));
+        const nextRecords = new Map(request.baseline.records.map((record) => [record.path, record.observedHash]));
+        const changes: RefreshChanges = {
+          initial: previous === null,
+          headChanged: previous === null || previous.headHash !== request.baseline.headHash,
+          planVersionChanged: previous === null || previous.planVersion !== request.baseline.planVersion,
+          recordsAdded: [...nextRecords.keys()].filter((pathKey) => !previousRecords.has(pathKey)).sort(),
+          recordsRemoved: [...previousRecords.keys()].filter((pathKey) => !nextRecords.has(pathKey)).sort(),
+          recordsChanged: [...nextRecords.entries()]
+            .filter(([pathKey, hash]) => previousRecords.has(pathKey) && previousRecords.get(pathKey) !== hash)
+            .map(([pathKey]) => pathKey)
+            .sort(),
+        };
+
+        const observedAt = this.deps.clock();
+        const nextAggregate: InstanceAggregate = {
+          ...aggregate,
+          source: { ...aggregate.source, generation: aggregate.source.generation + 1 },
+          lastObservation: {
+            planVersion: request.baseline.planVersion,
+            headHash: request.baseline.headHash,
+            records: request.baseline.records.map((record) => ({
+              path: record.path,
+              contentHash: record.contentHash,
+              observedHash: record.observedHash,
+            })),
+            observedAt,
+          },
+        };
+        const saved = await this.deps.store.replaceAggregateChecked(rootPath, nextAggregate);
+        if (saved.status !== 'saved') {
+          return {
+            ok: false as const,
+            issues: [
+              {
+                code: saved.status === 'not-saved' ? 'local-state-write-failed' : 'unknown-state',
+                message: `刷新未确认（${saved.stage}）：${saved.detail ?? '本机状态未保存'}；不要直接重试覆盖，先核对本机数据`,
+                path: rootPath,
+              },
+            ],
+          };
+        }
+        const nextEntry: RegistryEntry = {
+          ...entry,
+          sourceGeneration: nextAggregate.source.generation,
+          updatedAt: observedAt,
+        };
+        await this.deps.store.writeRegistry(rootPath, {
+          ...registry,
+          instances: registry.instances.map((item) => (item.instanceId === entry.instanceId ? nextEntry : item)),
+        });
+        return { ok: true as const, entry: nextEntry, aggregate: nextAggregate, changes };
+      });
+
+      if (locked.ok === false) return { ok: false, issues: locked.issues };
+      const value = locked.value;
+      if (value.ok === false) return { ok: false, issues: value.issues };
+      return { ok: true, root: resolved.root, entry: value.entry, aggregate: value.aggregate, changes: value.changes };
+    } catch (error) {
+      return failureOf(error);
+    }
   }
 
   async list(request: LocalRootRequest): Promise<LocalResult<ListResult>> {

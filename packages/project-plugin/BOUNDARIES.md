@@ -7,8 +7,8 @@
 | 目录 | 依赖及职责 | 边界验证 |
 |---|---|---|
 | `src/domain/` | JSON 数据结构、纯变换、树／依赖／完成条件校验、v1-plan 指纹；**无 Node、Cordis、React** | `tsconfig.domain.json`（`types: []`、纯 ES2022 lib）+ `scripts/check-boundaries.mjs` |
-| `src/application/` | 命令、查询、可信调用上下文、提交及恢复；调用 ports 和领域核心 | 3.1 已落位置计划与 `SourceService`（preview／create／attach）；3.2 已落本机根计划与 `LocalStateService`（ensureRoot／register／list／show）；命令封套在 3.4 |
-| `src/adapters/` | 文件、本机状态、DSH 会话和身份映射、Remote／工具入口 | 3.1 已落 `fs/`（位置解析、Git 只读观察、资料头读写、格式资源）；3.2 已落本机状态存储、私有根检查与锁；Remote 在 3.6 |
+| `src/application/` | 命令、查询、可信调用上下文、提交及恢复；调用 ports 和领域核心 | 3.1 位置计划与 `SourceService`；3.2 本机根与 `LocalStateService`；3.5 基线读取（`baseline.ts`）与 `refresh`；命令封套与回执在 4.x |
+| `src/adapters/` | 文件、本机状态、DSH 会话和身份映射、Remote／工具入口 | 3.1／3.2 位置、Git、资料头、本机状态与锁；3.3 范围解析；3.4 原子替换与三态发布；Remote 在 3.6 |
 | `src/client/` | 面板、编辑草稿、同步状态机、字典；不写文件或复制业务规则 | 第 5 段实现 |
 | `src/host/` | Cordis 服务装配、依赖注入和生命周期 | 第 2 段实现 |
 | `src/cli/` | 独立校验命令：纯 Node，无 DSH 服务 | `test/cli.test.ts` |
@@ -26,8 +26,8 @@
 ## 尚未验证（保持 untested）
 
 - 独立包构建、tarball 安装与真实宿主加载（第 2 段）。
-- 公开资料的 `not-published／published／unknown` 三态、意图日志与恢复状态机（3.4）；本机聚合已实现基本原子替换，中断注入未做。
-- 路径范围、符号链接、hardlink 与大小写（3.3）。
+- 意图日志、幂等回执与恢复状态机（4.x）；3.4 只做单步三态与注入观察。
+- 断电持久性：只有临时文件 + rename + 回读，没有目录 fsync，未做突然断电试验。
 - 面板同步、i18n、聊天绑定与真实 Agent 演示（第 5–6 段）。
 
 ## 3.1 落地的边界（资料位置与基础接入）
@@ -62,3 +62,20 @@
 - 公开资料与本机运行数据物理分离：注册表与聚合存放绝对路径、实例 id、修订号，这些字段一律不进 `project.json`。
 - 注册顺序：先写实例聚合，再写注册表；注册表不得指向不存在的聚合。发现注册表指向缺失聚合时拒绝复用，不自动重建实例。
 - 锁语义：进程内同根第二个写者直接拒绝（`local-writer-duplicate`）；跨进程用 `wx` 独占创建 `lock.json`（`local-lock-held`），遗留锁只能通过 `--force` 或持有者 token 显式释放。
+
+## 3.3–3.5 落地的边界
+
+| 文件 | 责任 | 不做什么 |
+|---|---|---|
+| `src/domain/relative-path.ts` | 公开相对引用分段协议（拒绝绝对、盘符、反斜杠、NUL、`.`／`..`、编码绕过） | 不碰文件系统、不判断存在性 |
+| `src/adapters/fs/path-scope.ts` | 逐段 symlink 检查、中间段目录检查、目标类型、写目标 hardlink、realpath 复核、范围读取与目录列举、大小写冲突检测 | 不做大小写归一或自动重命名；不跟随 symlink |
+| `src/adapters/fs/atomic-write.ts` | 同目录临时文件 + rename + 回读，三态结果与阶段 | 不做目录 fsync；不宣称断电安全；rename 后异常一律 `unknown` |
+| `src/adapters/fs/publish.ts` | 正文内容寻址写入（幂等／冲突）、资料头三态发布 | 不定发布顺序（4.x 命令层保证先正文后头） |
+| `src/application/baseline.ts` | 头字节哈希、逐条正文核对、冲突标记识别 | 不改磁盘、不返回部分基线 |
+| `src/application/local-state.ts`（refresh） | 以磁盘基线更新观察与源代际，计算 changes | 不复用旧缓存；身份变化拒绝刷新；不自动合并外部改动 |
+
+三条约束：
+
+- **unknown 不是失败**：`unknown`／`unknown-state` 表示无法确认，不得当“未提交”重试，也不得标成“已提交”。
+- **顺序由命令层负责**：3.4 提供单步可观察结果，正文 → 头 → 本机回执的整体顺序与恢复在 4.x。
+- **范围校验在每次读写**：读资料头、读正文、写头、写正文都经 `path-scope`，不缓存“已检查”结论。
