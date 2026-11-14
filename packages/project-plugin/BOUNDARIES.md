@@ -114,3 +114,17 @@
 - **不输出半新半旧快照**：两次聚合读取之间修订／源代际变化即重读；重试耗尽返回 `unsynced` 且无树。
 - **同步状态必须显式**：`source-drift` 时给磁盘一致内容但标 `not-synced + requiresRefresh`；本机无观察基线时标 `basis: current-read`，不冒充已验收基线。
 - **代际与修订分开**：`sourceEpoch` 是替换边界（不比较大小）；`stateRevision` 同代际内单调；旧代际请求 `stale-connection`。
+
+## 5.2 落地的边界（宿主 Remote 与实例打开）
+
+| 文件 | 责任 | 不做什么 |
+|---|---|---|
+| `src/host/bootstrap.ts` | 配置形态校验（只接受绝对路径）、校验资料后登记／复用实例、仅在磁盘变化时刷新基线 | 不猜目录、不扫描磁盘找项目、不改资料头；失败不建立半可用实例 |
+| `src/host/project-service.ts` | `conaProject` Remote 准入（owner invocation）、参数补齐、转交应用服务 | 不做一致性读取或命令逻辑；缺 invocation 不降级；`follow` 未暴露 |
+
+四条约束：
+
+- **配置即选择**：资料根来自 profile 配置的绝对路径，面板不做位置选择与迁移。
+- **启动期不无条件刷新**：刷新会推进源代际，而代际是订阅侧替换边界；只在缺失或与磁盘不一致时刷新。
+- **失败不阻塞宿主**：配置错误、资料不合法只体现在 `status.error`，插件其余部分照常加载。
+- **Remote 边界只放稳定结构**：`ProjectSnapshot.local` 用计数而非 `unknown[]`；边界类型必须从 `./types` 子路径导出（生成器约束）。

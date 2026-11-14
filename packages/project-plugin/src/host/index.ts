@@ -10,9 +10,47 @@
 // 工具定义的静态类型校验待宿主发布插件类型包后恢复。
 
 import { Context } from '@deepseek-ai/cordis'
+import { createHash, randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { z } from 'zod'
+import { ProjectCommandService } from '../application/command-service.js'
+import { InMemoryChangeStream, notificationForCommit, notificationForRefresh } from '../application/change-stream.js'
+import { ProjectSnapshotService } from '../application/snapshot.js'
+import { createSourceFiles } from '../adapters/fs/source-files.js'
+import { LocalStateStore } from '../adapters/fs/local-state.js'
+import { resolveLocalRoot, rootRelation } from '../adapters/fs/local-root.js'
+import { inspectPrivateRoot } from '../adapters/fs/git-guard.js'
+import { describeRoot } from '../adapters/fs/location.js'
+import type { Sha256Fn } from '../domain/types.js'
 import { ConaDiagnosticService } from './diagnostic-service.js'
+import { createLocalStateService, openConfiguredInstance, resolveHostConfig, type HostConfigInput, type HostWiring } from './bootstrap.js'
+import { ConaProjectService } from './project-service.js'
+import type { RuntimeResult } from './project-service.js'
 
 export const name = 'dsh-cona-project'
+
+/** 插件配置（cordis `Config`）：两条绝对路径都是用户显式选择，缺省即未配置。 */
+export const Config = z.object({
+  projectRoot: z.string().optional(),
+  localDataRoot: z.string().optional(),
+  instanceId: z.string().optional(),
+})
+
+const sha256: Sha256Fn = (bytes) => createHash('sha256').update(bytes).digest('hex')
+const clock = (): string => new Date().toISOString()
+
+/** 包根：lib/host/index.js → packages/project-plugin。 */
+function packageRootDir(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+}
+
+/** 本机运行数据根默认值（design §2）：`<宿主 home>/data/dsh-cona/local`。 */
+function defaultLocalRootDir(): string {
+  const home = process.env['DSH_HOME'] ?? path.join(homedir(), '.dsh')
+  return path.join(home, 'data', 'dsh-cona', 'local')
+}
 
 export interface ConaToolObservation {
   /** execute 收到的 exec.agent（Agent.id 为 SessionId）；无 agent 时为 null。 */
@@ -72,10 +110,11 @@ interface ConaToolsRegistry {
   register(definition: ConaToolDefinition): () => void;
 }
 
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config?: HostConfigInput): void {
   // tasks 2.3：宿主进程 Node 版本的直接观察证据（随激活日志输出）。
   console.log('[dsh-cona-project] host apply; node =', process.version, '; pid =', process.pid)
   ctx.plugin(ConaDiagnosticService)
+  mountProjectServices(ctx, config ?? {})
 
   const tools = (ctx as Context & { tools?: ConaToolsRegistry }).tools
   if (tools === undefined) {
@@ -178,6 +217,110 @@ export function apply(ctx: Context): void {
       if (observation.signalAbortedAtEnd !== null) output['signalAbortedAtEnd'] = observation.signalAbortedAtEnd
       return output
     },
+  })
+}
+
+/**
+ * 装配 `conaProject`（tasks 5.2）：配置 → 打开实例 → 快照／命令服务。
+ * 打开失败只记录并可经 `status` 读到，不阻塞宿主启动；首次调用后结果被记忆。
+ */
+function mountProjectServices(ctx: Context, config: HostConfigInput): void {
+  const stream = new InMemoryChangeStream()
+  const store = new LocalStateStore()
+  const files = createSourceFiles(path.join(packageRootDir(), 'formats', 'v1'), sha256)
+  const describe = (root: string): { displayPath: string } => ({ displayPath: describeRoot(root).displayPath })
+
+  const resolveRuntime = async (): Promise<RuntimeResult> => {
+    const resolved = resolveHostConfig(config)
+    if (!resolved.ok) {
+      return { ok: false, code: resolved.issues[0]?.code ?? 'cona-config-invalid', message: resolved.issues.map((issue) => issue.message).join('；') }
+    }
+    const wiring: HostWiring = {
+      files,
+      store,
+      resolver: { resolveLocal: resolveLocalRoot, relation: rootRelation },
+      git: { inspect: inspectPrivateRoot },
+      sha256,
+      clock,
+      newInstanceId: () => randomUUID(),
+      defaultLocalRoot: async () => defaultLocalRootDir(),
+      describeLocation: describe,
+    }
+    const localState = createLocalStateService(wiring, ({ entry, aggregate }) => {
+      stream.publish(
+        notificationForRefresh(
+          {
+            instanceId: entry.instanceId,
+            projectId: entry.projectId,
+            sourceEpoch: entry.sourceGeneration,
+            stateRevision: aggregate.revisions.state,
+            planRevision: aggregate.revisions.plan,
+          },
+          clock(),
+        ),
+      )
+    })
+    const opened = await openConfiguredInstance(resolved.config, {
+      files,
+      store,
+      sha256,
+      clock,
+      localState,
+      defaultLocalRoot: async () => defaultLocalRootDir(),
+      describeLocation: describe,
+    })
+    if (opened.status !== 'opened') {
+      return {
+        ok: false,
+        code: opened.status === 'not-configured' ? 'binding-expired' : opened.code,
+        message: opened.message,
+      }
+    }
+    const instance = opened.instance
+    const command = new ProjectCommandService({
+      localRoot: instance.localRoot,
+      store,
+      files,
+      sha256,
+      clock,
+      newNodeId: () => randomUUID(),
+      newRecordId: () => randomUUID(),
+      notify: (result, envelope) =>
+        stream.publish(
+          notificationForCommit(
+            { instanceId: envelope.instanceId, projectId: envelope.projectId },
+            result,
+            clock(),
+          ),
+        ),
+    })
+    const snapshot = new ProjectSnapshotService({
+      localRoot: instance.localRoot,
+      store,
+      files,
+      sha256,
+      clock,
+      stream,
+      describeLocation: describe,
+    })
+    return { ok: true, value: { instance, snapshot, command } }
+  }
+
+  let runtime: Promise<RuntimeResult> | null = null
+  const shared = (): Promise<RuntimeResult> => (runtime ??= resolveRuntime())
+
+  ctx.plugin(ConaProjectService, {
+    runtime: shared,
+    localRootDisplay: (root: string) => describeRoot(root).displayPath,
+  })
+
+  // 启动即尝试打开一次：成功与失败都留一行宿主日志作为直接证据。
+  void shared().then((result) => {
+    console.log(
+      result.ok
+        ? `[dsh-cona-project] 实例 ${result.value.instance.instanceId} @ ${result.value.instance.sourceDisplay}（${result.value.instance.sourceKind}）`
+        : `[dsh-cona-project] 资料源未打开（${result.code}: ${result.message}）`,
+    )
   })
 }
 

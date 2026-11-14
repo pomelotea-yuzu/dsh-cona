@@ -225,6 +225,10 @@ test('快照包含完整小树、记录索引与同源摘要', async () => {
   assert.equal(snapshot.stateRevision, 1);
   assert.equal(snapshot.sync.status, 'synced');
   assert.equal(snapshot.sync.basis, 'local-observation', '提交后本机已有观察基线');
+  assert.equal(snapshot.source.kind, 'custom');
+  assert.equal(snapshot.source.displayPath, ctx.source, '缺省显示资料根绝对路径');
+  assert.equal(snapshot.local.conversationCount, 0);
+  assert.equal(snapshot.local.workRunCount, 0);
 
   assert.equal(snapshot.tree.length, 2);
   assert.equal(snapshot.tree[0]?.id, ROOT_NODE);

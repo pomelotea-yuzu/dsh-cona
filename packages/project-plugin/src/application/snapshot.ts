@@ -24,6 +24,7 @@ import { readSourceBaseline } from './baseline.js';
 import type { ChangeStreamPort } from './change-stream.js';
 import { checkTrustedContext, type TrustedContext } from './command-service.js';
 import type { InstanceAggregate, QuarantineInfo, RegistryEntry } from './local-state.js';
+import type { LocationKind } from './location.js';
 import type { LocalStateStorePort, SourceFilesPort } from './ports.js';
 
 /** 树与规划摘要：同一快照派生，供面板与未来路线图共用基础数据。 */
@@ -62,6 +63,8 @@ export interface ProjectSnapshot {
   /** 请求携带的连接代际，原样回传；客户端先核对代际再核对单调修订。 */
   connectionGeneration: number;
   sync: SnapshotSync;
+  /** 资料位置展示（来源种类 + 折叠 home 的显示路径）；面板只展示，不改位置。 */
+  source: { kind: LocationKind; displayPath: string };
   project: ProjectMeta;
   /** 完整小树：父节点先于子节点，同级按 order、id 排序。 */
   tree: WorkNode[];
@@ -71,8 +74,10 @@ export interface ProjectSnapshot {
   records: RecordIndexEntry[];
   summary: PlanSummary;
   local: {
-    conversations: readonly unknown[];
-    workRuns: readonly unknown[];
+    /** 本机聊天关联数量（R1 面板只显示数量；关系本身属第 6 段）。 */
+    conversationCount: number;
+    /** 本机 WorkRun 历史数量。 */
+    workRunCount: number;
     quarantined: QuarantineInfo | null;
   };
   readAt: string;
@@ -140,6 +145,8 @@ export interface SnapshotDeps {
   sha256: Sha256Fn;
   clock: () => string;
   stream: ChangeStreamPort;
+  /** 资料根显示路径（home 折叠）；缺省时原样返回绝对路径。 */
+  describeLocation?: (root: string) => { displayPath: string };
   /** 一致读取的最大尝试次数；默认 4。 */
   maxAttempts?: number;
   hooks?: SnapshotHooks;
@@ -519,6 +526,10 @@ export class ProjectSnapshotService {
       stateRevision: aggregate.revisions.state,
       connectionGeneration: request.connectionGeneration,
       sync,
+      source: {
+        kind: entry.sourceKind,
+        displayPath: this.deps.describeLocation?.(entry.sourceRoot).displayPath ?? entry.sourceRoot,
+      },
       project: {
         ...doc.project,
         constraints: [...doc.project.constraints],
@@ -529,8 +540,8 @@ export class ProjectSnapshotService {
       records,
       summary: summarizePlan(tree, doc.plan.dependencies, records),
       local: {
-        conversations: aggregate.conversations,
-        workRuns: aggregate.workRuns,
+        conversationCount: aggregate.conversations.length,
+        workRunCount: aggregate.workRuns.length,
         quarantined,
       },
       readAt: this.deps.clock(),

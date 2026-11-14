@@ -193,6 +193,29 @@ Remote 契约（Cona 自有，namespace `conaProject`）：
 - **代际与修订**：`sourceEpoch` 变化是替换边界，不比较大小；`stateRevision` 只在同代际内单调。旧代际快照请求直接 `stale-connection`。
 - **失效流只在进程内**：Host 重启后水位丢失，靠“重连即完整回读”弥补；跨进程通道不在 R1 范围。
 
+## 宿主 Remote 与实例配置（5.2 传输层）
+
+profile 的 `cordis.patch.yml` 里给出两条绝对路径（用户显式选择，插件不猜目录）：
+
+```yaml
+- id: cona-project
+  config:
+    projectRoot: /abs/path/to/project-root     # 公开资料根
+    localDataRoot: /abs/path/to/local-root     # 本机运行数据根（可省，默认 <DSH_HOME>/data/dsh-cona/local）
+```
+
+宿主启动即校验资料并登记／复用实例；只有磁盘与本机观察不一致时才刷新基线（避免每次启动推进源代际）。未配置时宿主照常启动，`status` 返回 `configured:false` 与原因。
+
+`conaProject` Remote（owner invocation 专属）：
+
+| 方法 | 请求（HTTP `payload.args` 按参数名） | 结果 |
+|---|---|---|
+| `status` | `{}` | `configured／instanceId／projectId／sourceKind／sourceDisplay／localRootDisplay／created／error` |
+| `snapshot` | `{request:{connectionGeneration, minStateRevision?}}` | `SnapshotResult`（含 `source` 位置展示） |
+| `execute` | `{request:{operationId, command, expectedPlanVersion, expectedPlanRevision, …}}` | `CommandResult` |
+
+准入：`ctx.invocation` 存在、peer 主体 owner、`principalOf` 为空；其余 `forbidden`，不降级为进程内 owner。`follow` 尚未暴露（随面板接线）。
+
 ## 实现状态
 
-第 1 段（1.1–1.5）、第 3 段（3.1–3.5）、第 4 段（4.1–4.5）与 5.1 完成；5.2 起未开始，见 change `openspec/changes/establish-r1-project-plugin/tasks.md`。
+第 1 段（1.1–1.5）、第 3 段（3.1–3.5）、第 4 段（4.1–4.5）与 5.1 完成；5.2 完成宿主传输层（`conaProject` Remote 与实例打开），Client 面板与草稿保留未做；见 change `openspec/changes/establish-r1-project-plugin/tasks.md`。
