@@ -9,6 +9,7 @@
 - [决定索引](knowledge/decisions.md)：当前方向、沿用边界与被替代内容。
 - [DSH 插件与 Typert 踩坑契约](knowledge/2026-11-13-dsh-typert-plugin-gotchas.md)：0.2.2-rc.2 插件开发实测经验（源面登记、产物布局、manifest 契约等）。
 - [项目管理设计草案](product/2026-11-11-project-management-design.md)：用户明确需求与待讨论设计；当前方向已确认，使用流程和实现尚未定稿。
+- [每日代码城市讨论草案](product/2026-11-14-code-city-design.md)：按 Git 提交统计，每天一个 3D 街区、长期累积成城；支持老项目历史生成的设想，统计细则与实施范围待讨论。
 - [项目开发管理架构草案](architecture/2026-11-11-project-development-architecture.md)：DSH 内部插件的完整设计基线；包含分层、规划指纹与本机版本、公开资料与私有回执恢复、执行身份、快照同步及里程碑，尚未实现。
 - [插件开发路线图草案](engineering/2026-11-12-plugin-development-roadmap.md)：本项目从接入实验到首版试用的 R1–R6 里程碑、依赖与完成标准，尚未实施。
 - [路线图功能讨论草案](product/2026-11-12-project-roadmap-design.md)：共用规划、结合目标与时间视角的整体设计已获认可，具体界面与排期能力待细化。
