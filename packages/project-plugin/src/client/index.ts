@@ -5,9 +5,11 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { ConaPanelIcon } from './PanelIcon.js'
+import { NS, dictionaries } from './locales.js'
 import { createHttpTransport } from './http-transport.js'
 import { PanelController } from './panel-controller.js'
 import { ProjectPanel } from './ProjectPanel.js'
@@ -15,13 +17,15 @@ import { ProjectPanel } from './ProjectPanel.js'
 export const name = 'dsh-cona-project.client'
 
 /** `slots` 服务就绪后才注册；侧栏与主区域的槽位由 web 组合声明。 */
-export const inject: readonly string[] = ['slots']
+export const inject: readonly string[] = ['slots', 'locale']
 
 /** 面板 id：同时作为侧栏入口与主区域 keyed slot 的键。 */
 const PANEL_ID = 'cona-project'
 
 /** 注册面板入口与面板本体；控制器随插件生命周期存在。 */
 export function apply(ctx: ClientContext): void {
+  ctx.effect(() => ctx.locale.register(NS, dictionaries), 'dsh-cona-project: dictionaries')
+  const t = ctx.locale.bind(NS)
   const controller = new PanelController({
     transport: createHttpTransport(),
     newOperationId: () => globalThis.crypto.randomUUID(),
@@ -32,6 +36,7 @@ export function apply(ctx: ClientContext): void {
       {
         name: 'main',
         key: PANEL_ID,
+        locale: NS,
         inject: () => ({ controller }),
       },
       ProjectPanel,
@@ -44,7 +49,8 @@ export function apply(ctx: ClientContext): void {
         name: 'sidebar.panellist',
         id: PANEL_ID,
         order: 40,
-        label: '项目',
+        locale: NS,
+        label: () => t('panel'),
       },
       ConaPanelIcon,
     ),

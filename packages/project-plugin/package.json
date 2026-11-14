@@ -37,7 +37,8 @@
     "./remote": {
       "types": "./lib/typert.remote-client.d.ts",
       "default": "./lib/typert.remote-client.js"
-    }
+    },
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "lib",
@@ -47,7 +48,8 @@
     "lib/typert.remote-client.d.ts",
     "lib/typert.remote-client.d.ts.map",
     "formats",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "locale/*.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs && node scripts/generate-typert.mjs",
@@ -63,7 +65,8 @@
     "local": "node lib/cli/local.js",
     "command": "node lib/cli/command.js",
     "snapshot": "node lib/cli/snapshot.js",
-    "test:run": "tsc -p tsconfig.test.json && node --test lib-test/test/*.test.js"
+    "test:run": "tsc -p tsconfig.test.json && node --test lib-test/test/*.test.js",
+    "check:locale": "node scripts/check-locale.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
@@ -77,6 +80,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-client-locale": "0.2.2-rc.2",
     "@deepseek-ai/dsh-client-ui-layout": "0.2.2-rc.2",
     "@deepseek-ai/dsh-client-ui-renderer": "0.2.2-rc.2",
     "@deepseek-ai/dsh-client-ui-sidebar": "0.2.2-rc.2",

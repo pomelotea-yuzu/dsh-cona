@@ -40,7 +40,7 @@
 | V31 | project-panel-sync：旧连接／旧源／旧回执 | A、H | 迟到响应不覆盖新快照，历史回执不回滚当前树，跨实例不比较计数器 | untested（2026-11-14 自动化已测：换代后旧代际答复丢弃、旧源整份丢弃、同代际更旧修订不覆盖、旧回执不回退；H 层仅覆盖“断线后重连不覆盖”，跨实例计数器未测——R1 单实例） |
 | V32 | project-panel-sync：重连与草稿 | A、H | 重新订阅／完整回读看到已提交事实，未提交编辑及基线保留 | untested（2026-11-14 H 层部分实测：阻断插件 API 后面板标「连接断开」，点「重连」代际 1→2、树完整回读、草稿保留并可保存成功；**“重新订阅”未做**——当前为 5 秒轮询，`conaProject.follow` 未接；宿主重启致外壳白屏、草稿不持久化） |
 | V33 | project-panel-sync：外部变化及未知提示 | F、H | 无通知也在准备／刷新边界重读，待核对／隔离明确显示，对应写入关闭 | untested（2026-11-14 部分实测：`local refresh` 边界总重读并报告 changes；UI 提示与写入关闭待第 5 段） |
-| V34 | plugin-localization：安装资源与回退 | A、H | 中英全部 key／占位符可用，元信息随包，缺失反例失败，其他宿主语言英文回退不改宿主偏好 | untested |
+| V34 | plugin-localization：安装资源与回退 | A、H | 中英全部 key／占位符可用，元信息随包，缺失反例失败，其他宿主语言英文回退不改宿主偏好 | pass（2026-11-14：`check-locale.mjs` 中英 key／占位符一致 + 6 个反例自测；删 en 单个 key 实测 exit 1；tarball 含 `locale/` 与 `lib/client/locales/`；真实浏览器 zh-CN 中文、en-US 英文、ja-JP 英文回退，界面无原始 key，`locale.preference` 未被自动选择写入） |
 | V35 | plugin-localization：切换与重启 | A、H | 导航／已开面板更新，节点选择／输入保留，重启跟随宿主选择，字典卸载重载无重复 | untested |
 | V36 | plugin-localization：内容和时间隔离 | A、H | 项目原文、协议码、指纹与修订不变；长文本、数量、时区可用，语言不改日期或 Agent 授权 | untested |
 | V37 | 六能力整体闭环，必含 V32／V04 | E、H | 预构建安装→小树保存→聊天→真实 Agent 授权内调整并记原因→UI 已提交→Client 断线重连完整回读（V32）→重启恢复→卸载及重新安装（V04）→原资料／历史回执一致且旧 WorkRun 不恢复授权，可重复 | untested |

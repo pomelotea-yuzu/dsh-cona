@@ -10,6 +10,26 @@ import { fileURLToPath } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
+
+/**
+ * 展开 npm files／exports 里的 `*` 通配（单层）：返回实际存在的相对路径。
+ * 通配是 npm 的合法写法；检查器按目录列举核对是否存在，避免把通配符当文件名。
+ */
+function expandPattern(pattern) {
+  if (!pattern.includes('*')) return [pattern];
+  const clean = pattern.replace(/^\.\//, '');
+  const dir = path.posix.dirname(clean);
+  const namePattern = path.posix.basename(clean);
+  const regex = new RegExp('^' + namePattern.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*') + '$');
+  let entries;
+  try {
+    entries = readdirSync(path.join(packageRoot, dir));
+  } catch {
+    return [];
+  }
+  return entries.filter((entry) => regex.test(entry)).sort().map((entry) => path.posix.join(dir, entry));
+}
+
 const failures = [];
 const check = (ok, message) => {
   if (!ok) failures.push(message);
@@ -59,11 +79,13 @@ const exportFiles = (target) => {
 };
 for (const [subpath, target] of Object.entries(manifest.exports ?? {})) {
   for (const file of exportFiles(target)) {
-    check(existsSync(path.join(packageRoot, file)), `exports["${subpath}"] 指向的产物不存在：${file}（先运行 build）`);
+    const matches = (file.includes('*') ? expandPattern(file) : [file]).filter((item) => existsSync(path.join(packageRoot, item)));
+    check(matches.length > 0, `exports["${subpath}"] 指向的产物不存在：${file}（先运行 build）`);
   }
 }
 for (const file of manifest.files ?? []) {
-  check(existsSync(path.join(packageRoot, file)), `files 声明的产物不存在：${file}`);
+  const matches = (file.includes('*') ? expandPattern(file) : [file]).filter((item) => existsSync(path.join(packageRoot, item)));
+  check(matches.length > 0, `files 声明的产物不存在：${file}`);
 }
 
 // 共享宿主包 peer/dev 双声明（发布文档要求）。
@@ -98,11 +120,13 @@ if (packedIndex !== -1) {
     check(existsSync(path.join(dir, clientPath)) || !existsSync(path.join(dir, 'lib', 'client', 'index.js')), 'tarball Client 产物与 exports 声明不一致');
   }
   for (const file of manifest.files ?? []) {
-    check(existsSync(path.join(dir, file)), `tarball 缺 files 声明产物：${file}`);
+    const matches = (file.includes('*') ? expandPattern(file) : [file]).filter((item) => existsSync(path.join(dir, item)));
+    check(matches.length > 0, `tarball 缺 files 声明产物：${file}`);
   }
   for (const [subpath, target] of Object.entries(manifest.exports ?? {})) {
     for (const file of exportFiles(target)) {
-      check(existsSync(path.join(dir, file)), `tarball 缺 exports["${subpath}"] 产物：${file}`);
+      const matches = (file.includes('*') ? expandPattern(file) : [file]).filter((item) => existsSync(path.join(dir, item)));
+      check(matches.length > 0, `tarball 缺 exports["${subpath}"] 产物：${file}`);
     }
   }
 }

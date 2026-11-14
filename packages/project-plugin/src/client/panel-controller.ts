@@ -54,7 +54,8 @@ export interface PanelState {
   draft: PanelDraft | null;
   /** 变更原因：随本次保存追加一条 plan-change 记录。 */
   reason: string;
-  save: { status: SaveStatus; message: string | null };
+  /** `code` 为稳定码（不翻译），`message` 为宿主原文；界面文案由字典提供。 */
+  save: { status: SaveStatus; code: string | null; message: string | null };
   connection: ConnectionState;
 }
 
@@ -71,7 +72,7 @@ const EMPTY: PanelState = {
   selectedNodeId: null,
   draft: null,
   reason: '',
-  save: { status: 'idle', message: null },
+  save: { status: 'idle', code: null, message: null },
   connection: { generation: 1, status: 'connected', error: null },
 };
 
@@ -171,7 +172,7 @@ export class PanelController {
         baseline: baselineOf(snapshot),
         operationId: null,
       },
-      save: { status: 'idle', message: null },
+      save: { status: 'idle', code: null, message: null },
     });
   }
 
@@ -191,22 +192,25 @@ export class PanelController {
         baseline: baselineOf(snapshot),
         operationId: null,
       },
-      save: { status: 'idle', message: null },
+      save: { status: 'idle', code: null, message: null },
     });
   }
 
   editDraft(patch: Partial<Pick<PanelDraft, 'goal' | 'title' | 'criteria'>>): void {
     const draft = this.state.draft;
     if (draft === null) return;
-    this.patch({ draft: { ...draft, ...patch }, save: { status: 'idle', message: null } });
+    this.patch({ draft: { ...draft, ...patch }, save: { status: 'idle', code: null, message: null } });
   }
 
   setReason(reason: string): void {
-    this.patch({ reason, save: this.state.save.status === 'saved' ? { status: 'idle', message: null } : this.state.save });
+    this.patch({
+      reason,
+      save: this.state.save.status === 'saved' ? { status: 'idle', code: null, message: null } : this.state.save,
+    });
   }
 
   discardDraft(): void {
-    this.patch({ draft: null, reason: '', save: { status: 'idle', message: null } });
+    this.patch({ draft: null, reason: '', save: { status: 'idle', code: null, message: null } });
   }
 
   /** 保存：先规划命令，再（如有原因）追加记录。失败保留草稿且不标已保存。 */
@@ -216,7 +220,7 @@ export class PanelController {
     if (draft === null && this.state.reason.trim() === '') return 'idle';
     if (this.state.save.status === 'saving') return 'saving';
     const generation = this.state.connection.generation;
-    this.patch({ save: { status: 'saving', message: null } });
+    this.patch({ save: { status: 'saving', code: null, message: null } });
 
     if (draft !== null) {
       const operationId = draft.operationId ?? this.deps.newOperationId();
@@ -234,18 +238,14 @@ export class PanelController {
       } catch (error) {
         // 传输异常 = 结果未知：保留草稿与原 operationId，不换 id 重试。
         this.markOffline((error as Error).message);
-        return this.fail('failed', `保存结果未知（${(error as Error).message}）；草稿已保留，请先核对后再重试`, true);
+        return this.fail('failed', 'transport-unknown', (error as Error).message, true);
       }
       if (result.status === 'rejected') {
         const conflict = result.code === 'plan-conflict' || result.code === 'source-changed';
-        return this.fail(
-          conflict ? 'conflict' : 'failed',
-          conflict ? '资料已被改动（规划冲突），草稿已保留；请对照后重新保存' : `${result.code}: ${result.message}`,
-          true,
-        );
+        return this.fail(conflict ? 'conflict' : 'failed', result.code, result.message, true);
       }
       if (result.status === 'pending-reconciliation') {
-        return this.fail('pending', `发布结果待核对（${result.stage}）：${result.message}；草稿已保留`, true);
+        return this.fail('pending', 'pending-reconciliation', result.message, true);
       }
       // 规划已提交：清草稿，再按需追加原因记录。
       this.patch({ draft: null });
@@ -258,24 +258,24 @@ export class PanelController {
         );
         await this.reloadQuietly(generation);
         if (!recorded) {
-          return this.fail('partial', '规划已保存，但变更原因记录未写入；原因已保留，可单独重试', false);
+          return this.fail('partial', 'record-failed', null, false);
         }
-        this.patch({ reason: '', save: { status: 'saved', message: null } });
+        this.patch({ reason: '', save: { status: 'saved', code: null, message: null } });
         return 'saved';
       }
       await this.reloadQuietly(generation);
-      this.patch({ save: { status: 'saved', message: null } });
+      this.patch({ save: { status: 'saved', code: null, message: null } });
       return 'saved';
     }
 
     // 只有变更原因：直接追加记录（用当前快照作为基线）。
     const snapshot = this.state.snapshot;
     const subjects = this.state.selectedNodeId ?? snapshot.tree[0]?.id;
-    if (subjects === undefined) return this.fail('failed', '没有可关联的节点；原因未写入', false);
+    if (subjects === undefined) return this.fail('failed', 'no-subject', null, false);
     const recorded = await this.appendReason([subjects], snapshot.planVersion, snapshot.planRevision, snapshot.sourceEpoch);
     await this.reloadQuietly(generation);
-    if (!recorded) return this.fail('failed', '变更原因未写入；内容已保留', false);
-    this.patch({ reason: '', save: { status: 'saved', message: null } });
+    if (!recorded) return this.fail('failed', 'record-failed', null, false);
+    this.patch({ reason: '', save: { status: 'saved', code: null, message: null } });
     return 'saved';
   }
 
@@ -355,7 +355,7 @@ export class PanelController {
     if (result.status === 'snapshot') {
       this.patch({ status });
       this.ingest(result, generation);
-      if (this.state.save.status === 'saved') this.patch({ save: { status: 'idle', message: null } });
+      if (this.state.save.status === 'saved') this.patch({ save: { status: 'idle', code: null, message: null } });
       return;
     }
     const outcome = this.ingest(result, generation);
@@ -406,9 +406,9 @@ export class PanelController {
     }
   }
 
-  private fail(status: SaveStatus, message: string, keepDraft: boolean): SaveStatus {
+  private fail(status: SaveStatus, code: string | null, message: string | null, keepDraft: boolean): SaveStatus {
     this.patch({
-      save: { status, message },
+      save: { status, code, message },
       ...(keepDraft ? {} : { draft: null }),
     });
     return status;

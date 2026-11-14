@@ -12,7 +12,7 @@
     "typecheck": "pnpm --filter dsh-cona-project run typecheck",
     "test": "pnpm --filter dsh-cona-project run test",
     "test:run": "pnpm --filter dsh-cona-project run test:run",
-    "check:plugin": "pnpm --filter dsh-cona-project run check:boundaries && pnpm --filter dsh-cona-project run check:protocol-sync",
+    "check:plugin": "pnpm --filter dsh-cona-project run check:boundaries && pnpm --filter dsh-cona-project run check:protocol-sync && pnpm --filter dsh-cona-project run check:locale",
     "check:manifest": "pnpm --filter dsh-cona-project run check:manifest",
     "check:ci": "node scripts/check-repo.mjs --all && pnpm build && pnpm typecheck && pnpm test:run && pnpm check:plugin && pnpm check:manifest"
   }

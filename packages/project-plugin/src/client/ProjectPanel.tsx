@@ -1,18 +1,34 @@
-// 项目面板（tasks 5.2）：小树、详情、目标编辑、节点新增、变更原因与位置展示。
+// 项目面板（tasks 5.2／5.4）：小树、详情、目标编辑、节点新增、变更原因与位置展示。
 //
 // 渲染层只读控制器状态并调用其方法；保存规则、草稿保留与失败标记都在
-// `panel-controller.ts` 里，可脱离浏览器测试。文案固定中文，i18n 在 5.4 接。
+// `panel-controller.ts` 里，可脱离浏览器测试。全部文案来自 `dsh-cona.project` 字典，
+// 稳定错误码与项目原文不翻译。
 
 import { useEffect, useState } from 'react';
-import type { PanelController, PanelState } from './panel-controller.js';
+import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
+import type { PanelController, PanelState, SaveStatus } from './panel-controller.js';
 import type { PanelSnapshot } from './api.js';
+import type { LocaleKey } from './locales.js';
 
-export interface ProjectPanelProps {
-  controller: PanelController;
-}
+export type ProjectPanelInjected = { controller: PanelController };
+
+export type ProjectPanelProps = PropsRuntime<'main'>
+  & InjectFace<ProjectPanelInjected>
+  & PropsLocale<'dsh-cona.project'>;
+
+const SAVE_LABEL: Record<SaveStatus, LocaleKey> = {
+  idle: 'saveStatusIdle',
+  saving: 'saveStatusSaving',
+  saved: 'saveStatusSaved',
+  conflict: 'saveStatusConflict',
+  pending: 'saveStatusPending',
+  failed: 'saveStatusFailed',
+  partial: 'saveStatusPartial',
+};
 
 /** 面板根组件：订阅控制器状态。 */
-export function ProjectPanel({ controller }: ProjectPanelProps): JSX.Element {
+export function ProjectPanel(props: ProjectPanelProps): JSX.Element {
+  const { controller, t } = props;
   const [state, setState] = useState<PanelState>(controller.getState());
 
   useEffect(() => {
@@ -29,15 +45,15 @@ export function ProjectPanel({ controller }: ProjectPanelProps): JSX.Element {
   }, [controller]);
 
   if (state.phase === 'loading' || state.phase === 'idle') {
-    return <p style={{ padding: 16, color: 'var(--dsh-text-secondary, #666)' }}>正在读取项目…</p>;
+    return <p style={{ padding: 16, color: 'var(--dsh-text-secondary, #666)' }}>{t('loading')}</p>;
   }
   if (state.phase === 'error' || state.snapshot === null) {
     return (
       <section style={{ padding: 16 }}>
-        <h2 style={{ margin: '0 0 8px', fontSize: 16 }}>项目</h2>
-        <p style={{ color: '#b3261e', margin: '0 0 12px' }}>{state.message ?? '资料源不可用'}</p>
+        <h2 style={{ margin: '0 0 8px', fontSize: 16 }}>{t('title')}</h2>
+        <p style={{ color: '#b3261e', margin: '0 0 12px' }}>{state.message ?? t('loadError')}</p>
         <button type="button" onClick={() => void controller.open()}>
-          重新读取
+          {t('retry')}
         </button>
       </section>
     );
@@ -52,6 +68,7 @@ export function ProjectPanel({ controller }: ProjectPanelProps): JSX.Element {
       <Header
         state={state}
         snapshot={snapshot}
+        t={t}
         onRefresh={() => void controller.open()}
         onReconnect={() => void controller.reconnect()}
       />
@@ -68,7 +85,7 @@ export function ProjectPanel({ controller }: ProjectPanelProps): JSX.Element {
                 textAlign: 'left',
                 padding: '6px 12px',
                 paddingLeft: 12 + (depths.get(node.id) ?? 0) * 14,
-                background: node.id === selected?.id ? 'var(--dsh-bg-selected, #eef2f7)' : 'transparent',
+                background: node.id === state.selectedNodeId ? 'var(--dsh-bg-selected, #eef2f7)' : 'transparent',
                 border: 'none',
                 cursor: 'pointer',
                 fontSize: 13,
@@ -83,27 +100,30 @@ export function ProjectPanel({ controller }: ProjectPanelProps): JSX.Element {
         </nav>
         <main style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
           {selected === undefined ? (
-            <p>资料里没有节点。</p>
+            <p>{t('noNodes')}</p>
           ) : (
-            <NodeDetail controller={controller} state={state} node={selected} />
+            <NodeDetail controller={controller} state={state} node={selected} t={t} />
           )}
         </main>
       </div>
       <footer style={{ borderTop: '1px solid var(--dsh-border, #e5e5e5)', padding: '8px 16px', fontSize: 12 }}>
-        <SaveBar controller={controller} state={state} />
+        <SaveBar controller={controller} state={state} t={t} />
       </footer>
     </section>
   );
 }
 
+type Translate = ProjectPanelProps['t'];
+
 function Header(props: {
   state: PanelState;
   snapshot: PanelSnapshot;
+  t: Translate;
   onRefresh: () => void;
   onReconnect: () => void;
 }): JSX.Element {
-  const { state, snapshot, onRefresh, onReconnect } = props;
-  const sync = snapshot.sync.status === 'synced' ? '已同步' : '未同步（需刷新）';
+  const { state, snapshot, t, onRefresh, onReconnect } = props;
+  const sync = snapshot.sync.status === 'synced' ? t('syncOk') : t('syncDrift');
   const online = state.connection.status === 'connected';
   return (
     <header style={{ borderBottom: '1px solid var(--dsh-border, #e5e5e5)', padding: '10px 16px' }}>
@@ -111,32 +131,41 @@ function Header(props: {
         <h2 style={{ margin: 0, fontSize: 15 }}>{snapshot.project.title}</h2>
         <span style={{ fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>{sync}</span>
         <span style={{ fontSize: 12, color: online ? 'var(--dsh-text-secondary, #777)' : '#b3261e' }}>
-          {online ? '已连接' : '连接断开'}
+          {online ? t('connected') : t('offline')}
         </span>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>
-          规划修订 {snapshot.planRevision} · 状态修订 {snapshot.stateRevision} · 连接代际 {state.connection.generation}
+          {t('revisions', {
+            plan: snapshot.planRevision,
+            state: snapshot.stateRevision,
+            generation: state.connection.generation,
+          })}
         </span>
         <button type="button" onClick={onRefresh}>
-          刷新
+          {t('refresh')}
         </button>
         <button type="button" onClick={onReconnect}>
-          重连
+          {t('reconnect')}
         </button>
       </div>
       <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>
-        位置：{snapshot.source.displayPath}（{snapshot.source.kind}）
+        {t('location', { path: snapshot.source.displayPath, kind: snapshot.source.kind })}
       </p>
       {state.status?.localRootDisplay === undefined || state.status?.localRootDisplay === null ? null : (
         <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>
-          本机数据：{state.status.localRootDisplay}
+          {t('localData', { path: state.status.localRootDisplay })}
         </p>
       )}
     </header>
   );
 }
 
-function NodeDetail(props: { controller: PanelController; state: PanelState; node: PanelSnapshot['tree'][number] }): JSX.Element {
-  const { controller, state, node } = props;
+function NodeDetail(props: {
+  controller: PanelController;
+  state: PanelState;
+  node: PanelSnapshot['tree'][number];
+  t: Translate;
+}): JSX.Element {
+  const { controller, state, node, t } = props;
   const draft = state.draft;
   const draftGoal = draft !== null && draft.kind === 'update-goal' && draft.nodeId === node.id ? draft.goal : null;
   const adding = draft !== null && draft.kind === 'add-node' && draft.nodeId === node.id;
@@ -151,7 +180,7 @@ function NodeDetail(props: { controller: PanelController; state: PanelState; nod
     <article>
       <h3 style={{ margin: '0 0 4px', fontSize: 14 }}>{node.title}</h3>
       <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>
-        {node.status} · 顺序 {node.order} · {node.completionCriteria.length} 条完成条件
+        {t('nodeMeta', { status: node.status, order: node.order, count: node.completionCriteria.length })}
       </p>
       {node.completionCriteria.length === 0 ? null : (
         <ul style={{ margin: '0 0 12px 16px', padding: 0, fontSize: 12 }}>
@@ -162,7 +191,7 @@ function NodeDetail(props: { controller: PanelController; state: PanelState; nod
       )}
 
       <label style={{ display: 'block', fontSize: 12, marginBottom: 4 }} htmlFor="cona-goal">
-        目标
+        {t('goal')}
       </label>
       <textarea
         id="cona-goal"
@@ -176,24 +205,22 @@ function NodeDetail(props: { controller: PanelController; state: PanelState; nod
       />
       <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
         <button type="button" onClick={() => void controller.save()} disabled={!controller.isDirty()}>
-          保存
+          {t('save')}
         </button>
         <button type="button" onClick={() => controller.discardDraft()} disabled={draft === null && state.reason === ''}>
-          放弃草稿
+          {t('discard')}
         </button>
         <button type="button" onClick={() => controller.beginAddNode(node.id)}>
-          在此新增子节点
+          {t('addChild')}
         </button>
       </div>
 
       {controller.isDraftBaselineStale() ? (
-        <p style={{ margin: '8px 0 0', fontSize: 12, color: '#8a6d00' }}>
-          草稿基于较早的修订；保存可能被拒绝（冲突时草稿会保留）。
-        </p>
+        <p style={{ margin: '8px 0 0', fontSize: 12, color: '#8a6d00' }}>{t('staleDraft')}</p>
       ) : null}
 
       <label style={{ display: 'block', fontSize: 12, margin: '12px 0 4px' }} htmlFor="cona-reason">
-        变更原因（保存时追加为 plan-change 记录）
+        {t('reason')}
       </label>
       <input
         id="cona-reason"
@@ -204,9 +231,9 @@ function NodeDetail(props: { controller: PanelController; state: PanelState; nod
 
       {adding ? (
         <section style={{ marginTop: 16, borderTop: '1px solid var(--dsh-border, #e5e5e5)', paddingTop: 12 }}>
-          <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>新增子节点（父节点：{node.title}）</h4>
+          <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>{t('addNodeTitle', { parent: node.title })}</h4>
           <label style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>
-            标题
+            {t('titleField')}
             <input
               value={draft.title ?? ''}
               onChange={(event) => controller.editDraft({ title: event.target.value })}
@@ -214,7 +241,7 @@ function NodeDetail(props: { controller: PanelController; state: PanelState; nod
             />
           </label>
           <label style={{ display: 'block', fontSize: 12, margin: '8px 0 4px' }}>
-            目标
+            {t('goalField')}
             <input
               value={draft.goal}
               onChange={(event) => controller.editDraft({ goal: event.target.value })}
@@ -222,7 +249,7 @@ function NodeDetail(props: { controller: PanelController; state: PanelState; nod
             />
           </label>
           <button type="button" style={{ marginTop: 8 }} onClick={() => void controller.save()}>
-            保存新节点
+            {t('saveNewNode')}
           </button>
         </section>
       ) : null}
@@ -230,23 +257,16 @@ function NodeDetail(props: { controller: PanelController; state: PanelState; nod
   );
 }
 
-function SaveBar(props: { controller: PanelController; state: PanelState }): JSX.Element {
-  const { controller, state } = props;
-  const { status, message } = state.save;
-  const label: Record<string, string> = {
-    idle: controller.isDirty() ? '有未保存修改' : '无修改',
-    saving: '保存中…',
-    saved: '已保存',
-    conflict: '冲突：草稿已保留',
-    pending: '结果待核对：草稿已保留',
-    failed: '保存失败：草稿已保留',
-    partial: '部分保存：规划已保存，原因未写入',
-  };
+function SaveBar(props: { controller: PanelController; state: PanelState; t: Translate }): JSX.Element {
+  const { controller, state, t } = props;
+  const { status, code, message } = state.save;
+  const key: LocaleKey = status === 'idle' && controller.isDirty() ? 'saveStatusDirty' : SAVE_LABEL[status];
   const color = status === 'saved' ? '#1b5e20' : status === 'idle' ? '#666' : '#b3261e';
   return (
     <span style={{ color }}>
-      {label[status] ?? status}
-      {message === null ? '' : ` · ${message}`}
+      {t(key)}
+      {message === null || message === '' ? '' : ` · ${message}`}
+      {code === null ? '' : ` · ${t('errorCode', { code })}`}
     </span>
   );
 }
