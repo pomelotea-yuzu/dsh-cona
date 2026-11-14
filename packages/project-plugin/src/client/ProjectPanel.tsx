@@ -18,7 +18,14 @@ export function ProjectPanel({ controller }: ProjectPanelProps): JSX.Element {
   useEffect(() => {
     const unsubscribe = controller.subscribe(setState);
     void controller.open();
-    return unsubscribe;
+    // R1 的失效检测：定时轮询并按修订单调过滤；断线只标离线，不清草稿。
+    const timer = setInterval(() => {
+      void controller.poll();
+    }, 5000);
+    return () => {
+      clearInterval(timer);
+      unsubscribe();
+    };
   }, [controller]);
 
   if (state.phase === 'loading' || state.phase === 'idle') {
@@ -42,7 +49,12 @@ export function ProjectPanel({ controller }: ProjectPanelProps): JSX.Element {
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <Header state={state} snapshot={snapshot} onRefresh={() => void controller.open()} />
+      <Header
+        state={state}
+        snapshot={snapshot}
+        onRefresh={() => void controller.open()}
+        onReconnect={() => void controller.reconnect()}
+      />
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <nav style={{ width: 260, borderRight: '1px solid var(--dsh-border, #e5e5e5)', overflowY: 'auto', padding: '8px 0' }}>
           {snapshot.tree.map((node) => (
@@ -84,19 +96,31 @@ export function ProjectPanel({ controller }: ProjectPanelProps): JSX.Element {
   );
 }
 
-function Header(props: { state: PanelState; snapshot: PanelSnapshot; onRefresh: () => void }): JSX.Element {
-  const { state, snapshot, onRefresh } = props;
+function Header(props: {
+  state: PanelState;
+  snapshot: PanelSnapshot;
+  onRefresh: () => void;
+  onReconnect: () => void;
+}): JSX.Element {
+  const { state, snapshot, onRefresh, onReconnect } = props;
   const sync = snapshot.sync.status === 'synced' ? '已同步' : '未同步（需刷新）';
+  const online = state.connection.status === 'connected';
   return (
     <header style={{ borderBottom: '1px solid var(--dsh-border, #e5e5e5)', padding: '10px 16px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
         <h2 style={{ margin: 0, fontSize: 15 }}>{snapshot.project.title}</h2>
         <span style={{ fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>{sync}</span>
+        <span style={{ fontSize: 12, color: online ? 'var(--dsh-text-secondary, #777)' : '#b3261e' }}>
+          {online ? '已连接' : '连接断开'}
+        </span>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>
-          规划修订 {snapshot.planRevision} · 状态修订 {snapshot.stateRevision}
+          规划修订 {snapshot.planRevision} · 状态修订 {snapshot.stateRevision} · 连接代际 {state.connection.generation}
         </span>
         <button type="button" onClick={onRefresh}>
           刷新
+        </button>
+        <button type="button" onClick={onReconnect}>
+          重连
         </button>
       </div>
       <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>
@@ -161,6 +185,12 @@ function NodeDetail(props: { controller: PanelController; state: PanelState; nod
           在此新增子节点
         </button>
       </div>
+
+      {controller.isDraftBaselineStale() ? (
+        <p style={{ margin: '8px 0 0', fontSize: 12, color: '#8a6d00' }}>
+          草稿基于较早的修订；保存可能被拒绝（冲突时草稿会保留）。
+        </p>
+      ) : null}
 
       <label style={{ display: 'block', fontSize: 12, margin: '12px 0 4px' }} htmlFor="cona-reason">
         变更原因（保存时追加为 plan-change 记录）

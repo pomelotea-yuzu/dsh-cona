@@ -1,10 +1,12 @@
-// 面板控制器（5.2）：小树／详情／目标编辑／节点新增／变更原因的纯状态机。
+// 面板控制器（5.2／5.3）：小树、详情、目标编辑、节点新增、变更原因，以及连接代际与草稿分离。
 //
-// 规则（design §8、tasks 5.2）：
-// - 草稿单独保存，权威快照刷新不清空草稿；
-// - 保存失败或冲突时草稿保留，且**不标已保存**；
-// - 结果未知（pending-reconciliation 或传输异常）时保留原 operationId，不换 id 重试；
-// - 变更原因在规划命令成功之后追加为 `plan-change` 记录；记录失败如实标 partial，不谎报已保存。
+// 规则（design §8、tasks 5.2／5.3）：
+// - 草稿单独保存，权威快照刷新不清空草稿；只有保存成功或显式放弃才清空；
+// - 保存失败或冲突时草稿保留，且**不标已保存**；结果未知时保留原 operationId，不换 id 重试；
+// - 连接代际（generation）在重连时递增：旧代际的迟到答复一律丢弃；
+// - 同一源代际内 `stateRevision` 单调：更旧的快照不覆盖更新的；
+// - `sourceEpoch` 变化是**替换边界**：接受新代际内容，不与旧代际比较修订大小；
+// - 旧回执不让已提交的事实回退：提交后按当前代际重新回读，回读受同一单调守卫约束。
 //
 // 本文件不得依赖 DOM、React 或 Node：渲染层只读状态、调方法。
 
@@ -34,6 +36,14 @@ export interface PanelDraft {
   operationId: string | null;
 }
 
+export interface ConnectionState {
+  /** 每次重连 +1；旧代际的答复与回执按此丢弃。 */
+  generation: number;
+  status: 'connected' | 'offline';
+  /** 最近一次连接失败或未同步的原因；正常时为 null。 */
+  error: string | null;
+}
+
 export interface PanelState {
   phase: 'idle' | 'loading' | 'ready' | 'error';
   /** 打开失败的稳定说明（未配置、资料不合法等）。 */
@@ -45,7 +55,7 @@ export interface PanelState {
   /** 变更原因：随本次保存追加一条 plan-change 记录。 */
   reason: string;
   save: { status: SaveStatus; message: string | null };
-  connectionGeneration: number;
+  connection: ConnectionState;
 }
 
 export interface PanelControllerDeps {
@@ -62,8 +72,11 @@ const EMPTY: PanelState = {
   draft: null,
   reason: '',
   save: { status: 'idle', message: null },
-  connectionGeneration: 1,
+  connection: { generation: 1, status: 'connected', error: null },
 };
+
+/** 一次读取的结论：是否被采纳、是否因代际／修订过旧被丢弃。 */
+export type IngestOutcome = 'applied' | 'stale-generation' | 'stale-source' | 'stale-revision' | 'unsynced' | 'failed';
 
 /** 面板状态机：所有写入都返回新状态并通知订阅者。 */
 export class PanelController {
@@ -91,39 +104,52 @@ export class PanelController {
     return this.state.save.status === 'saved';
   }
 
+  /** 草稿基线是否已落后于权威快照（源代际或修订变化）：提示用户重新对照，不清草稿。 */
+  isDraftBaselineStale(): boolean {
+    const draft = this.state.draft;
+    const snapshot = this.state.snapshot;
+    if (draft === null || snapshot === null) return false;
+    return draft.baseline.sourceEpoch !== snapshot.sourceEpoch || draft.baseline.planRevision !== snapshot.planRevision;
+  }
+
   /** 打开／重新读取权威快照。草稿与原因不被清空。 */
   async open(): Promise<void> {
-    this.patch({ phase: this.state.snapshot === null ? 'loading' : this.state.phase, message: null });
-    const status = await this.deps.transport.status();
-    if (!status.configured) {
-      this.patch({
-        phase: 'error',
-        status,
-        message: status.error?.message ?? '未配置资料源',
+    await this.load();
+  }
+
+  /**
+   * 重连：递增连接代际后完整回读。
+   * 旧代际的迟到答复因代际不符被丢弃；草稿保留。
+   */
+  async reconnect(): Promise<void> {
+    this.patch({
+      connection: { generation: this.state.connection.generation + 1, status: 'connected', error: null },
+    });
+    await this.load();
+  }
+
+  /** 连接失败：保留内容与草稿，只标离线。 */
+  markOffline(reason: string): void {
+    this.patch({ connection: { ...this.state.connection, status: 'offline', error: reason } });
+  }
+
+  /**
+   * 轮询一次快照（R1 的失效检测）：带 `minStateRevision` 追读；受代际与修订守卫约束。
+   * 失败只标离线，不清空树与草稿。
+   */
+  async poll(): Promise<IngestOutcome> {
+    if (this.state.snapshot === null) return 'failed';
+    const generation = this.state.connection.generation;
+    try {
+      const result = await this.deps.transport.snapshot({
+        connectionGeneration: generation,
+        minStateRevision: this.state.snapshot.stateRevision,
       });
-      return;
+      return this.ingest(result, generation);
+    } catch (error) {
+      this.markOffline((error as Error).message);
+      return 'failed';
     }
-    const result = await this.deps.transport.snapshot({ connectionGeneration: this.state.connectionGeneration });
-    if (result.status === 'rejected') {
-      this.patch({ phase: 'error', status, message: `${result.code}: ${result.message}` });
-      return;
-    }
-    if (result.status === 'unsynced') {
-      this.patch({
-        phase: 'error',
-        status,
-        message: `快照未同步（${result.reason}）：${result.detail}`,
-      });
-      return;
-    }
-    const snapshot = result.snapshot;
-    const selected =
-      this.state.selectedNodeId !== null && snapshot.tree.some((node) => node.id === this.state.selectedNodeId)
-        ? this.state.selectedNodeId
-        : (snapshot.tree[0]?.id ?? null);
-    this.patch({ phase: 'ready', status, snapshot, selectedNodeId: selected, message: null });
-    // 打开成功后清掉“已保存”提示，避免把上一次结果当成当前状态。
-    if (this.state.save.status === 'saved') this.patch({ save: { status: 'idle', message: null } });
   }
 
   select(nodeId: string): void {
@@ -189,6 +215,7 @@ export class PanelController {
     if (this.state.snapshot === null) return 'failed';
     if (draft === null && this.state.reason.trim() === '') return 'idle';
     if (this.state.save.status === 'saving') return 'saving';
+    const generation = this.state.connection.generation;
     this.patch({ save: { status: 'saving', message: null } });
 
     if (draft !== null) {
@@ -206,6 +233,7 @@ export class PanelController {
         });
       } catch (error) {
         // 传输异常 = 结果未知：保留草稿与原 operationId，不换 id 重试。
+        this.markOffline((error as Error).message);
         return this.fail('failed', `保存结果未知（${(error as Error).message}）；草稿已保留，请先核对后再重试`, true);
       }
       if (result.status === 'rejected') {
@@ -228,14 +256,14 @@ export class PanelController {
           result.planRevision,
           result.sourceEpoch,
         );
-        await this.reloadQuietly();
+        await this.reloadQuietly(generation);
         if (!recorded) {
           return this.fail('partial', '规划已保存，但变更原因记录未写入；原因已保留，可单独重试', false);
         }
         this.patch({ reason: '', save: { status: 'saved', message: null } });
         return 'saved';
       }
-      await this.reloadQuietly();
+      await this.reloadQuietly(generation);
       this.patch({ save: { status: 'saved', message: null } });
       return 'saved';
     }
@@ -245,10 +273,109 @@ export class PanelController {
     const subjects = this.state.selectedNodeId ?? snapshot.tree[0]?.id;
     if (subjects === undefined) return this.fail('failed', '没有可关联的节点；原因未写入', false);
     const recorded = await this.appendReason([subjects], snapshot.planVersion, snapshot.planRevision, snapshot.sourceEpoch);
-    await this.reloadQuietly();
+    await this.reloadQuietly(generation);
     if (!recorded) return this.fail('failed', '变更原因未写入；内容已保留', false);
     this.patch({ reason: '', save: { status: 'saved', message: null } });
     return 'saved';
+  }
+
+  /** 应用一次读取结果：代际 → 源代际 → 修订，逐层守卫。 */
+  ingest(result: Awaited<ReturnType<PanelTransport['snapshot']>>, generation: number): IngestOutcome {
+    if (generation !== this.state.connection.generation) return 'stale-generation';
+    if (result.status === 'rejected') {
+      if (result.code === 'stale-connection') return 'stale-generation';
+      this.patch({ connection: { ...this.state.connection, status: 'connected', error: `${result.code}: ${result.message}` } });
+      return 'failed';
+    }
+    if (result.status === 'unsynced') {
+      // 不一致时不改树：宁可显示旧内容并标未同步，也不混两版。
+      this.patch({
+        connection: { ...this.state.connection, status: 'connected', error: `快照未同步（${result.reason}）：${result.detail}` },
+      });
+      return 'unsynced';
+    }
+    const verdict = this.accepts(result.snapshot);
+    if (verdict !== 'applied') return verdict;
+    this.apply(result.snapshot);
+    return 'applied';
+  }
+
+  private accepts(snapshot: PanelSnapshot): 'applied' | 'stale-source' | 'stale-revision' {
+    const current = this.state.snapshot;
+    if (current === null) return 'applied';
+    if (current.instanceId === snapshot.instanceId) {
+      // 旧源：整体过期，丢弃整份内容，不用它覆盖新代际。
+      if (snapshot.sourceEpoch < current.sourceEpoch) return 'stale-source';
+      // 同代际内只接受不更旧的修订（乱序答复不覆盖新状态）。
+      if (snapshot.sourceEpoch === current.sourceEpoch && snapshot.stateRevision < current.stateRevision) {
+        return 'stale-revision';
+      }
+    }
+    return 'applied';
+  }
+
+  private apply(snapshot: PanelSnapshot): void {
+    const selected =
+      this.state.selectedNodeId !== null && snapshot.tree.some((node) => node.id === this.state.selectedNodeId)
+        ? this.state.selectedNodeId
+        : (snapshot.tree[0]?.id ?? null);
+    this.patch({
+      phase: 'ready',
+      snapshot,
+      selectedNodeId: selected,
+      message: null,
+      connection: { ...this.state.connection, status: 'connected', error: null },
+    });
+  }
+
+  private async load(): Promise<void> {
+    const generation = this.state.connection.generation;
+    this.patch({ phase: this.state.snapshot === null ? 'loading' : this.state.phase, message: null });
+    let status: ConaProjectStatus;
+    try {
+      status = await this.deps.transport.status();
+    } catch (error) {
+      this.markOffline((error as Error).message);
+      if (this.state.snapshot === null) this.patch({ phase: 'error', message: (error as Error).message });
+      return;
+    }
+    if (generation !== this.state.connection.generation) return;
+    if (!status.configured) {
+      this.patch({ phase: 'error', status, message: status.error?.message ?? '未配置资料源' });
+      return;
+    }
+    let result: Awaited<ReturnType<PanelTransport['snapshot']>>;
+    try {
+      result = await this.deps.transport.snapshot({ connectionGeneration: generation });
+    } catch (error) {
+      this.markOffline((error as Error).message);
+      if (this.state.snapshot === null) this.patch({ phase: 'error', status, message: (error as Error).message });
+      return;
+    }
+    if (result.status === 'snapshot') {
+      this.patch({ status });
+      this.ingest(result, generation);
+      if (this.state.save.status === 'saved') this.patch({ save: { status: 'idle', message: null } });
+      return;
+    }
+    const outcome = this.ingest(result, generation);
+    if (outcome === 'stale-generation') return;
+    this.patch({
+      status,
+      ...(this.state.snapshot === null
+        ? { phase: 'error' as const, message: describeFailure(result) }
+        : {}),
+    });
+  }
+
+  /** 重新读快照但不覆盖草稿；失败只更新连接提示。受同一代际与修订守卫约束。 */
+  private async reloadQuietly(generation: number): Promise<void> {
+    try {
+      const result = await this.deps.transport.snapshot({ connectionGeneration: generation });
+      this.ingest(result, generation);
+    } catch (error) {
+      this.markOffline((error as Error).message);
+    }
   }
 
   private async appendReason(
@@ -279,23 +406,6 @@ export class PanelController {
     }
   }
 
-  /** 重新读快照但不覆盖草稿；失败只更新提示。 */
-  private async reloadQuietly(): Promise<void> {
-    try {
-      const result = await this.deps.transport.snapshot({ connectionGeneration: this.state.connectionGeneration });
-      if (result.status === 'snapshot') {
-        const snapshot = result.snapshot;
-        const selected =
-          this.state.selectedNodeId !== null && snapshot.tree.some((node) => node.id === this.state.selectedNodeId)
-            ? this.state.selectedNodeId
-            : (snapshot.tree[0]?.id ?? null);
-        this.patch({ snapshot, selectedNodeId: selected, phase: 'ready' });
-      }
-    } catch {
-      // 回读失败不改“已提交”的事实；面板保留旧快照并等待下次刷新。
-    }
-  }
-
   private fail(status: SaveStatus, message: string, keepDraft: boolean): SaveStatus {
     this.patch({
       save: { status, message },
@@ -308,6 +418,12 @@ export class PanelController {
     this.state = { ...this.state, ...patch };
     for (const listener of [...this.listeners]) listener(this.state);
   }
+}
+
+function describeFailure(result: Extract<Awaited<ReturnType<PanelTransport['snapshot']>>, { status: 'rejected' | 'unsynced' }>): string {
+  return result.status === 'rejected'
+    ? `${result.code}: ${result.message}`
+    : `快照未同步（${result.reason}）：${result.detail}`;
 }
 
 function baselineOf(snapshot: PanelSnapshot): DraftBaseline {

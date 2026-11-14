@@ -363,3 +363,155 @@ test('HTTP 传输：args 按参数名封装，HTTP 与解析错误归一为 Tran
 
 /** 只用于类型收敛：确保 PanelState 变更字段被控制器完整填充。 */
 export type PanelStateShape = PanelState;
+
+// ── 5.3：连接代际、源代际、乱序快照与草稿分离 ─────────────────────────────
+
+/** 按顺序返回快照（或抛错）的假传输；超过序列长度后重复最后一个。 */
+function sequencedTransport(
+  behaviors: (PanelSnapshot | Error)[],
+  executeImpl?: (request: ExecuteRequest) => CommandResult,
+): PanelTransport & { calls: ExecuteRequest[]; reads: number } {
+  let index = 0;
+  const calls: ExecuteRequest[] = [];
+  const transport: PanelTransport & { calls: ExecuteRequest[]; reads: number } = {
+    calls,
+    reads: 0,
+    status: async () => READY_STATUS,
+    snapshot: async (): Promise<SnapshotResult> => {
+      const behavior = behaviors[Math.min(index, behaviors.length - 1)];
+      index += 1;
+      transport.reads += 1;
+      if (behavior === undefined) throw new Error('空序列');
+      if (behavior instanceof Error) throw behavior;
+      return { status: 'snapshot', snapshot: behavior };
+    },
+    execute: async (request) => {
+      calls.push(request);
+      return executeImpl === undefined ? committed(request, 1) : executeImpl(request);
+    },
+  };
+  return transport;
+}
+
+function snapshotResult(value: PanelSnapshot): SnapshotResult {
+  return { status: 'snapshot', snapshot: value };
+}
+
+test('旧连接：换代后的迟到答复按代际丢弃', async () => {
+  const transport = sequencedTransport([
+    snapshot({ stateRevision: 0 }),
+    snapshot({ stateRevision: 1, planRevision: 1 }),
+  ]);
+  const panel = controller(transport);
+  await panel.open();
+  await panel.reconnect();
+  assert.equal(panel.getState().connection.generation, 2);
+  assert.equal(panel.getState().snapshot?.stateRevision, 1);
+
+  // 旧代际（1）的答复即使修订更高也不采纳。
+  const outcome = panel.ingest(snapshotResult(snapshot({ stateRevision: 9, planRevision: 9 })), 1);
+  assert.equal(outcome, 'stale-generation');
+  assert.equal(panel.getState().snapshot?.stateRevision, 1, '不被旧代际答复覆盖');
+});
+
+test('源代际：旧源整份丢弃，新源即使修订更小也接受', async () => {
+  const transport = sequencedTransport([snapshot({ sourceEpoch: 2, stateRevision: 5 })]);
+  const panel = controller(transport);
+  await panel.open();
+  const generation = panel.getState().connection.generation;
+
+  assert.equal(panel.ingest(snapshotResult(snapshot({ sourceEpoch: 1, stateRevision: 99 })), generation), 'stale-source');
+  assert.equal(panel.getState().snapshot?.sourceEpoch, 2);
+
+  const replaced = snapshot({ sourceEpoch: 3, stateRevision: 0, planRevision: 0 });
+  assert.equal(panel.ingest(snapshotResult(replaced), generation), 'applied');
+  assert.equal(panel.getState().snapshot?.sourceEpoch, 3, '换代是替换边界，不比较修订大小');
+  assert.equal(panel.getState().snapshot?.stateRevision, 0);
+});
+
+test('乱序快照：同代际内更旧的修订不覆盖', async () => {
+  const transport = sequencedTransport([snapshot({ stateRevision: 2 })]);
+  const panel = controller(transport);
+  await panel.open();
+  const generation = panel.getState().connection.generation;
+
+  assert.equal(panel.ingest(snapshotResult(snapshot({ stateRevision: 1 })), generation), 'stale-revision');
+  assert.equal(panel.getState().snapshot?.stateRevision, 2);
+  assert.equal(panel.ingest(snapshotResult(snapshot({ stateRevision: 3 })), generation), 'applied');
+  assert.equal(panel.getState().snapshot?.stateRevision, 3);
+});
+
+test('旧回执不回退：提交后回读被更旧快照覆盖时不降级', async () => {
+  const transport = sequencedTransport(
+    [snapshot({ stateRevision: 0 }), snapshot({ stateRevision: 1, planRevision: 1 })],
+    (request) => committed(request, 1),
+  );
+  const panel = controller(transport);
+  await panel.open();
+  panel.editGoal(ROOT_NODE, '提交一次');
+  assert.equal(await panel.save(), 'saved');
+  assert.equal(panel.getState().snapshot?.stateRevision, 1);
+
+  // 迟到的旧回执触发的读取（更旧修订）不得把树退回去。
+  const generation = panel.getState().connection.generation;
+  assert.equal(panel.ingest(snapshotResult(snapshot({ stateRevision: 0 })), generation), 'stale-revision');
+  assert.equal(panel.getState().snapshot?.stateRevision, 1);
+  assert.equal(panel.isSaved(), true);
+});
+
+test('草稿跨重连、换代与轮询保留；只在保存成功或放弃时清空', async () => {
+  const transport = sequencedTransport([
+    snapshot({ stateRevision: 0 }),
+    snapshot({ stateRevision: 1, planRevision: 1, sourceEpoch: 3 }),
+    snapshot({ stateRevision: 2, planRevision: 2, sourceEpoch: 3 }),
+  ]);
+  const panel = controller(transport);
+  await panel.open();
+  panel.editGoal(ROOT_NODE, '跨换代草稿');
+  assert.equal(panel.isDraftBaselineStale(), false);
+
+  await panel.reconnect();
+  assert.equal(panel.getState().draft?.goal, '跨换代草稿', '重连不清草稿');
+  assert.equal(panel.isDraftBaselineStale(), true, '换代后草稿基线已落后');
+
+  await panel.poll();
+  assert.equal(panel.getState().draft?.goal, '跨换代草稿', '轮询刷新不清草稿');
+
+  panel.discardDraft();
+  assert.equal(panel.getState().draft, null);
+});
+
+test('断线：轮询失败标离线保留内容，重连后代际 +1 并完整回读', async () => {
+  const transport = sequencedTransport([
+    snapshot({ stateRevision: 0 }),
+    new Error('连接中断'),
+    snapshot({ stateRevision: 4, planRevision: 4 }),
+  ]);
+  const panel = controller(transport);
+  await panel.open();
+  const before = panel.getState().connection.generation;
+
+  assert.equal(await panel.poll(), 'failed');
+  assert.equal(panel.getState().connection.status, 'offline');
+  assert.equal(panel.getState().snapshot?.stateRevision, 0, '断线不清空树');
+
+  await panel.reconnect();
+  const state = panel.getState();
+  assert.equal(state.connection.generation, before + 1);
+  assert.equal(state.connection.status, 'connected');
+  assert.equal(state.snapshot?.stateRevision, 4, '重连完整回读');
+});
+
+test('轮询：覆盖新修订并清掉离线提示', async () => {
+  const transport = sequencedTransport([
+    snapshot({ stateRevision: 0 }),
+    snapshot({ stateRevision: 1, planRevision: 1 }),
+  ]);
+  const panel = controller(transport);
+  await panel.open();
+  panel.markOffline('网络抖动');
+  assert.equal(await panel.poll(), 'applied');
+  assert.equal(panel.getState().snapshot?.stateRevision, 1);
+  assert.equal(panel.getState().connection.status, 'connected');
+  assert.equal(panel.getState().connection.error, null);
+});
