@@ -35,7 +35,7 @@
 | V26 | project-conversation-context：queue／steer／旧调用 | H、E | 待执行 B 不覆盖 A，同轮不明确归属拒绝，旧绑定不借新范围；续接和新基线有记录 | untested |
 | V27 | project-conversation-context：终态及重启 | H | 结束／取消后拒绝新写，未知停止保持未知，Host 恢复历史不激活授权，Client 断线不取消 Host | untested |
 | V28 | project-conversation-context：来源与动态上下文 | A、H、E | 背景与实际绑定一致，决定／建议／未核查区分，新材料不静默改目标，授权内调整记录原因 | untested |
-| V29 | project-panel-sync：最小编辑与保存 | H、E | 用户编辑与 Agent 调整同树，失败保草稿不标已保存，重启身份／规划不变 | untested（2026-11-14 传输层已实测：隔离 profile 内 `conaProject.status／snapshot／execute` 经真实 HTTP Remote 完成保存并回读，planRevision 0→1 且 `sync:synced`；Client 面板与草稿未做，H 层点击保存仍缺） |
+| V29 | project-panel-sync：最小编辑与保存 | H、E | 用户编辑与 Agent 调整同树，失败保草稿不标已保存，重启身份／规划不变 | untested（2026-11-14 H 层部分实测：真实浏览器点侧栏「项目」打开面板，改目标 + 变更原因保存后资料目标变化、`records` 增 `plan-change`；新增子节点节点数 2→3；外部写者提交后保存得冲突、草稿保留且文件是外部值。缺 E 层 Agent 调整（6.6）与重启后身份／规划核对） |
 | V30 | project-panel-sync：一致快照与初读竞态 | A、F、H | 不混合资料版本，先订阅后回读覆盖已知最新状态，树／摘要一致 | untested（2026-11-14 自动化层已实测：读取中提交触发重读且返回单一版本、正文改写／未知 schema 拒绝且不返回树、`follow → ready → snapshot(minStateRevision)` 覆盖水位、`summary` 与 `tree／dependencies／records` 同源、刷新换代后旧代际 `stale-connection`；H 层真实 Remote 入口与面板未接，待 5.2／5.3） |
 | V31 | project-panel-sync：旧连接／旧源／旧回执 | A、H | 迟到响应不覆盖新快照，历史回执不回滚当前树，跨实例不比较计数器 | untested |
 | V32 | project-panel-sync：重连与草稿 | A、H | 重新订阅／完整回读看到已提交事实，未提交编辑及基线保留 | untested |

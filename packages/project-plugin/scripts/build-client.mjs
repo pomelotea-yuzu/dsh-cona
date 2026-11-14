@@ -18,8 +18,9 @@ await build({
   platform: 'browser',
   format: 'cjs',
   target: 'es2022',
+  jsx: 'automatic',
   // 共享宿主模块经注入 require 解析，不内联；宿主注入清单由 manifest dsh.client.inject 声明。
-  external: ['@deepseek-ai/*'],
+  external: ['@deepseek-ai/*', 'react', 'react/jsx-runtime', 'react-dom'],
   sourcemap: 'external',
   minify: false,
   logLevel: 'info',

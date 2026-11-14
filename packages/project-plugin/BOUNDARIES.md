@@ -9,7 +9,7 @@
 | `src/domain/` | JSON 数据结构、纯变换、树／依赖／完成条件校验、v1-plan 指纹；**无 Node、Cordis、React** | `tsconfig.domain.json`（`types: []`、纯 ES2022 lib）+ `scripts/check-boundaries.mjs` |
 | `src/application/` | 命令、查询、可信调用上下文、提交及恢复；调用 ports 和领域核心 | 3.1 `SourceService`；3.2 `LocalStateService`；3.5 基线与 `refresh`；4.1 `ProjectCommandService` 与每实例队列；回执与恢复在 4.2–4.5；5.1 `ProjectSnapshotService` 与 `InMemoryChangeStream` |
 | `src/adapters/` | 文件、本机状态、DSH 会话和身份映射、Remote／工具入口 | 3.1／3.2 位置、Git、资料头、本机状态与锁；3.3 范围解析；3.4 原子替换与三态发布；Remote 在 3.6 |
-| `src/client/` | 面板、编辑草稿、同步状态机、字典；不写文件或复制业务规则 | 第 5 段实现 |
+| `src/client/` | 面板、编辑草稿与保存状态机、传输（`PanelTransport`）、字典；不写文件或复制业务规则 | 5.2 `panel-controller`／`http-transport`／`ProjectPanel`；`test/panel-controller.test.ts`；边界脚本禁 `node:` |
 | `src/host/` | Cordis 服务装配、依赖注入和生命周期 | 第 2 段实现 |
 | `src/cli/` | 独立校验命令：纯 Node，无 DSH 服务 | `test/cli.test.ts` |
 | `formats/v1/` | JSON Schema、资料 README 模板、协议正文与向量副本、合法样例 | `scripts/check-protocol-sync.mjs` |
@@ -128,3 +128,17 @@
 - **启动期不无条件刷新**：刷新会推进源代际，而代际是订阅侧替换边界；只在缺失或与磁盘不一致时刷新。
 - **失败不阻塞宿主**：配置错误、资料不合法只体现在 `status.error`，插件其余部分照常加载。
 - **Remote 边界只放稳定结构**：`ProjectSnapshot.local` 用计数而非 `unknown[]`；边界类型必须从 `./types` 子路径导出（生成器约束）。
+
+## 5.2 面板落地的边界
+
+| 文件 | 责任 | 不做什么 |
+|---|---|---|
+| `src/client/panel-controller.ts` | 草稿基线、保存三步（规划 → 原因记录 → 回读）、冲突／未知保留、`isDirty／isSaved` | 不渲染、不直接发请求、不自动合并冲突 |
+| `src/client/http-transport.ts` | `/api/conaProject/*` 编解码、`TransportError` 归一 | 不缓存快照、不做业务判断 |
+| `src/client/ProjectPanel.tsx` | 小树／详情／目标编辑／原因／位置／保存状态栏 | 不做保存规则；order 由控制器计算 |
+
+三条约束：
+
+- **渲染与规则分离**：草稿与保存规则可脱离浏览器测试；React 组件只读状态、调方法。
+- **保草稿优先于好看**：冲突、待核对、传输异常都不清草稿、不标已保存；未知结果复用原 operationId。
+- **传输可替换**：面板只依赖 `PanelTransport`；当前 HTTP 载体与后续 Remote 代理互不影响面板逻辑。

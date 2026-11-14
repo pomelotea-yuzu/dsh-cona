@@ -193,7 +193,7 @@ Remote 契约（Cona 自有，namespace `conaProject`）：
 - **代际与修订**：`sourceEpoch` 变化是替换边界，不比较大小；`stateRevision` 只在同代际内单调。旧代际快照请求直接 `stale-connection`。
 - **失效流只在进程内**：Host 重启后水位丢失，靠“重连即完整回读”弥补；跨进程通道不在 R1 范围。
 
-## 宿主 Remote 与实例配置（5.2 传输层）
+## 宿主 Remote 与实例配置（5.2）
 
 profile 的 `cordis.patch.yml` 里给出两条绝对路径（用户显式选择，插件不猜目录）：
 
@@ -214,8 +214,17 @@ profile 的 `cordis.patch.yml` 里给出两条绝对路径（用户显式选择�
 | `snapshot` | `{request:{connectionGeneration, minStateRevision?}}` | `SnapshotResult`（含 `source` 位置展示） |
 | `execute` | `{request:{operationId, command, expectedPlanVersion, expectedPlanRevision, …}}` | `CommandResult` |
 
-准入：`ctx.invocation` 存在、peer 主体 owner、`principalOf` 为空；其余 `forbidden`，不降级为进程内 owner。`follow` 尚未暴露（随面板接线）。
+准入：`ctx.invocation` 存在、peer 主体 owner、`principalOf` 为空；其余 `forbidden`，不降级为进程内 owner。`follow` 尚未暴露。
+
+## 面板（5.2）
+
+- 侧栏「项目」入口（`sidebar.panellist`，order 40）打开主区域面板（`main` keyed slot，key `cona-project`）。
+- 面板显示：项目标题与同步状态、规划／状态修订、资料位置与本机数据路径、完整小树（缩进 + order + status）、节点详情（含完成条件）、目标编辑、变更原因、保存状态栏。
+- 保存经统一命令（`conaProject.execute`）：目标编辑 → `update-node`；新增子节点 → `add-nodes`（order 取同级最大值 +1）；变更原因在规划成功后追加 `plan-change` 记录。
+- 草稿规则：保存冲突（`plan-conflict`／`source-changed`）、结果待核对、传输异常一律**保留草稿且不标已保存**；未知结果复用原 operationId 重试；原因记录失败标「部分保存」。
+- 传输：当前走宿主 `/api` 载体（`payload.args = {request}`），接口是 `PanelTransport`，可替换为生成的 Remote 代理。
+- 文案暂为固定中文；字典与语言切换属 5.4／5.5。
 
 ## 实现状态
 
-第 1 段（1.1–1.5）、第 3 段（3.1–3.5）、第 4 段（4.1–4.5）与 5.1 完成；5.2 完成宿主传输层（`conaProject` Remote 与实例打开），Client 面板与草稿保留未做；见 change `openspec/changes/establish-r1-project-plugin/tasks.md`。
+第 1 段（1.1–1.5）、第 3 段（3.1–3.5）、第 4 段（4.1–4.5）、5.1 与 5.2 完成；5.3 起未开始，见 change `openspec/changes/establish-r1-project-plugin/tasks.md`。
