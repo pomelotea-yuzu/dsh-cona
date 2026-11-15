@@ -109,6 +109,20 @@ export class ConversationService {
     return this.deps.queue.run(this.mutationInstanceId(), async () => {
       const read = await this.readAggregate();
       if ('outcome' in read) return read.outcome;
+      // 核查实际关联：宿主列表中不可见的会话不得被认领（失效／另一实例的会话不静默写入）。
+      let directory: Awaited<ReturnType<SessionDirectoryPort['listSessions']>>;
+      try {
+        directory = await this.deps.directory.listSessions();
+      } catch (error) {
+        return { status: 'rejected' as const, code: 'session-directory-unavailable', message: (error as Error).message };
+      }
+      if (!directory.some((session) => session.sessionId === request.sessionId)) {
+        return {
+          status: 'rejected' as const,
+          code: 'session-not-visible',
+          message: '宿主会话列表中没有该 Session；不写入关联',
+        };
+      }
       const state = conversationStateOf(read.aggregate.conversations);
       // 同 Session + 同用途 = 一条链接（合并节点）；不同用途是多条链接（多对多，不用唯一 Session 字段替代）。
       const existing = state.links.find(

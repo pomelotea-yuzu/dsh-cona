@@ -28,7 +28,7 @@
 | V20 | project-command-commit：unknown-state | F、H | 文件未知停止源新写，本机未知停止实例读写，UI 标未同步，不换 id 盲重试 | untested（2026-11-14 文件层已实测：本机聚合 unknown-state 与聚合不可读均写隔离标记，命令／回执／恢复全部拒绝，只读 `diagnostics` 仍可用，解除需显式确认；文件发布未知时停 `publishing` 且不解锁；UI 标未同步待第 5 段） |
 | V21 | project-command-commit：外部顺序编辑 | F | 追加索引保留，冲突标记／非法树／未知 schema 不被旧内存覆盖，源重载使旧绑定失效 | untested（2026-11-14 部分实测：外部追加记录被刷新接纳且不重复计数；冲突标记／非法树／未知 schema 拒绝且不推进基线；旧绑定失效待 4.x） |
 | V22 | project-command-commit：通知失败和发布中取消 | F、H | 已提交事实仍可查，发布中取消按实际结果核对，不回滚或重复应用 | untested（2026-11-14 部分实测：通知抛错仍 `committed` 且回执可查；发布中取消未做，待 6.x 与 UI 入口） |
-| V23 | project-conversation-context：多对多、空会话 | H | 双向关系可查，实际返回 Session id 被记录，复用不误绑，创建未知不再盲建 | untested |
+| V23 | project-conversation-context：多对多、空会话 | H | 双向关系可查，实际返回 Session id 被记录，复用不误绑，创建未知不再盲建 | pass（2026-11-15：真实宿主实测——创建记录宿主实际返回 sessionId 且 session/list 可见；空会话复用经命名复用返回同一 sessionId，同会话两条用途链接互不误绑；ghost 会话与未知节点拒绝；重启后链接保留且可见；双实例隔离以第二 profile 实测；结果未知路径以故障注入单测 + reconcile 只读实测覆盖，见 6.1 记录） |
 | V24 | project-conversation-context：浏览与授权分离 | A、H | A 运行时浏览 B／增加 B 关联不改执行目标，不自动扩大写权限 | untested |
 | V25a | project-conversation-context：owner Remote 与工具上下文映射 | H、E | UI Remote 由宿主生成 owner invocation（`principalOf` 为空不单独授权）；工具 ToolRunContext 无 invocation 但 agent／callId／signal 有效；queue／steer／迟到工具／cancel／重启的 turn 映射可对照 | pass（2026-11-13，见 2.4 映射记录） |
 | V25b | project-conversation-context：绑定准入与 non-owner 边界 | H、E | （i）工具无 invocation 但绑定有效按有限范围准入；agent 缺失／归属不唯一拒绝新绑定——第 6 段实现绑定层后复测，计入 R1；（ii）non-owner／伪造主体拒绝——R1 已声明边界 | blocked（i 待 6.2／6.5 复测，不享完成例外；ii 因 R1 无真实多身份部署，不阻 R1 完成，随归档带入 R2+ 边界记录） |

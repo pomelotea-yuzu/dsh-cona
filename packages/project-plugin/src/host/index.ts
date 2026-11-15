@@ -234,14 +234,6 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): void {
   const queue = new InstanceCommandQueue()
   const files = createSourceFiles(path.join(packageRootDir(), 'formats', 'v1'), sha256)
   const describe = (root: string): { displayPath: string } => ({ displayPath: describeRoot(root).displayPath })
-  // 会话目录（tasks 6.1）：宿主 sessionController 服务缺失时用稳定拒绝的占位实现。
-  const directoryResult = sessionDirectory(ctx)
-  const directory = directoryResult.ok
-    ? directoryResult.directory
-    : unavailableSessionDirectory(directoryResult.message)
-  if (!directoryResult.ok) {
-    console.log(`[dsh-cona-project] 会话目录不可用（${directoryResult.message}）；聊天创建／关联将以稳定码拒绝`)
-  }
 
   const resolveRuntime = async (): Promise<RuntimeResult> => {
     const resolved = resolveHostConfig(config)
@@ -290,6 +282,14 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): void {
       }
     }
     const instance = opened.instance
+    // 会话目录（tasks 6.1）：cwd 绑定实例资料根；宿主 sessionController 缺失时用稳定拒绝的占位实现。
+    const directoryResult = sessionDirectory(ctx, instance.sourceRoot)
+    const directory = directoryResult.ok
+      ? directoryResult.directory
+      : unavailableSessionDirectory(directoryResult.message)
+    if (!directoryResult.ok) {
+      console.log(`[dsh-cona-project] 会话目录不可用（${directoryResult.message}）；聊天创建／关联将以稳定码拒绝`)
+    }
     const command = new ProjectCommandService({
       localRoot: instance.localRoot,
       store,

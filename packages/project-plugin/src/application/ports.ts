@@ -42,6 +42,8 @@ export interface DirectorySession {
   running: boolean;
   /** 宿主最近活动时间（毫秒 epoch）。 */
   updatedAt: number;
+  /** 会话工作目录；冷会话缺失时为 null。 */
+  cwd: string | null;
 }
 
 export interface SessionDirectoryPort {

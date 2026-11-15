@@ -39,11 +39,11 @@ class FakeDirectory implements SessionDirectoryPort {
     const value = this.createResults.shift() as { sessionId: string };
     if (this.failAfterCreate) {
       // 模拟响应丢失：宿主已创建，但调用方拿不到结果（异常抛出）。
-      this.sessions.push({ sessionId: value.sessionId, blank: true, running: false, updatedAt: Date.now() });
+      this.sessions.push({ sessionId: value.sessionId, blank: true, running: false, updatedAt: Date.now(), cwd: null });
       this.failAfterCreate = false;
       throw new Error('响应丢失');
     }
-    this.sessions.push({ sessionId: value.sessionId, blank: true, running: false, updatedAt: Date.now() });
+    this.sessions.push({ sessionId: value.sessionId, blank: true, running: false, updatedAt: Date.now(), cwd: null });
     return value;
   }
 
@@ -96,11 +96,16 @@ function makeService(options?: {
   mkdirSync(localRoot, { recursive: true });
   // 测试装配总提供一份基础聚合。
   writeAggregateFixture(localRoot, { links: [], intents: [] });
+  const directory = options?.directory ?? new FakeDirectory();
+  // linkChat 要求会话在目录可见：默认目录常驻 session-a。
+  if (directory instanceof FakeDirectory && !directory.sessions.some((s) => s.sessionId === 'session-a')) {
+    directory.sessions.push({ sessionId: 'session-a', blank: true, running: false, updatedAt: 0, cwd: null });
+  }
   const service = new ConversationService({
     localRoot,
     instanceId: INSTANCE_ID,
     store,
-    directory: options?.directory ?? new FakeDirectory(),
+    directory,
     planNodes: options?.planNodes ?? PLAN_NODES,
     clock,
     newLinkId: () => `link-${Math.random().toString(16).slice(2)}`,
@@ -294,7 +299,9 @@ test('6.1 unknown-state：聚合替换结果未知时进入隔离并停止读写
     localRoot,
     instanceId: INSTANCE_ID,
     store,
-    directory: new FakeDirectory(),
+    directory: Object.assign(new FakeDirectory(), {
+      sessions: [{ sessionId: 'session-a', blank: true, running: false, updatedAt: 0, cwd: null }],
+    }),
     planNodes: PLAN_NODES,
     clock,
     newLinkId: () => 'link-x',

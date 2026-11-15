@@ -12,7 +12,7 @@ import type { Sha256Fn } from '../domain/types.js'
 
 /** 与 dsh-api-session-controller 的 SessionController 运行时形态对齐的最小结构。 */
 interface SessionControllerLike {
-  create(request: Record<string, never>): Promise<{ sessionId: unknown }>;
+  create(request: { sessionId?: string; cwd?: string }): Promise<{ sessionId: unknown }>;
   list(signal?: AbortSignal): Promise<{ items?: ReadonlyArray<Record<string, unknown>> }>;
 }
 
@@ -20,8 +20,13 @@ export type SessionDirectoryResult =
   | { ok: true; directory: SessionDirectoryPort }
   | { ok: false; message: string };
 
-/** 读取 ctx.sessionController（需要插件 inject 声明包含 'sessionController'）。 */
-export function sessionDirectory(ctx: Context): SessionDirectoryResult {
+/**
+ * 读取 ctx.sessionController（需要插件 inject 声明包含 'sessionController'）。
+ * `cwd` 绑定为当前实例的资料根：新建会话带 cwd（冷会话在重启后仍可列举），
+ * 复用策略按宿主 create 语义实现——先找 cwd 一致的空白会话命名复用，没有才新建；
+ * 无论复用还是新建，都以宿主实际返回的 sessionId 为准。
+ */
+export function sessionDirectory(ctx: Context, cwd: string): SessionDirectoryResult {
   const controller = (ctx as Context & { sessionController?: SessionControllerLike }).sessionController;
   if (controller === undefined) {
     return { ok: false, message: '宿主未提供 sessionController 服务（inject 缺失或宿主版本不符）' };
@@ -30,7 +35,15 @@ export function sessionDirectory(ctx: Context): SessionDirectoryResult {
     ok: true,
     directory: {
       async createSession() {
-        const value = await controller.create({});
+        const items = (await controller.list()).items ?? [];
+        const blank = items.find(
+          (item) => item['blank'] === true && item['cwd'] === cwd && typeof item['sessionId'] === 'string',
+        );
+        const request =
+          blank !== undefined
+            ? { sessionId: blank['sessionId'] as string, cwd }
+            : { cwd };
+        const value = await controller.create(request);
         const sessionId = value?.sessionId;
         if (typeof sessionId !== 'string' || sessionId === '') {
           throw new Error('宿主 create 未返回有效 sessionId');
@@ -40,7 +53,7 @@ export function sessionDirectory(ctx: Context): SessionDirectoryResult {
       async listSessions() {
         const value = await controller.list();
         const items = value?.items ?? [];
-        const out: Array<{ sessionId: string; blank: boolean; running: boolean; updatedAt: number }> = [];
+        const out: Array<{ sessionId: string; blank: boolean; running: boolean; updatedAt: number; cwd: string | null }> = [];
         for (const item of items) {
           const sessionId = item['sessionId'];
           if (typeof sessionId !== 'string' || sessionId === '') continue;
@@ -49,6 +62,7 @@ export function sessionDirectory(ctx: Context): SessionDirectoryResult {
             blank: item['blank'] === true,
             running: item['running'] === true,
             updatedAt: typeof item['updatedAt'] === 'number' ? (item['updatedAt'] as number) : 0,
+            cwd: typeof item['cwd'] === 'string' ? (item['cwd'] as string) : null,
           });
         }
         return out;
