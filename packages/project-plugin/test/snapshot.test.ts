@@ -229,6 +229,10 @@ test('快照包含完整小树、记录索引与同源摘要', async () => {
   assert.equal(snapshot.source.displayPath, ctx.source, '缺省显示资料根绝对路径');
   assert.equal(snapshot.local.conversationCount, 0);
   assert.equal(snapshot.local.workRunCount, 0);
+  // 最近本机操作时间（tasks 5.5）：此前已提交过记录命令，应为 UTC instant 且不晚于本次读取时刻。
+  assert.ok(snapshot.local.lastOperationAt !== null, '有操作记录时 lastOperationAt 非空');
+  assert.ok(!Number.isNaN(Date.parse(snapshot.local.lastOperationAt)), 'lastOperationAt 是可解析的 UTC instant');
+  assert.ok(Date.parse(snapshot.local.lastOperationAt) <= Date.parse(snapshot.readAt), 'lastOperationAt 不晚于 readAt');
 
   assert.equal(snapshot.tree.length, 2);
   assert.equal(snapshot.tree[0]?.id, ROOT_NODE);

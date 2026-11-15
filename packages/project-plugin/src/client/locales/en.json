@@ -13,6 +13,7 @@
   "revisions": "Plan revision {plan} · State revision {state} · Connection generation {generation}",
   "location": "Location: {path} ({kind})",
   "localData": "Local data: {path}",
+  "lastOperation": "Last local operation: {time}",
   "goal": "Goal",
   "save": "Save",
   "discard": "Discard draft",

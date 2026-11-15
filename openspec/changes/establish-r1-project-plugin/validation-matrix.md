@@ -41,8 +41,8 @@
 | V32 | project-panel-sync：重连与草稿 | A、H | 重新订阅／完整回读看到已提交事实，未提交编辑及基线保留 | untested（2026-11-14 H 层部分实测：阻断插件 API 后面板标「连接断开」，点「重连」代际 1→2、树完整回读、草稿保留并可保存成功；**“重新订阅”未做**——当前为 5 秒轮询，`conaProject.follow` 未接；宿主重启致外壳白屏、草稿不持久化） |
 | V33 | project-panel-sync：外部变化及未知提示 | F、H | 无通知也在准备／刷新边界重读，待核对／隔离明确显示，对应写入关闭 | untested（2026-11-14 部分实测：`local refresh` 边界总重读并报告 changes；UI 提示与写入关闭待第 5 段） |
 | V34 | plugin-localization：安装资源与回退 | A、H | 中英全部 key／占位符可用，元信息随包，缺失反例失败，其他宿主语言英文回退不改宿主偏好 | pass（2026-11-14：`check-locale.mjs` 中英 key／占位符一致 + 6 个反例自测；删 en 单个 key 实测 exit 1；tarball 含 `locale/` 与 `lib/client/locales/`；真实浏览器 zh-CN 中文、en-US 英文、ja-JP 英文回退，界面无原始 key，`locale.preference` 未被自动选择写入） |
-| V35 | plugin-localization：切换与重启 | A、H | 导航／已开面板更新，节点选择／输入保留，重启跟随宿主选择，字典卸载重载无重复 | untested |
-| V36 | plugin-localization：内容和时间隔离 | A、H | 项目原文、协议码、指纹与修订不变；长文本、数量、时区可用，语言不改日期或 Agent 授权 | untested |
+| V35 | plugin-localization：切换与重启 | A、H | 导航／已开面板更新，节点选择／输入保留，重启跟随宿主选择，字典卸载重载无重复 | pass（2026-11-15：设置页运行中切 English 后面板按钮／侧栏 label／`<html lang>` 即时更新；节点选择与目标草稿、变更原因逐字节保留；修订行数字不变；`preference: en` 落盘 profile patch，重启后 ja-JP 浏览器得英文界面（偏好覆盖浏览器语言）；重启后侧栏 Project 入口恰 1 个、pageerror 0。脚本 `panel-locale-55.mjs`，见 5.5 记录） |
+| V36 | plugin-localization：内容和时间隔离 | A、H | 项目原文、协议码、指纹与修订不变；长文本、数量、时区可用，语言不改日期或 Agent 授权 | pass（2026-11-15：项目标题／节点标题／目标保持中文原文；`planVersion`／修订切换前后不变；数量 zh/en 同源（3 条完成条件）；新增 `local.lastOperationAt` 以 Intl＋显式时区显示，zh/en 提取 (月,日,时,分,时区) 相等仅格式变；英文冲突长文案与 older-revision 提示完整可读、冲突保留草稿；R1 无 Agent 工具，owner execute 两语言同规则可用，Agent 授权属第 6 段。见 5.5 记录） |
 | V37 | 六能力整体闭环，必含 V32／V04 | E、H | 预构建安装→小树保存→聊天→真实 Agent 授权内调整并记原因→UI 已提交→Client 断线重连完整回读（V32）→重启恢复→卸载及重新安装（V04）→原资料／历史回执一致且旧 WorkRun 不恢复授权，可重复 | untested |
 | V38 | portable-project-data：外部 v1 首次接入 | F、H | 全新本机根无原注册表／数据库时取得外部合法 v1 文件，沿用原项目／节点 id，新建本机实例，不重建项目，不导入旧授权或回执；仅基础接入，非 R2 Git 或 R6 跨机试用 | untested（2026-11-14 文件层已实测：外部 sample 接入沿用 project／node id 与 planVersion，资料根不新增文件；本机实例登记待 3.2、H 待第 5／6 段） |
 

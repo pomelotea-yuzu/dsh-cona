@@ -155,6 +155,11 @@ function Header(props: {
           {t('localData', { path: state.status.localRootDisplay })}
         </p>
       )}
+      {snapshot.local.lastOperationAt === null ? null : (
+        <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>
+          {t('lastOperation', { time: formatInstant(snapshot.local.lastOperationAt) })}
+        </p>
+      )}
     </header>
   );
 }
@@ -269,6 +274,34 @@ function SaveBar(props: { controller: PanelController; state: PanelState; t: Tra
       {code === null ? '' : ` · ${t('errorCode', { code })}`}
     </span>
   );
+}
+
+/**
+ * 记录时间显示（design §9、tasks 5.5）：数据只存 UTC instant，这里按明确显示时区
+ * （本机系统时区，取不到时回退 UTC）用 Intl 格式化，输出自带时区标记。
+ * 格式随界面语言变化，但时刻与时区不随语言切换改变。
+ */
+function formatInstant(instant: string): string {
+  const date = new Date(instant);
+  if (Number.isNaN(date.getTime())) return instant;
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const locale = document.documentElement.lang || navigator.language || 'en';
+  try {
+    // 注意：dateStyle／timeStyle 不能与 timeZoneName 同用（会抛 RangeError），
+    // 因此用显式日期时间分量选项。
+    return new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZone,
+      timeZoneName: 'short',
+    }).format(date);
+  } catch {
+    return instant;
+  }
 }
 
 /** 由 parentId 计算缩进深度（数据已保证父节点存在）。 */

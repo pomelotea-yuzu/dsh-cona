@@ -63,7 +63,7 @@ function snapshot(overrides: Partial<PanelSnapshot> = {}): PanelSnapshot {
       recordCount: 0,
       recordsByKind: {},
     },
-    local: { conversationCount: 0, workRunCount: 0, quarantined: null },
+    local: { conversationCount: 0, workRunCount: 0, lastOperationAt: null, quarantined: null },
     readAt: '2026-11-14T00:00:00.000Z',
     ...overrides,
   };

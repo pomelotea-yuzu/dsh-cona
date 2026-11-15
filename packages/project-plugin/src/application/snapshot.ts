@@ -78,6 +78,11 @@ export interface ProjectSnapshot {
     conversationCount: number;
     /** 本机 WorkRun 历史数量。 */
     workRunCount: number;
+    /**
+     * 最近一条本机操作记录的 UTC instant（design §9：只存 instant，显示层按明确时区格式化）；
+     * 无任何操作记录时为 null。跨语言切换不变。
+     */
+    lastOperationAt: string | null;
     quarantined: QuarantineInfo | null;
   };
   readAt: string;
@@ -542,6 +547,11 @@ export class ProjectSnapshotService {
       local: {
         conversationCount: aggregate.conversations.length,
         workRunCount: aggregate.workRuns.length,
+        // createdAt 由同一 clock() 产出（UTC ISO instant），字典序即时间序。
+        lastOperationAt: aggregate.operations.reduce<string | null>(
+          (latest, item) => (latest === null || item.createdAt > latest ? item.createdAt : latest),
+          null,
+        ),
         quarantined,
       },
       readAt: this.deps.clock(),

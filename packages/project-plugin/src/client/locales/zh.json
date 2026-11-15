@@ -13,6 +13,7 @@
   "revisions": "规划修订 {plan} · 状态修订 {state} · 连接代际 {generation}",
   "location": "位置：{path}（{kind}）",
   "localData": "本机数据：{path}",
+  "lastOperation": "最近本机操作：{time}",
   "goal": "目标",
   "save": "保存",
   "discard": "放弃草稿",
