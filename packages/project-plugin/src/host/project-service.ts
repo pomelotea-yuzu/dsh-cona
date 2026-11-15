@@ -17,6 +17,8 @@ import type {
   ProjectCommandService,
   TrustedContext,
 } from '../application/command-service.js'
+import type { ConversationOutcome, ChatsView } from '../application/conversations.js'
+import { ConversationService } from '../application/conversations.js'
 import type { ProjectSnapshotService, SnapshotResult } from '../application/snapshot.js'
 import type { OpenedInstance } from './bootstrap.js'
 
@@ -55,11 +57,31 @@ export interface ConaExecuteRequest {
   sourceEpoch?: number;
 }
 
-/** 已打开的运行时：实例 + 两个应用服务。 */
+/** 创建聊天请求：意图登记 + 宿主创建（可能复用空白会话）+ 落链接，一次调用内完成。 */
+export interface ConaCreateChatRequest {
+  operationId: string;
+  nodeIds: string[];
+  purpose: string;
+  origin?: 'panel' | 'agent';
+}
+
+/** 认领（关联）请求：reconcile 候选确认，或直接关联已知会话。 */
+export interface ConaLinkChatRequest extends ConaCreateChatRequest {
+  sessionId: string;
+}
+
+export interface ConaUnlinkChatRequest {
+  operationId: string;
+  linkId: string;
+  nodeIds?: string[];
+}
+
+/** 已打开的运行时：实例 + 三个应用服务。 */
 export interface ConaProjectRuntime {
   instance: OpenedInstance;
   snapshot: ProjectSnapshotService;
   command: ProjectCommandService;
+  chats: ConversationService;
 }
 
 export type RuntimeResult =
@@ -154,6 +176,77 @@ export class ConaProjectService extends TypertRemoteService {
       command: request.command,
     }
     return runtime.value.command.execute(OWNER, envelope)
+  }
+
+  /** 聊天关联列表（含失效检查与待核对意图）；只读。 */
+  @Remote('chats')
+  async chats(): Promise<ConversationOutcome<ChatsView>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.listChats()
+  }
+
+  /**
+   * 创建聊天（tasks 6.1）：意图先落盘 → 宿主 create（可能复用空白会话）→ 核对实际返回身份 → 落链接。
+   * 宿主结果未知时意图保留 pending，由 reconcileChats 核对；本入口绝不自动重试创建。
+   */
+  @Remote('createChat')
+  async createChat(request: ConaCreateChatRequest): Promise<ConversationOutcome<{ sessionId: string; linkId: string; reusedBlank: boolean }>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.createChat({
+      operationId: request.operationId,
+      nodeIds: request.nodeIds,
+      purpose: request.purpose,
+      ...(request.origin === undefined ? {} : { origin: request.origin }),
+    })
+  }
+
+  /** 关联已知会话（含 reconcile 候选的显式认领）；核对宿主列表中的实际身份后才落盘。 */
+  @Remote('linkChat')
+  async linkChat(request: ConaLinkChatRequest): Promise<ConversationOutcome<{ linkId: string; reused: boolean }>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    if (typeof request.sessionId !== 'string' || request.sessionId === '') {
+      return { status: 'rejected', code: 'session-identity-missing', message: 'Session 身份缺失或为空' }
+    }
+    return runtime.value.chats.linkChat({
+      operationId: request.operationId,
+      sessionId: request.sessionId,
+      nodeIds: request.nodeIds,
+      purpose: request.purpose,
+      ...(request.origin === undefined ? {} : { origin: request.origin }),
+    })
+  }
+
+  /** 解除关联：缺省删除整条链接，给出 nodeIds 时只移除这些节点。 */
+  @Remote('unlinkChat')
+  async unlinkChat(request: ConaUnlinkChatRequest): Promise<ConversationOutcome<{ removed: boolean }>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.unlinkChat({
+      operationId: request.operationId,
+      linkId: request.linkId,
+      ...(request.nodeIds === undefined ? {} : { nodeIds: request.nodeIds }),
+    })
+  }
+
+  /** 待核对：对每个未决聊天意图给出宿主候选，不写链接、不再创建。 */
+  @Remote('reconcileChats')
+  async reconcileChats(): Promise<ConversationOutcome<ChatsView>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.reconcileChats()
   }
 
   /** 准入：缺 invocation、非 owner、或 `principalOf` 非空都拒绝，不降级。 */

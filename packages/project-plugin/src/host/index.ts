@@ -16,6 +16,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import { ProjectCommandService } from '../application/command-service.js'
+import { InstanceCommandQueue } from '../application/command-queue.js'
+import { ConversationService } from '../application/conversations.js'
 import { InMemoryChangeStream, notificationForCommit, notificationForRefresh } from '../application/change-stream.js'
 import { ProjectSnapshotService } from '../application/snapshot.js'
 import { createSourceFiles } from '../adapters/fs/source-files.js'
@@ -28,6 +30,7 @@ import { ConaDiagnosticService } from './diagnostic-service.js'
 import { createLocalStateService, openConfiguredInstance, resolveHostConfig, type HostConfigInput, type HostWiring } from './bootstrap.js'
 import { ConaProjectService } from './project-service.js'
 import type { RuntimeResult } from './project-service.js'
+import { planNodeView, sessionDirectory, unavailableSessionDirectory } from './session-directory.js'
 
 export const name = 'dsh-cona-project'
 
@@ -227,8 +230,18 @@ export function apply(ctx: Context, config?: HostConfigInput): void {
 function mountProjectServices(ctx: Context, config: HostConfigInput): void {
   const stream = new InMemoryChangeStream()
   const store = new LocalStateStore()
+  // 与规划命令共享的每实例队列：聊天关联变更与资料命令在同一实例内串行（design §7）。
+  const queue = new InstanceCommandQueue()
   const files = createSourceFiles(path.join(packageRootDir(), 'formats', 'v1'), sha256)
   const describe = (root: string): { displayPath: string } => ({ displayPath: describeRoot(root).displayPath })
+  // 会话目录（tasks 6.1）：宿主 sessionController 服务缺失时用稳定拒绝的占位实现。
+  const directoryResult = sessionDirectory(ctx)
+  const directory = directoryResult.ok
+    ? directoryResult.directory
+    : unavailableSessionDirectory(directoryResult.message)
+  if (!directoryResult.ok) {
+    console.log(`[dsh-cona-project] 会话目录不可用（${directoryResult.message}）；聊天创建／关联将以稳定码拒绝`)
+  }
 
   const resolveRuntime = async (): Promise<RuntimeResult> => {
     const resolved = resolveHostConfig(config)
@@ -285,6 +298,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): void {
       clock,
       newNodeId: () => randomUUID(),
       newRecordId: () => randomUUID(),
+      queue,
       notify: (result, envelope) =>
         stream.publish(
           notificationForCommit(
@@ -293,6 +307,16 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): void {
             clock(),
           ),
         ),
+    })
+    const chats = new ConversationService({
+      localRoot: instance.localRoot,
+      instanceId: instance.instanceId,
+      store,
+      directory,
+      planNodes: planNodeView(files, () => instance.sourceRoot, sha256, clock),
+      clock,
+      newLinkId: () => randomUUID(),
+      queue,
     })
     const snapshot = new ProjectSnapshotService({
       localRoot: instance.localRoot,
@@ -303,7 +327,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): void {
       stream,
       describeLocation: describe,
     })
-    return { ok: true, value: { instance, snapshot, command } }
+    return { ok: true, value: { instance, snapshot, command, chats } }
   }
 
   let runtime: Promise<RuntimeResult> | null = null
@@ -328,6 +352,6 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): void {
 // 'tools' 使 cordis 延迟 apply 至 dsh-tools 服务就绪，并放行 ctx.tools 属性访问
 // （否则报 cannot get property "tools" without inject，2026-11-13 profile 实测）。
 // host loader 可能以模块对象或 apply 函数两种形态登记插件，两层都声明。
-;(apply as unknown as { inject: string[] }).inject = ['tools']
+;(apply as unknown as { inject: string[] }).inject = ['tools', 'sessionController']
 
-export const inject = ['tools']
+export const inject = ['tools', 'sessionController']

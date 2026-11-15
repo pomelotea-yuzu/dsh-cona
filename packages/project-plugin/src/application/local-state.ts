@@ -143,7 +143,7 @@ export interface OperationRecord {
 
 /**
  * 单实例聚合：双修订、聊天关系、WorkRun 历史、意图／回执与最近有效观察同存一处。
- * 3.2 落形状与基本读写，3.5 补完整基线，4.2 补操作意图／回执；聊天在 3.6 细化。
+ * 3.2 落形状与基本读写，3.5 补完整基线，4.2 补操作意图／回执；6.1 落聊天关联形状。
  */
 export interface InstanceAggregate {
   schemaVersion: 1;
@@ -151,10 +151,60 @@ export interface InstanceAggregate {
   projectId: string;
   source: { root: string; kind: LocationKind; generation: number };
   revisions: { plan: number; state: number };
-  conversations: readonly unknown[];
+  conversations: ConversationState;
   workRuns: readonly unknown[];
   operations: OperationRecord[];
   lastObservation: ObservationBaseline | null;
+}
+
+/** 本机聊天关联（tasks 6.1）：多对多，链接只表达背景关系，不构成写授权。 */
+export interface ConversationLink {
+  /** 本机稳定链接 id；同一 Session 可有多条链接（不同用途）。 */
+  linkId: string;
+  /** 宿主实际返回的 Session 身份（非预期 id）。 */
+  sessionId: string;
+  /** 关联节点集合（多对多的一端）。 */
+  nodeIds: string[];
+  purpose: string;
+  /** 来源：面板创建／认领，或（后续段落的）Agent 工具。 */
+  origin: 'panel' | 'agent';
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 创建／认领聊天的持久意图（tasks 6.1，design §7）：
+ * 先落盘意图再调宿主；结果未知时保留 pending，由显式 reconcile 核对，不盲目再建第二个聊天。
+ */
+export interface ConversationIntent {
+  operationId: string;
+  action: 'create' | 'claim';
+  nodeIds: string[];
+  purpose: string;
+  origin: 'panel' | 'agent';
+  createdAt: string;
+  /** linked：已写入链接；unknown：宿主结果未知（等 reconcile）；pending：尚未取得宿主结果。 */
+  status: 'pending' | 'linked' | 'unknown';
+  resolvedSessionId?: string;
+  detail?: string;
+}
+
+export interface ConversationState {
+  links: ConversationLink[];
+  intents: ConversationIntent[];
+}
+
+/** 旧版聚合的 conversations 是空数组（3.2 预留）；读取时归一化为新形状。 */
+export function conversationStateOf(value: unknown): ConversationState {
+  if (Array.isArray(value)) return { links: [], intents: [] };
+  if (value !== null && typeof value === 'object') {
+    const state = value as Partial<ConversationState>;
+    return {
+      links: Array.isArray(state.links) ? [...state.links] : [],
+      intents: Array.isArray(state.intents) ? [...state.intents] : [],
+    };
+  }
+  return { links: [], intents: [] };
 }
 
 /**
@@ -406,7 +456,7 @@ export class LocalStateService {
         projectId: request.projectId,
         source: { root: request.sourceRoot, kind: request.sourceKind, generation: 1 },
         revisions: { plan: 0, state: 0 },
-        conversations: [],
+        conversations: { links: [], intents: [] },
         workRuns: [],
         operations: [],
         // 完整基线由显式刷新（3.5）建立；登记不写半截观察，避免被误当作已核查基线。

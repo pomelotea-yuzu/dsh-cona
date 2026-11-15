@@ -17,3 +17,14 @@ export type {
   CommittedCommand,
 } from './application/command-service.js'
 export type { ProjectSnapshot, SnapshotResult, PlanSummary, SnapshotSync } from './application/snapshot.js'
+// 聊天关联（tasks 6.1）：Remote chats/createChat/linkChat/unlinkChat/reconcileChats 的边界类型。
+export type {
+  ConversationOutcome,
+  ChatsView,
+  LinkView,
+} from './application/conversations.js'
+export type {
+  ConaCreateChatRequest,
+  ConaLinkChatRequest,
+  ConaUnlinkChatRequest,
+} from './host/project-service.js'

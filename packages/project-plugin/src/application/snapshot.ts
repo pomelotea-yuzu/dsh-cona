@@ -545,7 +545,7 @@ export class ProjectSnapshotService {
       records,
       summary: summarizePlan(tree, doc.plan.dependencies, records),
       local: {
-        conversationCount: aggregate.conversations.length,
+        conversationCount: aggregate.conversations.links.length,
         workRunCount: aggregate.workRuns.length,
         // createdAt 由同一 clock() 产出（UTC ISO instant），字典序即时间序。
         lastOperationAt: aggregate.operations.reduce<string | null>(

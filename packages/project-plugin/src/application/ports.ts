@@ -34,6 +34,30 @@ export interface ConversationPort {
   open(conversationId: string): Promise<unknown>;
 }
 
+/** 宿主会话目录视图（tasks 6.1，design §7）：插件经此读取／创建真实 Session，不假设 id。 */
+export interface DirectorySession {
+  sessionId: string;
+  /** 宿主标记的空白会话（未发送过消息）——create 的复用对象。 */
+  blank: boolean;
+  running: boolean;
+  /** 宿主最近活动时间（毫秒 epoch）。 */
+  updatedAt: number;
+}
+
+export interface SessionDirectoryPort {
+  /** 创建（宿主可能复用可复用的空白会话）并返回实际 Session 身份。 */
+  createSession(): Promise<{ sessionId: string }>;
+  /** 只读列举可见 Session，不 resume Agent；用于身份核对与结果未知时的待核对候选。 */
+  listSessions(): Promise<readonly DirectorySession[]>;
+}
+
+/** 当前规划节点视图：链接校验用（nodeIds 必须存在于当前资料）。 */
+export interface PlanNodeViewPort {
+  currentNodeIds(): Promise<
+    { ok: true; nodeIds: ReadonlySet<string> } | { ok: false; code: string; message: string }
+  >;
+}
+
 /** 可信执行上下文：入口处捕获的只读判别联合（remote-owner | agent-work）。 */
 export interface ExecutionContextPort {
   capture(): unknown;
