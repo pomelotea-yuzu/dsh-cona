@@ -18,6 +18,7 @@ import { z } from 'zod'
 import { ProjectCommandService } from '../application/command-service.js'
 import { InstanceCommandQueue } from '../application/command-queue.js'
 import { ConversationService } from '../application/conversations.js'
+import { WorkService } from '../application/work.js'
 import { InMemoryChangeStream, notificationForCommit, notificationForRefresh } from '../application/change-stream.js'
 import { ProjectSnapshotService } from '../application/snapshot.js'
 import { createSourceFiles } from '../adapters/fs/source-files.js'
@@ -54,6 +55,9 @@ function defaultLocalRootDir(): string {
   const home = process.env['DSH_HOME'] ?? path.join(homedir(), '.dsh')
   return path.join(home, 'data', 'dsh-cona', 'local')
 }
+
+/** 宿主启动代际（tasks 6.2）：apply 时取进程启动时刻；WorkRun 只在本代际内生效。 */
+let bootGeneration = 0
 
 export interface ConaToolObservation {
   /** execute 收到的 exec.agent（Agent.id 为 SessionId）；无 agent 时为 null。 */
@@ -116,6 +120,8 @@ interface ConaToolsRegistry {
 export function apply(ctx: Context, config?: HostConfigInput): void {
   // tasks 2.3：宿主进程 Node 版本的直接观察证据（随激活日志输出）。
   console.log('[dsh-cona-project] host apply; node =', process.version, '; pid =', process.pid)
+  // 宿主启动代际（tasks 6.2）：进程内常量；重启后新代际使全部旧活动绑定失效。
+  bootGeneration = Date.now()
   ctx.plugin(ConaDiagnosticService)
   mountProjectServices(ctx, config ?? {})
 
@@ -290,6 +296,17 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): void {
     if (!directoryResult.ok) {
       console.log(`[dsh-cona-project] 会话目录不可用（${directoryResult.message}）；聊天创建／关联将以稳定码拒绝`)
     }
+    // 工作意图与活动 WorkRun（tasks 6.2）：与命令服务共享同一 planNodes 视图与队列。
+    const work = new WorkService({
+      localRoot: instance.localRoot,
+      instanceId: instance.instanceId,
+      store,
+      planNodes: planNodeView(files, () => instance.sourceRoot, sha256, clock),
+      clock,
+      newWorkRunId: () => randomUUID(),
+      bootGeneration,
+      queue,
+    })
     const command = new ProjectCommandService({
       localRoot: instance.localRoot,
       store,
@@ -299,6 +316,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): void {
       newNodeId: () => randomUUID(),
       newRecordId: () => randomUUID(),
       queue,
+      work, // agent-work 上下文的有限范围准入与绑定版本推进（tasks 6.2）
       notify: (result, envelope) =>
         stream.publish(
           notificationForCommit(
@@ -327,7 +345,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): void {
       stream,
       describeLocation: describe,
     })
-    return { ok: true, value: { instance, snapshot, command, chats } }
+    return { ok: true, value: { instance, snapshot, command, chats, work } }
   }
 
   let runtime: Promise<RuntimeResult> | null = null

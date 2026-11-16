@@ -28,3 +28,15 @@ export type {
   ConaLinkChatRequest,
   ConaUnlinkChatRequest,
 } from './host/project-service.js'
+// 工作意图与 WorkRun（tasks 6.2）：Remote workList/workPrepare/workStart/workStop/workObserve 的边界类型。
+export type {
+  AdmissionResult,
+  WorkAction,
+  WorkListView,
+  WorkOutcome,
+} from './application/work.js'
+export type {
+  ConaWorkObserveRequest,
+  ConaWorkPrepareRequest,
+  ConaWorkStartRequest,
+} from './host/project-service.js'

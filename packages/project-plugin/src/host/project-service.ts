@@ -19,6 +19,13 @@ import type {
 } from '../application/command-service.js'
 import type { ConversationOutcome, ChatsView } from '../application/conversations.js'
 import { ConversationService } from '../application/conversations.js'
+import type {
+  AdmissionResult,
+  WorkAction,
+  WorkListView,
+  WorkOutcome,
+} from '../application/work.js'
+import { WorkService } from '../application/work.js'
 import type { ProjectSnapshotService, SnapshotResult } from '../application/snapshot.js'
 import type { OpenedInstance } from './bootstrap.js'
 
@@ -76,12 +83,49 @@ export interface ConaUnlinkChatRequest {
   nodeIds?: string[];
 }
 
-/** 已打开的运行时：实例 + 三个应用服务。 */
+/** 工作意图登记请求（tasks 6.2）：目标集合、允许动作、原因范围与确认时输入基线。 */
+export interface ConaWorkPrepareRequest {
+  workIntentId: string;
+  nodeIds: string[];
+  allowedActions: WorkAction[];
+  reasonScope: 'public' | 'local';
+  purpose: string;
+  origin?: 'panel' | 'agent';
+  baseline: { planVersion: string; planRevision: number; sourceEpoch: number };
+}
+
+/** “开始工作”确认：登记期望消息来源（Client prompt requestId ＝ source.rpcId）。 */
+export interface ConaWorkStartRequest {
+  workIntentId: string;
+  rpcId: string;
+  sessionId?: string;
+}
+
+/**
+ * 消息准入观测（design §7 映射）：宿主真实事件经适配器转发。
+ * queued＝agent/inbox/spliced target=next-turn（只登记）；consumed＝消息被消费（首次匹配启动 WorkRun）；
+ * turn-end＝turn/end completed／aborted（真实终态；预告 stopping 不作数）。
+ */
+export interface ConaWorkObserveRequest {
+  kind: 'queued' | 'consumed' | 'turn-end';
+  sessionId: string;
+  /** queued／consumed 必填：期望或被消费消息的来源 id。 */
+  rpcId?: string;
+  /** consumed／turn-end 必填：消费或结束所在 turn。 */
+  turn?: number;
+  /** consumed 必填：消费点是否有实际 Agent 归属。 */
+  agentPresent?: boolean;
+  /** turn-end 必填：真实终态种类。 */
+  endKind?: 'completed' | 'aborted';
+}
+
+/** 已打开的运行时：实例 + 四个应用服务。 */
 export interface ConaProjectRuntime {
   instance: OpenedInstance;
   snapshot: ProjectSnapshotService;
   command: ProjectCommandService;
   chats: ConversationService;
+  work: WorkService;
 }
 
 export type RuntimeResult =
@@ -247,6 +291,104 @@ export class ConaProjectService extends TypertRemoteService {
     const runtime = await this.deps.runtime()
     if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
     return runtime.value.chats.reconcileChats()
+  }
+
+  /** 工作意图与运行列表（含生效性标注：重启后旧代际不再有写资格）；只读。 */
+  @Remote('workList')
+  async workList(): Promise<WorkOutcome<WorkListView>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.work.listWork()
+  }
+
+  /** 登记工作意图（pending）：目标集合、允许动作、原因范围与输入基线；范围尚未生效。 */
+  @Remote('workPrepare')
+  async workPrepare(request: ConaWorkPrepareRequest): Promise<WorkOutcome<{ workIntentId: string; reused: boolean }>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.work.prepareWork({
+      workIntentId: request.workIntentId,
+      nodeIds: request.nodeIds,
+      allowedActions: request.allowedActions,
+      reasonScope: request.reasonScope,
+      purpose: request.purpose,
+      baseline: request.baseline,
+      ...(request.origin === undefined ? {} : { origin: request.origin }),
+    })
+  }
+
+  /** “开始工作”：确认具体范围并登记期望消息来源；基线过期拒绝，先刷新再确认。 */
+  @Remote('workStart')
+  async workStart(request: ConaWorkStartRequest): Promise<WorkOutcome<{ workIntentId: string; status: 'awaiting-message' }>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.work.startWork({
+      workIntentId: request.workIntentId,
+      rpcId: request.rpcId,
+      ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
+    })
+  }
+
+  /** 显式停止：立即停止新写准入；已进入发布的操作按提交恢复协议核对。 */
+  @Remote('workStop')
+  async workStop(request: { workRunId: string }): Promise<WorkOutcome<{ stopped: boolean }>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    if (typeof request.workRunId !== 'string' || request.workRunId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 workRunId' }
+    }
+    return runtime.value.work.stopWork(request.workRunId)
+  }
+
+  /**
+   * 消息准入观测：把宿主真实事件（排队／消费／终态）转发给 WorkService。
+   * rpcId 不是授权令牌——工具提交时还会核对真实 ToolRunContext 的 agent.id 与会话；
+   * owner 观测不替代消息消费与实际 Agent 在场核对（consumed 必须带 agentPresent）。
+   */
+  @Remote('workObserve')
+  async workObserve(request: ConaWorkObserveRequest): Promise<AdmissionResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    const work = runtime.value.work
+    if (request.kind === 'queued') {
+      if (typeof request.rpcId !== 'string' || request.rpcId === '') {
+        return { status: 'rejected', code: 'operation-mismatch', message: '排队事件缺少 rpcId' }
+      }
+      return work.observeQueued({ sessionId: request.sessionId, rpcId: request.rpcId })
+    }
+    if (request.kind === 'consumed') {
+      if (typeof request.rpcId !== 'string' || request.rpcId === '') {
+        return { status: 'rejected', code: 'operation-mismatch', message: '消费事件缺少 rpcId' }
+      }
+      return work.observeConsumed({
+        sessionId: request.sessionId,
+        rpcId: request.rpcId,
+        turn: request.turn as number,
+        agentPresent: request.agentPresent === true,
+      })
+    }
+    if (request.kind === 'turn-end') {
+      if (!Number.isSafeInteger(request.turn) || (request.turn as number) < 0
+        || (request.endKind !== 'completed' && request.endKind !== 'aborted')) {
+        return { status: 'rejected', code: 'operation-mismatch', message: '终态事件缺少有效 turn 与 endKind' }
+      }
+      return work.observeTurnEnd({
+        sessionId: request.sessionId,
+        turn: request.turn as number,
+        kind: request.endKind as 'completed' | 'aborted',
+      })
+    }
+    return { status: 'rejected', code: 'operation-mismatch', message: '未知观测事件类型' }
   }
 
   /** 准入：缺 invocation、非 owner、或 `principalOf` 非空都拒绝，不降级。 */

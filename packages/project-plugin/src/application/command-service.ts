@@ -111,6 +111,23 @@ export type CommandResult = CommittedCommand | RejectedCommand | PendingCommand;
 
 export type ReceiptResult = CommandResult | { status: 'not-found' };
 
+/**
+ * 工作绑定准入端口（tasks 6.2，design §7）：agent-work 上下文的有限范围授权。
+ * 由 WorkService 结构化实现；命令服务只依赖此接口，不依赖 WorkService 全量 API。
+ */
+export interface WorkAdmissionPort {
+  /** 核对活动 WorkRun、绑定版本、动作与目标范围、命令基线与已接受基线一致。 */
+  authorizeAgentCommand(
+    ctx: { kind: 'agent-work'; workRunId: string; bindingVersion: number; instanceId: string },
+    envelope: CommandEnvelope,
+  ): Promise<{ ok: true } | { ok: false; code: string; message: string }>;
+  /** 本运行规划命令成功后推进绑定版本（仅更新已接受基线；在实例队列任务内调用）。 */
+  afterPlanCommit(
+    ctx: { kind: 'agent-work'; workRunId: string; bindingVersion: number },
+    result: { planVersion: string; planRevision: number; sourceEpoch: number },
+  ): Promise<void>;
+}
+
 /** 只读诊断报告（tasks 4.5）：不写文件，不改变任何状态。 */
 export interface DiagnosticsReport {
   instanceId: string;
@@ -157,6 +174,8 @@ export interface ProjectCommandDeps {
   newNodeId: () => string;
   newRecordId: () => string;
   queue?: InstanceCommandQueue;
+  /** 工作绑定准入（tasks 6.2）：agent-work 上下文的有限范围授权与绑定版本推进。 */
+  work?: WorkAdmissionPort;
   /** 故障注入（仅测试）。 */
   hooks?: { publish?: PublishHooksPort; body?: PublishHooksPort; state?: PublishHooksPort };
   /** 提交后通知（第 5 段失效流）；失败不撤回提交。 */
@@ -253,6 +272,14 @@ export class ProjectCommandService {
     const authorized = authorizeTrustedContext(ctx, envelope);
     if (!authorized.ok) {
       return { status: 'rejected', code: authorized.code, message: authorized.message };
+    }
+    // agent-work 入口的第二层准入（tasks 6.2）：活动 WorkRun、绑定版本、目标／动作范围与基线。
+    // remote-owner 路径不走工作绑定；两条入口判据独立，不共用一个“有绑定即放行”。
+    if (ctx !== undefined && ctx.kind === 'agent-work' && this.deps.work !== undefined) {
+      const admitted = await this.deps.work.authorizeAgentCommand(ctx, envelope);
+      if (!admitted.ok) {
+        return { status: 'rejected', code: admitted.code, message: admitted.message };
+      }
     }
     const shape = this.checkEnvelope(envelope);
     if (shape !== null) return shape;
@@ -879,6 +906,19 @@ export class ProjectCommandService {
         await this.deps.notify(committed, envelope);
       } catch {
         // 通知失败不回滚、不重复执行。
+      }
+    }
+    // 工作绑定版本推进（tasks 6.2，design §7）：本运行规划命令成功后仅更新已接受基线并 +1，
+    // 目标范围与动作集合不自动扩大；bump 失败不撤回提交，旧版本捕获将在下一次调用被拒绝。
+    if (ctx.kind === 'agent-work' && this.deps.work !== undefined && result.impact === 'plan') {
+      try {
+        await this.deps.work.afterPlanCommit(ctx, {
+          planVersion: result.planVersion,
+          planRevision: result.planRevision,
+          sourceEpoch: result.sourceEpoch,
+        });
+      } catch {
+        // 绑定推进失败不影响已提交事实；下一次工具调用按版本核对拒绝并需重新接续。
       }
     }
     return committed;

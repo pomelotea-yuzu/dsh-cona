@@ -31,7 +31,7 @@
 | V23 | project-conversation-context：多对多、空会话 | H | 双向关系可查，实际返回 Session id 被记录，复用不误绑，创建未知不再盲建 | pass（2026-11-15：真实宿主实测——创建记录宿主实际返回 sessionId 且 session/list 可见；空会话复用经命名复用返回同一 sessionId，同会话两条用途链接互不误绑；ghost 会话与未知节点拒绝；重启后链接保留且可见；双实例隔离以第二 profile 实测；结果未知路径以故障注入单测 + reconcile 只读实测覆盖，见 6.1 记录） |
 | V24 | project-conversation-context：浏览与授权分离 | A、H | A 运行时浏览 B／增加 B 关联不改执行目标，不自动扩大写权限 | untested |
 | V25a | project-conversation-context：owner Remote 与工具上下文映射 | H、E | UI Remote 由宿主生成 owner invocation（`principalOf` 为空不单独授权）；工具 ToolRunContext 无 invocation 但 agent／callId／signal 有效；queue／steer／迟到工具／cancel／重启的 turn 映射可对照 | pass（2026-11-13，见 2.4 映射记录） |
-| V25b | project-conversation-context：绑定准入与 non-owner 边界 | H、E | （i）工具无 invocation 但绑定有效按有限范围准入；agent 缺失／归属不唯一拒绝新绑定——第 6 段实现绑定层后复测，计入 R1；（ii）non-owner／伪造主体拒绝——R1 已声明边界 | blocked（i 待 6.2／6.5 复测，不享完成例外；ii 因 R1 无真实多身份部署，不阻 R1 完成，随归档带入 R2+ 边界记录） |
+| V25b | project-conversation-context：绑定准入与 non-owner 边界 | H、E | （i）工具无 invocation 但绑定有效按有限范围准入；agent 缺失／归属不唯一拒绝新绑定——第 6 段实现绑定层后复测，计入 R1；（ii）non-owner／伪造主体拒绝——R1 已声明边界 | blocked（i：绑定层已于 2026-11-16 随 6.2 实现，准入与拒绝规则经单测证明（见 6.2 记录），真实宿主经真实 Agent 工具的复测待 6.3／6.5 落地后进行，不享完成例外；ii 因 R1 无真实多身份部署，不阻 R1 完成，随归档带入 R2+ 边界记录） |
 | V26 | project-conversation-context：queue／steer／旧调用 | H、E | 待执行 B 不覆盖 A，同轮不明确归属拒绝，旧绑定不借新范围；续接和新基线有记录 | untested |
 | V27 | project-conversation-context：终态及重启 | H | 结束／取消后拒绝新写，未知停止保持未知，Host 恢复历史不激活授权，Client 断线不取消 Host | untested |
 | V28 | project-conversation-context：来源与动态上下文 | A、H、E | 背景与实际绑定一致，决定／建议／未核查区分，新材料不静默改目标，授权内调整记录原因 | untested |

@@ -142,8 +142,9 @@ export interface OperationRecord {
 }
 
 /**
- * 单实例聚合：双修订、聊天关系、WorkRun 历史、意图／回执与最近有效观察同存一处。
- * 3.2 落形状与基本读写，3.5 补完整基线，4.2 补操作意图／回执；6.1 落聊天关联形状。
+ * 单实例聚合：双修订、聊天关系、工作意图／WorkRun、意图／回执与最近有效观察同存一处。
+ * 3.2 落形状与基本读写，3.5 补完整基线，4.2 补操作意图／回执；6.1 落聊天关联形状；6.2 落工作意图与 WorkRun。
+ * 私有授权（工作意图／运行／绑定）只存本机聚合，不进公开资料；导入外部 v1 资料不带来任何授权。
  */
 export interface InstanceAggregate {
   schemaVersion: 1;
@@ -152,7 +153,8 @@ export interface InstanceAggregate {
   source: { root: string; kind: LocationKind; generation: number };
   revisions: { plan: number; state: number };
   conversations: ConversationState;
-  workRuns: readonly unknown[];
+  workIntents: WorkIntent[];
+  workRuns: WorkRunRecord[];
   operations: OperationRecord[];
   lastObservation: ObservationBaseline | null;
 }
@@ -194,6 +196,71 @@ export interface ConversationState {
   intents: ConversationIntent[];
 }
 
+/** 工作意图允许的动作子集（design §7）：范围显式确认，不自动扩大。 */
+export type WorkAction = 'add' | 'update' | 'split' | 'dependencies' | 'record' | 'status';
+
+export const WORK_ACTIONS: readonly WorkAction[] = ['add', 'update', 'split', 'dependencies', 'record', 'status'];
+
+/** 工作意图登记的输入规划基线快照；运行期间命令基线与之核对，外部变化即失配。 */
+export interface WorkBaseline {
+  planVersion: string;
+  planRevision: number;
+  sourceEpoch: number;
+}
+
+/**
+ * 工作意图（tasks 6.2，design §7）：目标集合、允许动作、原因可发布范围与输入规划基线。
+ * 用户经“开始工作”确认具体范围后进入 awaiting-message，等期望消息（source.rpcId）
+ * 被宿主实际消费时才启动 WorkRun；排队未消费只登记，不改绑定。
+ */
+export interface WorkIntent {
+  workIntentId: string;
+  /** 目标集合（多节点允许）；绑定外目标一律拒绝。 */
+  nodeIds: string[];
+  allowedActions: WorkAction[];
+  /** 原因可发布范围：public＝原因可写入公开记录；local＝原因只留在本机聚合。 */
+  reasonScope: 'public' | 'local';
+  purpose: string;
+  origin: 'panel' | 'agent';
+  baseline: WorkBaseline;
+  /** 期望消息来源：Client prompt 的 requestId（宿主保存为消息 source.rpcId）；rpcId 不是授权令牌。 */
+  expectedRpcId?: string;
+  /** 期望会话；缺省由首次消费匹配确定。 */
+  sessionId?: string;
+  /** pending：已登记待确认；awaiting-message：已确认等消息消费；active：运行中；
+   *  completed：运行真实终态；stopped：显式停止；blocked：准入拒绝（agent 缺失／归属不唯一等）。 */
+  status: 'pending' | 'awaiting-message' | 'active' | 'completed' | 'stopped' | 'blocked';
+  blockedReason?: string;
+  /** 最近一次排队观测（只登记； informational）。 */
+  queuedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * WorkRun（tasks 6.2）：一次真实执行的活动绑定。身份键＝(bootGeneration, sessionId, turn)；
+ * 同一会话同时最多一个生效运行。bindingVersion 从 1 起，本运行规划提交成功后 +1
+ * （只更新已接受基线，范围与动作不变）；重启后旧代际运行不再有写资格。
+ */
+export interface WorkRunRecord {
+  workRunId: string;
+  workIntentId: string;
+  sessionId: string;
+  turn: number;
+  bootGeneration: number;
+  bindingVersion: number;
+  acceptedBaseline: WorkBaseline;
+  targets: string[];
+  allowedActions: WorkAction[];
+  reasonScope: 'public' | 'local';
+  rpcId: string;
+  /** active：生效中；stopped：显式停止；ended：真实终态（完成／取消）。 */
+  status: 'active' | 'stopped' | 'ended';
+  endedAt?: string;
+  endKind?: 'completed' | 'aborted' | 'stopped';
+  startedAt: string;
+}
+
 /** 旧版聚合的 conversations 是空数组（3.2 预留）；读取时归一化为新形状。 */
 export function conversationStateOf(value: unknown): ConversationState {
   if (Array.isArray(value)) return { links: [], intents: [] };
@@ -205,6 +272,20 @@ export function conversationStateOf(value: unknown): ConversationState {
     };
   }
   return { links: [], intents: [] };
+}
+
+/**
+ * 工作状态归一化（tasks 6.2）：旧聚合没有 workIntents（workRuns 曾是 unknown[] 占位）；
+ * 读取时归一化为类型化数组。私有授权只在本地聚合，导入的公开资料不带任何工作状态。
+ */
+export function workStateOf(aggregate: Pick<InstanceAggregate, 'workIntents' | 'workRuns'>): {
+  intents: WorkIntent[];
+  runs: WorkRunRecord[];
+} {
+  return {
+    intents: Array.isArray(aggregate.workIntents) ? [...aggregate.workIntents] : [],
+    runs: Array.isArray(aggregate.workRuns) ? [...aggregate.workRuns] : [],
+  };
 }
 
 /**
@@ -457,6 +538,7 @@ export class LocalStateService {
         source: { root: request.sourceRoot, kind: request.sourceKind, generation: 1 },
         revisions: { plan: 0, state: 0 },
         conversations: { links: [], intents: [] },
+        workIntents: [],
         workRuns: [],
         operations: [],
         // 完整基线由显式刷新（3.5）建立；登记不写半截观察，避免被误当作已核查基线。

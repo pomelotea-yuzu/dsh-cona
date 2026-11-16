@@ -208,6 +208,7 @@ test('本机聚合替换：saved／not-saved／unknown-state 三态', async () =
     source: { root: path.join(base, 'src'), kind: 'custom' as const, generation: 1 },
     revisions: { plan: 0, state: 0 },
     conversations: { links: [], intents: [] },
+    workIntents: [],
     workRuns: [],
     operations: [],
     lastObservation: null,
