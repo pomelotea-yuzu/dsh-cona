@@ -31,6 +31,7 @@ import { ConaDiagnosticService } from './diagnostic-service.js'
 import { createLocalStateService, openConfiguredInstance, resolveHostConfig, type HostConfigInput, type HostWiring } from './bootstrap.js'
 import { ConaProjectService } from './project-service.js'
 import type { RuntimeResult } from './project-service.js'
+import { ProjectToolAdapter, defineProjectTools, type ConaToolDefinition, type ConaToolExec, type ConaToolsRegistry } from './project-tools.js'
 import { planNodeView, sessionDirectory, unavailableSessionDirectory } from './session-directory.js'
 
 export const name = 'dsh-cona-project'
@@ -84,46 +85,13 @@ interface ConaAbortSignalLike {
   removeEventListener?(type: 'abort', listener: () => void): void;
 }
 
-interface ConaToolExec {
-  agent?: { readonly id: unknown };
-  callId?: unknown;
-  signal?: ConaAbortSignalLike;
-}
-
-/** 与 dsh-tools ToolDefinition 运行时形态对齐的最小结构（工具定义部分）。 */
-interface ConaToolDefinition {
-  name: string;
-  description: string;
-  parameters: {
-    type: 'object';
-    additionalProperties: false;
-    properties: Record<string, { type: string; description?: string; enum?: number[] }>;
-    required?: string[];
-  };
-  output: {
-    schema: {
-      type: 'object';
-      additionalProperties: false;
-      properties: Record<string, { type: string }>;
-      required?: string[];
-    };
-    render(args: unknown, value: unknown): Array<{ type: 'text'; text: string }>;
-  };
-  execute(args: unknown, exec: ConaToolExec): Promise<Record<string, string | boolean | number>>;
-}
-
-/** 与 dsh-tools Tools 服务运行时形态对齐的最小结构。 */
-interface ConaToolsRegistry {
-  register(definition: ConaToolDefinition): () => void;
-}
-
 export function apply(ctx: Context, config?: HostConfigInput): void {
   // tasks 2.3：宿主进程 Node 版本的直接观察证据（随激活日志输出）。
   console.log('[dsh-cona-project] host apply; node =', process.version, '; pid =', process.pid)
   // 宿主启动代际（tasks 6.2）：进程内常量；重启后新代际使全部旧活动绑定失效。
   bootGeneration = Date.now()
   ctx.plugin(ConaDiagnosticService)
-  mountProjectServices(ctx, config ?? {})
+  const toolAdapter = mountProjectServices(ctx, config ?? {})
 
   const tools = (ctx as Context & { tools?: ConaToolsRegistry }).tools
   if (tools === undefined) {
@@ -216,7 +184,7 @@ export function apply(ctx: Context, config?: HostConfigInput): void {
         + ` waitedMs=${waitedMs}`,
       )
       // 输出 schema 声明为可选字段；null 形态以字段缺失表达。
-      const output: Record<string, string | boolean | number> = {
+      const output: Record<string, unknown> = {
         capturedAt: observation.capturedAt,
         waitedMs: observation.waitedMs,
       }
@@ -227,13 +195,20 @@ export function apply(ctx: Context, config?: HostConfigInput): void {
       return output
     },
   })
+
+  // 项目工具（tasks 6.3）：身份只来自真实 ToolRunContext；参数不含身份／授权字段。
+  for (const definition of defineProjectTools(toolAdapter)) {
+    tools.register(definition)
+  }
+  console.log('[dsh-cona-project] project tools registered: project_read / project_apply / project_record / project_receipt')
 }
 
 /**
  * 装配 `conaProject`（tasks 5.2）：配置 → 打开实例 → 快照／命令服务。
  * 打开失败只记录并可经 `status` 读到，不阻塞宿主启动；首次调用后结果被记忆。
+ * 返回项目工具适配器（tasks 6.3）：与 Remote 共用同一 runtime promise。
  */
-function mountProjectServices(ctx: Context, config: HostConfigInput): void {
+function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToolAdapter {
   const stream = new InMemoryChangeStream()
   const store = new LocalStateStore()
   // 与规划命令共享的每实例队列：聊天关联变更与资料命令在同一实例内串行（design §7）。
@@ -364,6 +339,8 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): void {
         : `[dsh-cona-project] 资料源未打开（${result.code}: ${result.message}）`,
     )
   })
+
+  return new ProjectToolAdapter({ runtime: shared })
 }
 
 // cordis inject 声明（Fiber 构造按 Inject.resolve(plugin.inject) 读取）：
