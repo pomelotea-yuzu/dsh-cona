@@ -46,6 +46,7 @@ export type AdmissionResult =
   | { status: 'unmatched' }
   | { status: 'queued'; matched: number; stateRevision: number }
   | { status: 'ended'; workRunId: string; kind: 'completed' | 'aborted'; stateRevision: number }
+  | { status: 'cancelling'; workRunId: string; stateRevision: number }
   | {
       status: 'started';
       workRunId: string;
@@ -58,7 +59,7 @@ export type AdmissionResult =
   | { status: 'deferred'; reason: 'session-busy'; workIntentId: string }
   | {
       status: 'blocked';
-      reason: 'ambiguous-intent' | 'agent-missing' | 'session-mismatch';
+      reason: 'ambiguous-intent' | 'agent-missing' | 'session-mismatch' | 'lifecycle-unattributable';
       workIntentIds: string[];
       stateRevision: number;
     }
@@ -533,6 +534,10 @@ export class WorkService {
         message: '工具上下文没有实际 Agent（agent.id 缺失）；拒绝建立绑定，不从模型参数补值',
       };
     }
+    const registered = await this.ensureRegistered();
+    if (registered !== null) {
+      return { ok: false, code: 'binding-expired', message: registered };
+    }
     const read = await this.readAggregate();
     if ('outcome' in read) {
       return { ok: false, code: 'binding-expired', message: read.outcome.message };
@@ -580,12 +585,23 @@ export class WorkService {
     if (ctx.instanceId !== envelope.instanceId) {
       return { ok: false, code: 'forbidden', message: '绑定实例与命令实例不一致' };
     }
+    const registered = await this.ensureRegistered();
+    if (registered !== null) {
+      return { ok: false, code: 'binding-expired', message: registered };
+    }
     const read = await this.readAggregate();
     if ('outcome' in read) return { ok: false, code: read.outcome.status === 'rejected' ? read.outcome.code : 'unknown-state', message: read.outcome.message };
     const work = workStateOf(read.aggregate);
     const run = work.runs.find((item) => item.workRunId === ctx.workRunId);
     if (run === undefined || !this.effectiveRun(run)) {
       return { ok: false, code: 'binding-expired', message: 'WorkRun 不存在或已失效（结束／取消／宿主重启）；不接受新写入' };
+    }
+    if (run.admissionStoppedAt !== undefined) {
+      return {
+        ok: false,
+        code: 'binding-expired',
+        message: `已收到取消请求（${run.admissionStoppedAt}）；新写准入已停止，等待真实终态确认`,
+      };
     }
     if (ctx.bindingVersion !== run.bindingVersion) {
       return {
@@ -989,6 +1005,58 @@ export class WorkService {
   }
 
   /**
+   * 取消请求观测（tasks 6.5，design §7）：宿主 cancel／steer 的 abort 属取消请求——
+   * 立即停止新写准入（admissionStoppedAt），但 status 保持 active，等真实终态（turn/end）
+   * 确认；不把 turn-stopping 预告当已终止。已准入（在途发布）的操作不受影响，按提交
+   * 恢复协议处理；会话没有生效运行时不撤销任何东西（Client 断线不取消 Host 工作）。
+   * 无法唯一归属且该会话存在失去链路的 active 意图（运行缺失）时记 blocked。
+   */
+  async observeCancel(event: { sessionId: string; turn?: number }): Promise<AdmissionResult> {
+    if (typeof event.sessionId !== 'string' || event.sessionId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '取消事件缺少 sessionId' };
+    }
+    return this.deps.queue.run(this.deps.instanceId, async () => {
+      const read = await this.readAggregate();
+      if ('outcome' in read) return read.outcome;
+      const { aggregate } = read;
+      const work = workStateOf(aggregate);
+      const now = this.deps.clock();
+      const active = work.runs.filter((run) => run.sessionId === event.sessionId && this.effectiveRun(run));
+      if (active.length === 1) {
+        const run = active[0] as WorkRunRecord;
+        if (run.admissionStoppedAt !== undefined) {
+          return { status: 'cancelling' as const, workRunId: run.workRunId, stateRevision: aggregate.revisions.state };
+        }
+        const runs = work.runs.map((item) =>
+          item.workRunId === run.workRunId ? { ...item, admissionStoppedAt: now } : item,
+        );
+        const outcome = await this.persist(aggregate, (next) => ({ ...next, workRuns: runs }));
+        if (outcome.status !== 'committed') return outcome;
+        return { status: 'cancelling' as const, workRunId: run.workRunId, stateRevision: outcome.stateRevision };
+      }
+      if (active.length > 1) {
+        return { status: 'rejected', code: 'binding-ambiguous', message: `会话 ${event.sessionId} 存在 ${active.length} 个生效绑定；取消归属不唯一，拒绝盲停` };
+      }
+      // 无生效运行：失去链路的 active 意图（运行缺失）记 blocked，不静默清理。
+      const stale = work.intents.filter((intent) => intent.status === 'active' && intent.sessionId === event.sessionId);
+      if (stale.length === 0) return { status: 'unmatched' };
+      const intents = work.intents.map((item) =>
+        item.status === 'active' && item.sessionId === event.sessionId
+          ? { ...item, status: 'blocked' as const, blockedReason: 'lifecycle-unattributable', updatedAt: now }
+          : item,
+      );
+      const outcome = await this.persist(aggregate, (next) => ({ ...next, workIntents: intents }));
+      if (outcome.status !== 'committed') return outcome;
+      return {
+        status: 'blocked',
+        reason: 'lifecycle-unattributable',
+        workIntentIds: stale.map((item) => item.workIntentId),
+        stateRevision: outcome.stateRevision,
+      };
+    });
+  }
+
+  /**
    * 真实终态观测（2.4：turn/end completed／aborted；预告 stopping 不作数）。
    * aborted 的意图标 stopped（可重新接续），completed 标 completed。
    */
@@ -1077,6 +1145,24 @@ export class WorkService {
       || !Number.isSafeInteger(baseline.sourceEpoch) || baseline.sourceEpoch < 1
     ) {
       return { status: 'rejected', code: 'operation-mismatch', message: 'baseline 缺失或形状不合法' };
+    }
+    return null;
+  }
+
+  /**
+   * 实例仍在注册表的核对（tasks 6.5）：卸载（注册表条目移除）后不建立新捕获、不接受写入。
+   * 返回 null 表示已注册；否则返回面向调用者的说明。注册表不可读时按稳定拒绝停止（fail-closed）。
+   */
+  private async ensureRegistered(): Promise<string | null> {
+    let registry;
+    try {
+      registry = await this.deps.store.readRegistry(this.deps.localRoot);
+    } catch (error) {
+      return `本机注册表不可读（${(error as Error).message}）；不建立或延续写资格`;
+    }
+    const entry = registry.instances.find((item) => item.instanceId === this.deps.instanceId);
+    if (entry === undefined) {
+      return '实例已从本机注册表卸载；绑定失效，不接受写入';
     }
     return null;
   }

@@ -298,6 +298,11 @@ export interface WorkRunRecord {
   rpcId: string;
   /** active：生效中；stopped：显式停止；ended：真实终态（完成／取消）。 */
   status: 'active' | 'stopped' | 'ended';
+  /**
+   * 取消请求观测时刻（tasks 6.5，design §7）：收到真实取消／steer abort 后立即停止
+   * 新写准入，但 status 保持 active 等真实终态（turn/end）确认——预告不作数。
+   */
+  admissionStoppedAt?: string;
   endedAt?: string;
   endKind?: 'completed' | 'aborted' | 'stopped';
   startedAt: string;

@@ -339,6 +339,7 @@ export class ProjectToolAdapter {
       { kind: 'agent-work', workRunId: capture.workRunId, bindingVersion: capture.bindingVersion, instanceId: runtime.instance.instanceId },
       envelope,
     );
+    await this.maybeObserveAbort(runtime, capture, exec);
     return this.commitOutput(result, capture);
   }
 
@@ -382,6 +383,7 @@ export class ProjectToolAdapter {
       { kind: 'agent-work', workRunId: capture.workRunId, bindingVersion: capture.bindingVersion, instanceId: runtime.instance.instanceId },
       envelope,
     );
+    await this.maybeObserveAbort(runtime, capture, exec);
     return this.commitOutput(result, capture);
   }
 
@@ -409,6 +411,23 @@ export class ProjectToolAdapter {
   }
 
   // ---- 内部 ----
+
+  /**
+   * 工具 abort 观测（tasks 6.5）：写操作返回时 exec.signal 已中止属取消请求（cancel／steer）——
+   * 立即停止该运行的新写准入，等真实终态确认。best-effort：观测失败不影响工具结果本身。
+   */
+  private async maybeObserveAbort(
+    runtime: Extract<RuntimeResult, { ok: true }>['value'],
+    capture: WorkCapture,
+    exec: ConaToolExec,
+  ): Promise<void> {
+    if (exec.signal?.aborted !== true) return;
+    try {
+      await runtime.work.observeCancel({ sessionId: capture.sessionId });
+    } catch {
+      // 取消观测失败不改变已完成的命令结果；下一次调用仍会经准入核对。
+    }
+  }
 
   /** apply 的基线参数核对：必须是正整数修订与合法版本串。 */
   private readBaseline(checked: Record<string, unknown>): ToolRejectedOutput | null {

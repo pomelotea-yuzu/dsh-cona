@@ -54,7 +54,7 @@ const PLAN_NODES: PlanNodeViewPort = {
 /** 聚合夹具：lastObservation 与 startWork 的基线核对一致（revision 0 / epoch 1 / pv-test-1）。 */
 function writeAggregateFixture(
   localRoot: string,
-  extra?: { intents?: WorkIntent[]; runs?: WorkRunRecord[]; lastObservation?: unknown },
+  extra?: { intents?: WorkIntent[]; runs?: WorkRunRecord[]; lastObservation?: unknown; sourceGeneration?: number },
 ): void {
   const dir = path.join(localRoot, 'instances', INSTANCE_ID);
   mkdirSync(dir, { recursive: true });
@@ -62,11 +62,12 @@ function writeAggregateFixture(
     schemaVersion: 1,
     instanceId: INSTANCE_ID,
     projectId: '00000000-0000-4000-8000-000000000001',
-    source: { root: '/tmp/unused', kind: 'custom', generation: 1 },
+    source: { root: '/tmp/unused', kind: 'custom', generation: extra?.sourceGeneration ?? 1 },
     revisions: { plan: 0, state: 0 },
     conversations: { links: [], intents: [] },
     workIntents: extra?.intents ?? [],
     workRuns: extra?.runs ?? [],
+    workSuggestions: [],
     operations: [],
     lastObservation: extra?.lastObservation ?? {
       planVersion: BASELINE.planVersion,
@@ -76,6 +77,28 @@ function writeAggregateFixture(
     },
   };
   writeFileSync(path.join(dir, 'state.json'), JSON.stringify(aggregate, null, 2) + '\n');
+  // 注册表夹具：captureBinding／authorizeAgentCommand 核对实例仍在注册表（6.5 卸载失效）。
+  writeFileSync(
+    path.join(localRoot, 'registry.json'),
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        instances: [
+          {
+            instanceId: INSTANCE_ID,
+            projectId: '00000000-0000-4000-8000-000000000001',
+            sourceRoot: '/tmp/unused',
+            sourceKind: 'custom',
+            sourceGeneration: extra?.sourceGeneration ?? 1,
+            createdAt: clock(),
+            updatedAt: clock(),
+          },
+        ],
+      },
+      null,
+      2,
+    ) + '\n',
+  );
 }
 
 interface WorkHarness {

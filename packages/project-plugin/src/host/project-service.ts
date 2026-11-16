@@ -109,7 +109,7 @@ export interface ConaWorkStartRequest {
  * turn-end＝turn/end completed／aborted（真实终态；预告 stopping 不作数）。
  */
 export interface ConaWorkObserveRequest {
-  kind: 'queued' | 'consumed' | 'turn-end';
+  kind: 'queued' | 'consumed' | 'turn-end' | 'cancel';
   sessionId: string;
   /** queued／consumed 必填：期望或被消费消息的来源 id。 */
   rpcId?: string;
@@ -414,6 +414,13 @@ export class ConaProjectService extends TypertRemoteService {
         sessionId: request.sessionId,
         turn: request.turn as number,
         kind: request.endKind as 'completed' | 'aborted',
+      })
+    }
+    if (request.kind === 'cancel') {
+      // 取消／steer abort（tasks 6.5）：立即停止新写准入；真实终态仍由 turn-end 确认。
+      return work.observeCancel({
+        sessionId: request.sessionId,
+        ...(typeof request.turn === 'number' ? { turn: request.turn } : {}),
       })
     }
     return { status: 'rejected', code: 'operation-mismatch', message: '未知观测事件类型' }
