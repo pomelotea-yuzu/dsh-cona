@@ -53,10 +53,35 @@ export interface SessionDirectoryPort {
   listSessions(): Promise<readonly DirectorySession[]>;
 }
 
-/** 当前规划节点视图：链接校验用（nodeIds 必须存在于当前资料）。 */
+/** 目标节点的有来源摘要（6.4 运行上下文）：只取请求的节点，不注入整棵树。 */
+export interface PlanNodeDetail {
+  id: string;
+  title: string;
+  status: string;
+}
+
+/** 与目标相关的公开记录条目（6.4 运行上下文；来自资料头的记录索引）。 */
+export interface PlanRecordEntry {
+  id: string;
+  kind: string;
+  summary: string;
+  subjectNodeIds: string[];
+  path: string;
+}
+
 export interface PlanNodeViewPort {
   currentNodeIds(): Promise<
     { ok: true; nodeIds: ReadonlySet<string> } | { ok: false; code: string; message: string }
+  >;
+  /**
+   * 目标节点详情与公开记录索引（tasks 6.4）：有来源上下文的数据面。
+   * 可选方法——不可用时上下文退化为仅 id，仍不注入整棵树。
+   */
+  nodeDetails?(
+    ids: readonly string[],
+  ): Promise<
+    | { ok: true; nodes: PlanNodeDetail[]; records: PlanRecordEntry[] }
+    | { ok: false; code: string; message: string }
   >;
 }
 

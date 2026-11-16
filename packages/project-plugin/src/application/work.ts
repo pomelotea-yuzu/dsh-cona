@@ -26,12 +26,14 @@ import {
   type InstanceAggregate,
   type WorkAction,
   type WorkBaseline,
+  type WorkContinuation,
   type WorkIntent,
   type WorkRunRecord,
+  type WorkSuggestion,
 } from './local-state.js';
 import type { LocalStateStorePort, PlanNodeViewPort } from './ports.js';
 
-export type { WorkAction, WorkBaseline, WorkIntent, WorkRunRecord };
+export type { WorkAction, WorkBaseline, WorkContinuation, WorkIntent, WorkRunRecord, WorkSuggestion };
 export { WORK_ACTIONS };
 
 export type WorkOutcome<S> =
@@ -114,6 +116,56 @@ export type CaptureResult =
   | { ok: true; capture: WorkCapture }
   | { ok: false; code: 'agent-missing' | 'binding-expired' | 'binding-ambiguous'; message: string };
 
+// ---------- 有来源运行上下文（tasks 6.4） ----------
+
+export type ContextItemKind = 'decision' | 'suggestion' | 'unverified';
+
+/** 上下文条目：每条带来源；建议与未核查项是背景信息，不构成任何写授权。 */
+export interface ContextItem {
+  kind: ContextItemKind;
+  /** 来源说明（intent:<id>／continuation:<version>／run:<id>#suggestion 等）。 */
+  source: string;
+  text: string;
+  /** 关联节点（建议／未核查项）。 */
+  nodeIds?: string[];
+  /** 建议条目 id（kind==='suggestion'）。 */
+  suggestionId?: string;
+}
+
+/**
+ * 有来源运行上下文（spec：按实际绑定提供目标、约束、规划基线、相关公开记录和本机聊天入口，
+ * 区分用户决定、Agent 建议与未核查项）。仅供提示注入；授权判断始终走程序化准入，
+ * 提示文本不参与授权（design §7）。
+ */
+export interface WorkContext {
+  workRunId: string;
+  bindingVersion: number;
+  sessionId: string;
+  turn: number;
+  /** 目标节点摘要；known=false 表示节点不在当前资料中（外部重载后待核对）。 */
+  targets: Array<{ id: string; title?: string; status?: string; known: boolean }>;
+  constraints: { allowedActions: WorkAction[]; reasonScope: 'public' | 'local' };
+  baseline: WorkBaseline;
+  /** 相关公开记录（subjectNodeIds 与目标相交的资料头记录索引）。 */
+  publicRecords: Array<{ id: string; kind: string; summary: string; path: string; subjectNodeIds: string[] }>;
+  /** 与目标相交的本机聊天入口（链接只表达背景关系，不构成写授权）。 */
+  chatEntries: Array<{ linkId: string; sessionId: string; purpose: string; origin: string }>;
+  items: ContextItem[];
+  generatedAt: string;
+}
+
+/** 显式接续请求：把新目标纳入活动运行的范围（版本 +1 并保留接续原因）。 */
+export interface ContinueScopeRequest {
+  workRunId: string;
+  /** 发起方：panel 走 owner 入口；agent 必须与运行归属会话一致。 */
+  origin: 'panel' | 'agent';
+  /** agent 发起时必须提供归属会话 id。 */
+  sessionId?: string;
+  addedTargets: string[];
+  /** 接续原因（必填；spec 要求保留接续原因）。 */
+  reason: string;
+}
+
 export interface WorkIntentView extends WorkIntent {
   /** 运行中且属于当前宿主代际；false 表示历史／已失效。 */
   runActive: boolean;
@@ -179,6 +231,8 @@ interface WorkServiceDeps {
   planNodes: PlanNodeViewPort;
   clock: () => string;
   newWorkRunId: () => string;
+  /** 建议条目 id（tasks 6.4）：绑定外变更保留为建议时生成。 */
+  newSuggestionId: () => string;
   /** 宿主启动代际：每次宿主进程启动不同；运行只在本代际内生效。 */
   bootGeneration: number;
   queue: InstanceCommandQueue;
@@ -542,18 +596,24 @@ export class WorkService {
     }
     const action = commandAction(envelope.command);
     if (!run.allowedActions.includes(action)) {
-      return { ok: false, code: 'forbidden', message: `动作 ${action} 不在工作范围内（允许：${run.allowedActions.join(', ')}）` };
+      const message = `动作 ${action} 不在工作范围内（允许：${run.allowedActions.join(', ')}）`;
+      await this.noteSuggestion(run, action, commandTargets(envelope.command), message);
+      return { ok: false, code: 'forbidden', message };
     }
     if (action === 'add') {
       const rootAdds = (envelope.command.type === 'add-nodes' ? envelope.command.nodes : []).filter((node) => node.parentId === null);
       if (rootAdds.length > 0) {
-        return { ok: false, code: 'forbidden', message: '新增根级节点不在节点目标集合内；工具不获得根级新增资格' };
+        const message = '新增根级节点不在节点目标集合内；工具不获得根级新增资格';
+        await this.noteSuggestion(run, action, [], message);
+        return { ok: false, code: 'forbidden', message };
       }
     }
     const targets = commandTargets(envelope.command);
     const outside = targets.filter((id) => !run.targets.includes(id));
     if (outside.length > 0) {
-      return { ok: false, code: 'forbidden', message: `目标超出工作范围：${outside.join(', ')}` };
+      const message = `目标超出工作范围：${outside.join(', ')}`;
+      await this.noteSuggestion(run, action, targets, message);
+      return { ok: false, code: 'forbidden', message };
     }
     if (
       envelope.expectedPlanVersion !== run.acceptedBaseline.planVersion
@@ -593,6 +653,309 @@ export class WorkService {
         : item,
     );
     await this.persistUnchecked(aggregate, (next) => ({ ...next, workRuns: runs }));
+  }
+
+  // ---------- 有来源上下文与显式接续（tasks 6.4） ----------
+
+  /**
+   * 有来源运行上下文：按捕获绑定生成，刷新在可信执行边界生效（捕获版本过期即拒绝，
+   * 不读一个可变的全局上下文）。只读，不改目标：新材料到达标记待核对，不静默改写。
+   */
+  async buildContext(capture: WorkCapture): Promise<WorkOutcome<WorkContext>> {
+    return this.deps.queue.run(this.deps.instanceId, async () => {
+      const read = await this.readAggregate();
+      if ('outcome' in read) return read.outcome;
+      const work = workStateOf(read.aggregate);
+      const run = work.runs.find((item) => item.workRunId === capture.workRunId);
+      if (run === undefined || !this.effectiveRun(run) || run.sessionId !== capture.sessionId) {
+        return { status: 'rejected' as const, code: 'binding-expired', message: 'WorkRun 不存在或已失效；重新捕获绑定' };
+      }
+      if (capture.bindingVersion !== run.bindingVersion) {
+        return {
+          status: 'rejected' as const,
+          code: 'binding-expired',
+          message: `捕获绑定版本 ${capture.bindingVersion} 已过期（当前 ${run.bindingVersion}）；重新捕获，不借新上下文`,
+        };
+      }
+      return {
+        status: 'committed' as const,
+        value: await this.contextForRun(run, work, read.aggregate),
+        stateRevision: read.aggregate.revisions.state,
+      };
+    });
+  }
+
+  /** owner 入口按运行读上下文：核对运行有效后共用 contextForRun（不要求捕获版本）。 */
+  async contextForRunRemote(workRunId: string): Promise<WorkOutcome<WorkContext>> {
+    return this.deps.queue.run(this.deps.instanceId, async () => {
+      const read = await this.readAggregate();
+      if ('outcome' in read) return read.outcome;
+      const work = workStateOf(read.aggregate);
+      const run = work.runs.find((item) => item.workRunId === workRunId);
+      if (run === undefined) {
+        return { status: 'rejected' as const, code: 'not-found', message: '没有该 WorkRun' };
+      }
+      return {
+        status: 'committed' as const,
+        value: await this.contextForRun(run, work, read.aggregate),
+        stateRevision: read.aggregate.revisions.state,
+      };
+    });
+  }
+
+  /**
+   * 显式接续：把新目标纳入活动运行范围。版本 +1 并保留接续记录（谁、从哪到哪、纳入了什么、
+   * 为什么）；目标只增不减；接续后旧捕获版本一律拒绝（旧并行调用不能借新权限）。
+   * 匹配的开放建议随接续闭环（included）。
+   */
+  async continueScope(request: ContinueScopeRequest): Promise<WorkOutcome<{ workRunId: string; bindingVersion: number; addedTargets: string[]; includedSuggestions: number }>> {
+    if (typeof request.workRunId !== 'string' || request.workRunId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 workRunId' };
+    }
+    if (request.origin !== 'panel' && request.origin !== 'agent') {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'origin 必须是 panel 或 agent' };
+    }
+    if (
+      !Array.isArray(request.addedTargets)
+      || request.addedTargets.length === 0
+      || !request.addedTargets.every((id) => typeof id === 'string' && id !== '')
+    ) {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'addedTargets 必须是非空节点 id 数组' };
+    }
+    if (typeof request.reason !== 'string' || request.reason.trim() === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '接续必须给出原因（reason 非空）' };
+    }
+    if (request.origin === 'agent' && (typeof request.sessionId !== 'string' || request.sessionId === '')) {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'agent 发起接续必须提供归属会话 id' };
+    }
+    const nodes = await this.deps.planNodes.currentNodeIds();
+    if (!nodes.ok) return { status: 'rejected', code: nodes.code, message: nodes.message };
+    const missing = request.addedTargets.filter((id) => !nodes.nodeIds.has(id));
+    if (missing.length > 0) {
+      return { status: 'rejected', code: 'unknown-node', message: `接续目标不存在于当前资料：${missing.join(', ')}` };
+    }
+    return this.deps.queue.run(this.deps.instanceId, async () => {
+      const read = await this.readAggregate();
+      if ('outcome' in read) return read.outcome;
+      const work = workStateOf(read.aggregate);
+      const run = work.runs.find((item) => item.workRunId === request.workRunId);
+      if (run === undefined || !this.effectiveRun(run)) {
+        return { status: 'rejected' as const, code: 'binding-expired', message: 'WorkRun 不存在或已失效；不能接续' };
+      }
+      if (request.origin === 'agent' && request.sessionId !== run.sessionId) {
+        return { status: 'rejected' as const, code: 'forbidden', message: '只有归属会话可接续自己的运行范围' };
+      }
+      const fresh = request.addedTargets.filter((id) => !run.targets.includes(id));
+      if (fresh.length === 0) {
+        return { status: 'rejected' as const, code: 'operation-mismatch', message: '接续目标已在范围内；不重复接续，不推进版本' };
+      }
+      const now = this.deps.clock();
+      const continuation: WorkContinuation = {
+        at: now,
+        fromVersion: run.bindingVersion,
+        toVersion: run.bindingVersion + 1,
+        addedTargets: fresh,
+        reason: request.reason.trim(),
+        origin: request.origin,
+      };
+      const targets = [...run.targets, ...fresh];
+      // 开放建议闭环：建议的全部节点都已进入范围即标记 included（建议→决定的路径）。
+      let includedSuggestions = 0;
+      const suggestions = work.suggestions.map((item) => {
+        const resolvable =
+          item.status === 'open'
+          && item.workRunId === run.workRunId
+          && item.nodeIds.length > 0
+          && item.nodeIds.every((id) => targets.includes(id));
+        if (!resolvable) return item;
+        includedSuggestions += 1;
+        return { ...item, status: 'included' as const, resolvedAt: now, resolvedHow: `continuation:${continuation.toVersion}` };
+      });
+      const runs = work.runs.map((item) =>
+        item.workRunId === run.workRunId
+          ? {
+              ...item,
+              bindingVersion: continuation.toVersion,
+              targets,
+              continuations: [...(item.continuations ?? []), continuation],
+            }
+          : item,
+      );
+      const persisted = await this.persistUnchecked(read.aggregate, (next) => ({
+        ...next,
+        workRuns: runs,
+        workSuggestions: suggestions,
+      }));
+      if (persisted.status !== 'committed') return persisted;
+      return {
+        status: 'committed' as const,
+        value: {
+          workRunId: run.workRunId,
+          bindingVersion: continuation.toVersion,
+          addedTargets: fresh,
+          includedSuggestions,
+        },
+        stateRevision: persisted.stateRevision,
+      };
+    });
+  }
+
+  /**
+   * 绑定外变更保留为建议（best-effort）：同运行同动作同目标集合的开放建议只更新
+   * lastSeenAt，不重复堆积。建议是背景信息，不改变拒绝结果，也不构成写授权。
+   */
+  private async noteSuggestion(run: WorkRunRecord, action: WorkAction, nodeIds: string[], reason: string): Promise<void> {
+    try {
+      await this.deps.queue.run(this.deps.instanceId, async () => {
+        const read = await this.readAggregate();
+        if ('outcome' in read) return;
+        const work = workStateOf(read.aggregate);
+        const now = this.deps.clock();
+        const key = [...new Set(nodeIds)].sort().join(',');
+        const existing = work.suggestions.find(
+          (item) =>
+            item.status === 'open'
+            && item.workRunId === run.workRunId
+            && item.action === action
+            && [...new Set(item.nodeIds)].sort().join(',') === key,
+        );
+        const suggestions = existing !== undefined
+          ? work.suggestions.map((item) => (item.suggestionId === existing.suggestionId ? { ...item, lastSeenAt: now } : item))
+          : [
+              ...work.suggestions,
+              {
+                suggestionId: this.deps.newSuggestionId(),
+                workRunId: run.workRunId,
+                sessionId: run.sessionId,
+                action,
+                nodeIds: [...new Set(nodeIds)],
+                reason,
+                status: 'open' as const,
+                createdAt: now,
+                lastSeenAt: now,
+              } satisfies WorkSuggestion,
+            ];
+        await this.persistUnchecked(read.aggregate, (next) => ({ ...next, workSuggestions: suggestions }));
+      });
+    } catch {
+      // 建议是 best-effort 背景；持久化失败不影响拒绝结果本身。
+    }
+  }
+
+  /** 从运行当前状态组装上下文（owner Remote 与捕获路径共用；调用方已核对版本有效性）。 */
+  private async contextForRun(
+    run: WorkRunRecord,
+    work: { intents: WorkIntent[]; runs: WorkRunRecord[]; suggestions: WorkSuggestion[] },
+    aggregate: InstanceAggregate,
+  ): Promise<WorkContext> {
+    const intent = work.intents.find((item) => item.workIntentId === run.workIntentId);
+    const items: ContextItem[] = [];
+    // 用户决定：意图目的与确认范围（“开始工作”确认的具体范围）。
+    if (intent !== undefined) {
+      items.push({
+        kind: 'decision',
+        source: `intent:${intent.workIntentId}`,
+        text: `用户确认的工作目的：${intent.purpose}；目标 ${intent.nodeIds.join(', ')}；允许动作 ${intent.allowedActions.join(', ')}`,
+      });
+    }
+    // 接续也是决定：每次显式接续带原因进入上下文。
+    for (const continuation of run.continuations ?? []) {
+      items.push({
+        kind: 'decision',
+        source: `continuation:${continuation.toVersion}`,
+        text: `范围接续（v${continuation.fromVersion}→v${continuation.toVersion}，${continuation.origin}）：纳入 ${continuation.addedTargets.join(', ')}；原因：${continuation.reason}`,
+        nodeIds: [...continuation.addedTargets],
+      });
+    }
+    // Agent 建议：开放的建议条目（绑定外变更被拒后保留）。
+    for (const suggestion of work.suggestions) {
+      if (suggestion.workRunId !== run.workRunId || suggestion.status !== 'open') continue;
+      items.push({
+        kind: 'suggestion',
+        source: `suggestion:${suggestion.suggestionId}`,
+        text: `绑定外${suggestion.action}被拒并保留为建议（目标 ${suggestion.nodeIds.length > 0 ? suggestion.nodeIds.join(', ') : '（根级）'}）：${suggestion.reason}`,
+        nodeIds: [...suggestion.nodeIds],
+        suggestionId: suggestion.suggestionId,
+      });
+    }
+    // 目标节点详情与相关公开记录：只取目标集合，不注入整棵树。
+    const targets: WorkContext['targets'] = run.targets.map((id) => ({ id, known: true }));
+    let records: WorkContext['publicRecords'] = [];
+    const details = this.deps.planNodes.nodeDetails;
+    if (details !== undefined) {
+      try {
+        const result = await details.call(this.deps.planNodes, run.targets);
+        if (result.ok) {
+          const byId = new Map(result.nodes.map((node) => [node.id, node]));
+          for (const target of targets) {
+            const node = byId.get(target.id);
+            if (node === undefined) {
+              target.known = false;
+            } else {
+              target.title = node.title;
+              target.status = node.status;
+            }
+          }
+          const targetSet = new Set(run.targets);
+          records = result.records
+            .filter((record) => record.subjectNodeIds.some((id) => targetSet.has(id)))
+            .map((record) => ({
+              id: record.id,
+              kind: record.kind,
+              summary: record.summary,
+              path: record.path,
+              subjectNodeIds: [...record.subjectNodeIds],
+            }));
+        }
+      } catch {
+        // 详情不可用：上下文退化为仅 id，不因此失败。
+      }
+    }
+    // 未核查项一：新材料到达（源代际推进）——标记待核对，目标不静默改写。
+    const currentEpoch = await this.currentSourceEpoch(aggregate.instanceId);
+    if (currentEpoch !== null && currentEpoch > run.acceptedBaseline.sourceEpoch) {
+      items.push({
+        kind: 'unverified',
+        source: `source-generation:${currentEpoch}`,
+        text: `资料源代际已推进（${run.acceptedBaseline.sourceEpoch}→${currentEpoch}）；当前目标基于旧资料，新内容待核对，不静默改写已启动目标`,
+      });
+    }
+    // 未核查项二：目标节点已不在当前资料中（外部重载后可能被移除）。
+    const unknownTargets = targets.filter((target) => !target.known).map((target) => target.id);
+    if (unknownTargets.length > 0) {
+      items.push({
+        kind: 'unverified',
+        source: `plan-nodes:${unknownTargets.join(',')}`,
+        text: `目标节点不在当前资料中（外部重载后可能已变化）：${unknownTargets.join(', ')}；待核对，不静默改写`,
+        nodeIds: unknownTargets,
+      });
+    }
+    return {
+      workRunId: run.workRunId,
+      bindingVersion: run.bindingVersion,
+      sessionId: run.sessionId,
+      turn: run.turn,
+      targets,
+      constraints: { allowedActions: [...run.allowedActions], reasonScope: run.reasonScope },
+      baseline: { ...run.acceptedBaseline },
+      publicRecords: records,
+      chatEntries: aggregate.conversations.links
+        .filter((link) => link.nodeIds.some((id) => run.targets.includes(id)))
+        .map((link) => ({ linkId: link.linkId, sessionId: link.sessionId, purpose: link.purpose, origin: link.origin })),
+      items,
+      generatedAt: this.deps.clock(),
+    };
+  }
+
+  /** 当前资料源代际（注册表权威值）；读不到时返回 null（上下文不因此失败）。 */
+  private async currentSourceEpoch(instanceId: string): Promise<number | null> {
+    try {
+      const registry = await this.deps.store.readRegistry(this.deps.localRoot);
+      const entry = registry.instances.find((item) => item.instanceId === instanceId);
+      return entry === undefined ? null : entry.sourceGeneration;
+    } catch {
+      return null;
+    }
   }
 
   // ---------- 结束与停止 ----------

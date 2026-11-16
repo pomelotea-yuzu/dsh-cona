@@ -155,6 +155,8 @@ export interface InstanceAggregate {
   conversations: ConversationState;
   workIntents: WorkIntent[];
   workRuns: WorkRunRecord[];
+  /** 绑定外变更建议（6.4）；旧聚合归一化为空数组。 */
+  workSuggestions: WorkSuggestion[];
   operations: OperationRecord[];
   lastObservation: ObservationBaseline | null;
 }
@@ -238,9 +240,49 @@ export interface WorkIntent {
 }
 
 /**
+ * 接续记录（tasks 6.4，design §7）：范围扩展只能经显式接续纳入；每次接续保留
+ * 来源（谁、从哪个版本到哪个版本、纳入了什么、为什么），不把扩权藏进静默改写。
+ */
+export interface WorkContinuation {
+  /** 接续发生时刻（UTC instant）。 */
+  at: string;
+  fromVersion: number;
+  toVersion: number;
+  /** 本次显式纳入的新目标节点。 */
+  addedTargets: string[];
+  /** 接续原因（必填；spec 要求保留接续原因）。 */
+  reason: string;
+  origin: 'panel' | 'agent';
+}
+
+/**
+ * 绑定外变更建议（tasks 6.4，design §7「绑定外变更先保留为建议」）：
+ * agent 工具试图写入绑定外目标／动作被拒时，保留一条建议供用户复核；
+ * 建议是背景信息，不构成任何写授权。
+ */
+export interface WorkSuggestion {
+  suggestionId: string;
+  /** 提出建议的运行与会话（来源）。 */
+  workRunId: string;
+  sessionId: string;
+  action: WorkAction;
+  /** 试图写入的目标节点（被拒的那次命令的目标集合）。 */
+  nodeIds: string[];
+  /** 被拒原因（来自稳定拒绝的说明）。 */
+  reason: string;
+  /** open：待复核；included：已随接续纳入；dismissed：用户明确不采纳。 */
+  status: 'open' | 'included' | 'dismissed';
+  createdAt: string;
+  lastSeenAt: string;
+  resolvedAt?: string;
+  resolvedHow?: string;
+}
+
+/**
  * WorkRun（tasks 6.2）：一次真实执行的活动绑定。身份键＝(bootGeneration, sessionId, turn)；
  * 同一会话同时最多一个生效运行。bindingVersion 从 1 起，本运行规划提交成功后 +1
  * （只更新已接受基线，范围与动作不变）；重启后旧代际运行不再有写资格。
+ * 6.4：范围扩展经显式接续（版本再 +1），接续记录保留在运行上。
  */
 export interface WorkRunRecord {
   workRunId: string;
@@ -259,6 +301,8 @@ export interface WorkRunRecord {
   endedAt?: string;
   endKind?: 'completed' | 'aborted' | 'stopped';
   startedAt: string;
+  /** 显式接续历史（6.4）；缺省为空（旧聚合归一化）。 */
+  continuations?: WorkContinuation[];
 }
 
 /** 旧版聚合的 conversations 是空数组（3.2 预留）；读取时归一化为新形状。 */
@@ -276,15 +320,20 @@ export function conversationStateOf(value: unknown): ConversationState {
 
 /**
  * 工作状态归一化（tasks 6.2）：旧聚合没有 workIntents（workRuns 曾是 unknown[] 占位）；
- * 读取时归一化为类型化数组。私有授权只在本地聚合，导入的公开资料不带任何工作状态。
+ * 读取时归一化为类型化数组。6.4 补充 workSuggestions 归一化。
+ * 私有授权只在本地聚合，导入的公开资料不带任何工作状态。
  */
-export function workStateOf(aggregate: Pick<InstanceAggregate, 'workIntents' | 'workRuns'>): {
+export function workStateOf(
+  aggregate: Pick<InstanceAggregate, 'workIntents' | 'workRuns' | 'workSuggestions'>,
+): {
   intents: WorkIntent[];
   runs: WorkRunRecord[];
+  suggestions: WorkSuggestion[];
 } {
   return {
     intents: Array.isArray(aggregate.workIntents) ? [...aggregate.workIntents] : [],
     runs: Array.isArray(aggregate.workRuns) ? [...aggregate.workRuns] : [],
+    suggestions: Array.isArray(aggregate.workSuggestions) ? [...aggregate.workSuggestions] : [],
   };
 }
 
@@ -540,6 +589,7 @@ export class LocalStateService {
         conversations: { links: [], intents: [] },
         workIntents: [],
         workRuns: [],
+        workSuggestions: [],
         operations: [],
         // 完整基线由显式刷新（3.5）建立；登记不写半截观察，避免被误当作已核查基线。
         lastObservation: null,

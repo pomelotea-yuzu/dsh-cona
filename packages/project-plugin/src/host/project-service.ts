@@ -21,7 +21,9 @@ import type { ConversationOutcome, ChatsView } from '../application/conversation
 import { ConversationService } from '../application/conversations.js'
 import type {
   AdmissionResult,
+  ContinueScopeRequest,
   WorkAction,
+  WorkContext,
   WorkListView,
   WorkOutcome,
 } from '../application/work.js'
@@ -346,6 +348,32 @@ export class ConaProjectService extends TypertRemoteService {
       return { status: 'rejected', code: 'operation-mismatch', message: '缺少 workRunId' }
     }
     return runtime.value.work.stopWork(request.workRunId)
+  }
+
+  /**
+   * 有来源运行上下文（tasks 6.4）：owner 按运行当前状态读取目标／约束／基线／相关记录／
+   * 聊天入口与三类条目（决定／建议／未核查）。上下文是背景信息，不替代程序化授权。
+   */
+  @Remote('workContext')
+  async workContext(request: { workRunId: string }): Promise<WorkOutcome<WorkContext>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    if (typeof request.workRunId !== 'string' || request.workRunId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 workRunId' }
+    }
+    return runtime.value.work.contextForRunRemote(request.workRunId)
+  }
+
+  /** 显式接续（tasks 6.4）：owner 把新目标纳入活动运行范围；版本 +1 并保留接续原因。 */
+  @Remote('workContinue')
+  async workContinue(request: Omit<ContinueScopeRequest, 'origin'>): Promise<WorkOutcome<{ workRunId: string; bindingVersion: number; addedTargets: string[]; includedSuggestions: number }>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.work.continueScope({ ...request, origin: 'panel' })
   }
 
   /**

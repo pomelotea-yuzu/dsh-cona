@@ -279,6 +279,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       planNodes: planNodeView(files, () => instance.sourceRoot, sha256, clock),
       clock,
       newWorkRunId: () => randomUUID(),
+      newSuggestionId: () => randomUUID(),
       bootGeneration,
       queue,
     })

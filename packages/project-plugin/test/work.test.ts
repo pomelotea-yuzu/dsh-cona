@@ -104,6 +104,7 @@ function makeWorkService(options?: {
     planNodes: options?.planNodes ?? PLAN_NODES,
     clock,
     newWorkRunId: () => `run-${randomUUID()}`,
+    newSuggestionId: () => `sug-${randomUUID()}`,
     bootGeneration: options?.bootGeneration ?? BOOT,
     queue,
   });
@@ -479,9 +480,9 @@ test('6.2 私有授权不随公开资料导入：新实例无意图无运行；�
   assert.equal(head['workRuns'], undefined);
   assert.equal(head['workIntents'], undefined);
 
-  // 旧形状聚合（workRuns 占位、无 workIntents）读取归一化为空授权，不冒充历史绑定。
-  const legacy = { workRuns: [] as unknown[], workIntents: undefined } as unknown as Pick<InstanceAggregate, 'workIntents' | 'workRuns'>;
-  assert.deepEqual(workStateOf(legacy), { intents: [], runs: [] });
+  // 旧形状聚合（workRuns 占位、无 workIntents／workSuggestions）读取归一化为空授权，不冒充历史绑定。
+  const legacy = { workRuns: [] as unknown[], workIntents: undefined, workSuggestions: undefined } as unknown as Pick<InstanceAggregate, 'workIntents' | 'workRuns' | 'workSuggestions'>;
+  assert.deepEqual(workStateOf(legacy), { intents: [], runs: [], suggestions: [] });
 
   // 空授权实例上 agent-work 调用一律拒绝。
   const harness = makeWorkService({ store, localRoot, bootGeneration: BOOT });
@@ -593,6 +594,7 @@ async function setupFull(name: string): Promise<FullFixture> {
     planNodes,
     clock,
     newWorkRunId: () => `run-${randomUUID()}`,
+    newSuggestionId: () => `sug-${randomUUID()}`,
     bootGeneration: BOOT,
     queue,
   });

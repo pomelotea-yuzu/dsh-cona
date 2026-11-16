@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { PlanNodeViewPort, SessionDirectoryPort, SourceFilesPort } from '../application/ports.js'
 import { readSourceBaseline } from '../application/baseline.js'
-import type { Sha256Fn } from '../domain/types.js'
+import type { ProjectDocument, Sha256Fn } from '../domain/types.js'
 
 /** 与 dsh-api-session-controller 的 SessionController 运行时形态对齐的最小结构。 */
 interface SessionControllerLike {
@@ -90,21 +90,47 @@ export function planNodeView(
   sha256: Sha256Fn,
   clock: () => string,
 ): PlanNodeViewPort {
+  async function readDoc(): Promise<
+    { ok: true; doc: ProjectDocument } | { ok: false; code: string; message: string }
+  > {
+    const root = sourceRoot();
+    if (root === null) {
+      return { ok: false, code: 'binding-expired', message: '实例未打开；无法读取规划内容' };
+    }
+    const baseline = await readSourceBaseline(files, root, sha256, clock);
+    if (!baseline.ok) {
+      return {
+        ok: false,
+        code: 'invalid-project',
+        message: '资料不可读或引用正文不一致；无法读取规划内容',
+      };
+    }
+    return { ok: true, doc: baseline.doc };
+  }
   return {
     async currentNodeIds() {
-      const root = sourceRoot();
-      if (root === null) {
-        return { ok: false as const, code: 'binding-expired', message: '实例未打开；无法核对节点' };
-      }
-      const baseline = await readSourceBaseline(files, root, sha256, clock);
-      if (!baseline.ok) {
-        return {
-          ok: false as const,
-          code: 'invalid-project',
-          message: '资料不可读或引用正文不一致；无法核对节点',
-        };
-      }
-      return { ok: true as const, nodeIds: new Set(baseline.doc.plan.nodes.map((node) => node.id)) };
+      const read = await readDoc();
+      if (!read.ok) return read;
+      return { ok: true as const, nodeIds: new Set(read.doc.plan.nodes.map((node) => node.id)) };
+    },
+    async nodeDetails(ids) {
+      const read = await readDoc();
+      if (!read.ok) return read;
+      const wanted = new Set(ids);
+      // 只取请求的节点与记录索引，不注入整棵树（spec：不能把整棵树无差别注入）。
+      return {
+        ok: true as const,
+        nodes: read.doc.plan.nodes
+          .filter((node) => wanted.has(node.id))
+          .map((node) => ({ id: node.id, title: node.title, status: node.status })),
+        records: read.doc.records.map((record) => ({
+          id: record.id,
+          kind: record.kind,
+          summary: record.summary,
+          subjectNodeIds: [...record.subjectNodeIds],
+          path: record.path,
+        })),
+      };
     },
   };
 }

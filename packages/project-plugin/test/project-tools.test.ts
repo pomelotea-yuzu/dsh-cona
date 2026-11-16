@@ -93,6 +93,7 @@ async function setup(name: string): Promise<Fixture> {
     planNodes,
     clock,
     newWorkRunId: () => `run-${randomUUID()}`,
+    newSuggestionId: () => `sug-${randomUUID()}`,
     bootGeneration: BOOT,
     queue,
   });

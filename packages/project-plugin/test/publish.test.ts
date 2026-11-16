@@ -209,6 +209,7 @@ test('本机聚合替换：saved／not-saved／unknown-state 三态', async () =
     revisions: { plan: 0, state: 0 },
     conversations: { links: [], intents: [] },
     workIntents: [],
+    workSuggestions: [],
     workRuns: [],
     operations: [],
     lastObservation: null,
