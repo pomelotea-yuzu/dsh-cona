@@ -31,6 +31,7 @@ import { ConaDiagnosticService } from './diagnostic-service.js'
 import { createLocalStateService, openConfiguredInstance, resolveHostConfig, type HostConfigInput, type HostWiring } from './bootstrap.js'
 import { ConaProjectService } from './project-service.js'
 import type { RuntimeResult } from './project-service.js'
+import { attachWorkEventObservers } from './work-events.js'
 import { ProjectToolAdapter, defineProjectTools, type ConaToolDefinition, type ConaToolExec, type ConaToolsRegistry } from './project-tools.js'
 import { planNodeView, sessionDirectory, unavailableSessionDirectory } from './session-directory.js'
 
@@ -326,6 +327,10 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
 
   let runtime: Promise<RuntimeResult> | null = null
   const shared = (): Promise<RuntimeResult> => (runtime ??= resolveRuntime())
+
+  // 宿主事件自动订阅（tasks 6.6）：真实 inbox／turn 事件经 work-events 适配器
+  // 转到 WorkService 的消息准入映射，工具侧据此取得活动 WorkRun 绑定。
+  attachWorkEventObservers(ctx, shared)
 
   ctx.plugin(ConaProjectService, {
     runtime: shared,

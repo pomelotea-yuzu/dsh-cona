@@ -1,6 +1,6 @@
 # R1 验证矩阵
 
-日期：2026-11-12（2026-11-13、2026-11-14 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V12／V25a `pass`，V25b `blocked`；V05／V10／V11／V13／V14／V15／V16／V17／V18／V19／V20／V21／V22／V30／V33／V38 已有自动化或文件层部分证据但宿主层或后续阶段未做，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
+日期：2026-11-12（2026-11-13、2026-11-14、2026-11-17 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V12／V25a／V29／V34／V35／V36 `pass`，V25b `blocked`（i 准入路径已真实 Agent 复测、ii 为 R1 边界），V37 `untested`（部分已测、必做的 V32／V04 未做）；V05／V10／V11／V13／V14／V15／V16／V17／V18／V19／V20／V21／V22／V30／V33／V38 已有自动化或文件层部分证据但宿主层或后续阶段未做，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
 
 方法：`A` 为自动业务／Client 测试，`F` 为实际文件后端与中断注入，`H` 为独立 profile 的真实 DSH 检查，`E` 为真实 Agent 端到端。含多种方法的条目须分别记录观察；替身通过不代替真实宿主。运行时追加实际版本、步骤、预期／观察、证据定位与限制，状态仅 `pass / fail / blocked / untested`。
 
@@ -31,11 +31,11 @@
 | V23 | project-conversation-context：多对多、空会话 | H | 双向关系可查，实际返回 Session id 被记录，复用不误绑，创建未知不再盲建 | pass（2026-11-15：真实宿主实测——创建记录宿主实际返回 sessionId 且 session/list 可见；空会话复用经命名复用返回同一 sessionId，同会话两条用途链接互不误绑；ghost 会话与未知节点拒绝；重启后链接保留且可见；双实例隔离以第二 profile 实测；结果未知路径以故障注入单测 + reconcile 只读实测覆盖，见 6.1 记录） |
 | V24 | project-conversation-context：浏览与授权分离 | A、H | A 运行时浏览 B／增加 B 关联不改执行目标，不自动扩大写权限 | untested |
 | V25a | project-conversation-context：owner Remote 与工具上下文映射 | H、E | UI Remote 由宿主生成 owner invocation（`principalOf` 为空不单独授权）；工具 ToolRunContext 无 invocation 但 agent／callId／signal 有效；queue／steer／迟到工具／cancel／重启的 turn 映射可对照 | pass（2026-11-13，见 2.4 映射记录） |
-| V25b | project-conversation-context：绑定准入与 non-owner 边界 | H、E | （i）工具无 invocation 但绑定有效按有限范围准入；agent 缺失／归属不唯一拒绝新绑定——第 6 段实现绑定层后复测，计入 R1；（ii）non-owner／伪造主体拒绝——R1 已声明边界 | blocked（i：绑定层已于 2026-11-16 随 6.2 实现，准入与拒绝规则经单测证明（见 6.2 记录），真实宿主经真实 Agent 工具的复测待 6.3／6.5 落地后进行，不享完成例外；ii 因 R1 无真实多身份部署，不阻 R1 完成，随归档带入 R2+ 边界记录） |
+| V25b | project-conversation-context：绑定准入与 non-owner 边界 | H、E | （i）工具无 invocation 但绑定有效按有限范围准入；agent 缺失／归属不唯一拒绝新绑定——第 6 段实现绑定层后复测，计入 R1；（ii）non-owner／伪造主体拒绝——R1 已声明边界 | blocked（i 准入路径 2026-11-17 真实 Agent 复测通过：工具无 invocation、由真实 inbox/turn 事件建立绑定，`project_read` 返回 binding，范围内 split／record 提交成功，越权动作仍由 6.2／6.3 单测拒绝；agent 缺失／归属不唯一的真实拒绝在本单用户宿主无法构造（agentId 恒＝SessionId），维持单测级证据；ii 因 R1 无真实多身份部署 `blocked`，不阻 R1 完成，随归档带入 R2+。见 [6.6 记录](implementation/2026-11-17-6.6-agent-e2e.md)） |
 | V26 | project-conversation-context：queue／steer／旧调用 | H、E | 待执行 B 不覆盖 A，同轮不明确归属拒绝，旧绑定不借新范围；续接和新基线有记录 | untested |
 | V27 | project-conversation-context：终态及重启 | H | 结束／取消后拒绝新写，未知停止保持未知，Host 恢复历史不激活授权，Client 断线不取消 Host | untested |
 | V28 | project-conversation-context：来源与动态上下文 | A、H、E | 背景与实际绑定一致，决定／建议／未核查区分，新材料不静默改目标，授权内调整记录原因 | untested |
-| V29 | project-panel-sync：最小编辑与保存 | H、E | 用户编辑与 Agent 调整同树，失败保草稿不标已保存，重启身份／规划不变 | untested（2026-11-14 H 层部分实测：真实浏览器点侧栏「项目」打开面板，改目标 + 变更原因保存后资料目标变化、`records` 增 `plan-change`；新增子节点节点数 2→3；外部写者提交后保存得冲突、草稿保留且文件是外部值。缺 E 层 Agent 调整（6.6）与重启后身份／规划核对） |
+| V29 | project-panel-sync：最小编辑与保存 | H、E | 用户编辑与 Agent 调整同树，失败保草稿不标已保存，重启身份／规划不变 | pass（2026-11-14 H 层：真实浏览器改目标＋原因保存后资料变化、`records` 增 `plan-change`，新增节点 2→3，外部写者提交后保存得冲突且草稿保留；2026-11-17 E 层：真实 Agent 经工具 split-node 使节点 3→5、`project_record` 记原因，面板 snapshot 回读到新增子节点与记录；重启后资料树／records／planVersion 保留、旧 WorkRun `effective=false`、聊天关联保留。见 [6.6 记录](implementation/2026-11-17-6.6-agent-e2e.md)） |
 | V30 | project-panel-sync：一致快照与初读竞态 | A、F、H | 不混合资料版本，先订阅后回读覆盖已知最新状态，树／摘要一致 | untested（2026-11-14 自动化层已实测：读取中提交触发重读且返回单一版本、正文改写／未知 schema 拒绝且不返回树、`follow → ready → snapshot(minStateRevision)` 覆盖水位、`summary` 与 `tree／dependencies／records` 同源、刷新换代后旧代际 `stale-connection`；H 层真实 Remote 入口与面板未接，待 5.2／5.3） |
 | V31 | project-panel-sync：旧连接／旧源／旧回执 | A、H | 迟到响应不覆盖新快照，历史回执不回滚当前树，跨实例不比较计数器 | untested（2026-11-14 自动化已测：换代后旧代际答复丢弃、旧源整份丢弃、同代际更旧修订不覆盖、旧回执不回退；H 层仅覆盖“断线后重连不覆盖”，跨实例计数器未测——R1 单实例） |
 | V32 | project-panel-sync：重连与草稿 | A、H | 重新订阅／完整回读看到已提交事实，未提交编辑及基线保留 | untested（2026-11-14 H 层部分实测：阻断插件 API 后面板标「连接断开」，点「重连」代际 1→2、树完整回读、草稿保留并可保存成功；**“重新订阅”未做**——当前为 5 秒轮询，`conaProject.follow` 未接；宿主重启致外壳白屏、草稿不持久化） |
@@ -43,7 +43,7 @@
 | V34 | plugin-localization：安装资源与回退 | A、H | 中英全部 key／占位符可用，元信息随包，缺失反例失败，其他宿主语言英文回退不改宿主偏好 | pass（2026-11-14：`check-locale.mjs` 中英 key／占位符一致 + 6 个反例自测；删 en 单个 key 实测 exit 1；tarball 含 `locale/` 与 `lib/client/locales/`；真实浏览器 zh-CN 中文、en-US 英文、ja-JP 英文回退，界面无原始 key，`locale.preference` 未被自动选择写入） |
 | V35 | plugin-localization：切换与重启 | A、H | 导航／已开面板更新，节点选择／输入保留，重启跟随宿主选择，字典卸载重载无重复 | pass（2026-11-15：设置页运行中切 English 后面板按钮／侧栏 label／`<html lang>` 即时更新；节点选择与目标草稿、变更原因逐字节保留；修订行数字不变；`preference: en` 落盘 profile patch，重启后 ja-JP 浏览器得英文界面（偏好覆盖浏览器语言）；重启后侧栏 Project 入口恰 1 个、pageerror 0。脚本 `panel-locale-55.mjs`，见 5.5 记录） |
 | V36 | plugin-localization：内容和时间隔离 | A、H | 项目原文、协议码、指纹与修订不变；长文本、数量、时区可用，语言不改日期或 Agent 授权 | pass（2026-11-15：项目标题／节点标题／目标保持中文原文；`planVersion`／修订切换前后不变；数量 zh/en 同源（3 条完成条件）；新增 `local.lastOperationAt` 以 Intl＋显式时区显示，zh/en 提取 (月,日,时,分,时区) 相等仅格式变；英文冲突长文案与 older-revision 提示完整可读、冲突保留草稿；R1 无 Agent 工具，owner execute 两语言同规则可用，Agent 授权属第 6 段。见 5.5 记录） |
-| V37 | 六能力整体闭环，必含 V32／V04 | E、H | 预构建安装→小树保存→聊天→真实 Agent 授权内调整并记原因→UI 已提交→Client 断线重连完整回读（V32）→重启恢复→卸载及重新安装（V04）→原资料／历史回执一致且旧 WorkRun 不恢复授权，可重复 | untested |
+| V37 | 六能力整体闭环，必含 V32／V04 | E、H | 预构建安装→小树保存→聊天→真实 Agent 授权内调整并记原因→UI 已提交→Client 断线重连完整回读（V32）→重启恢复→卸载及重新安装（V04）→原资料／历史回执一致且旧 WorkRun 不恢复授权，可重复 | untested（2026-11-17 部分：已实测聊天→真实 Agent 授权内 split＋record 并记原因→UI 已提交回读→重启恢复（资料／回执一致、旧 WorkRun 不恢复写资格），见 [6.6 记录](implementation/2026-11-17-6.6-agent-e2e.md)。必做的 V32 Client 断线重连完整回读与 V04 卸载及重新安装、以及预构建 tarball 起装、原历史回执逐项一致本轮未做，仍待 7.1／7.2；不因部分通过标 pass） |
 | V38 | portable-project-data：外部 v1 首次接入 | F、H | 全新本机根无原注册表／数据库时取得外部合法 v1 文件，沿用原项目／节点 id，新建本机实例，不重建项目，不导入旧授权或回执；仅基础接入，非 R2 Git 或 R6 跨机试用 | untested（2026-11-14 文件层已实测：外部 sample 接入沿用 project／node id 与 planVersion，资料根不新增文件；本机实例登记待 3.2、H 待第 5／6 段） |
 
 ## 路线图 R1 必须反例映射
@@ -65,4 +65,4 @@
 
 ## 完成判据
 
-必须场景 fail／blocked／untested 时，R1 不标完成；保留问题、影响和下一步，不能通过删除必需场景缩小口径。**V25b 例外**：仅其 non-owner 部分（ii）因 R1 无真实多身份部署而 `blocked`，不阻 R1 完成；该边界须随 change 归档写入 R2+ 记录，且不得改为 `pass`。其绑定准入与 agent 缺失／归属不唯一部分（i）不享此例外，必须在 6.2／6.5 实现后复测并按实际结果更新。每项 pass 绑定实际对象与版本，实际代码变化后按影响复核。路线图原“树与路线图一致”的 R1 核查明确以树／规划摘要代替，路线图 UI 一致性留 R2，不因 V30 pass 宣称已验收路线图。外部 v1 基础接入在 V38 验证；新机器／Git 完整协作属于 R2，真实跨环境试用属于 R6，本机双目录不冒充它们已完成。
+必须场景 fail／blocked／untested 时，R1 不标完成；保留问题、影响和下一步，不能通过删除必需场景缩小口径。**V25b 例外**：仅其 non-owner 部分（ii）因 R1 无真实多身份部署而 `blocked`，不阻 R1 完成；该边界须随 change 归档写入 R2+ 记录，且不得改为 `pass`。其绑定准入与 agent 缺失／归属不唯一部分（i）不享此例外，必须复测并按实际结果更新；2026-11-17 随 6.6 真实 Agent 工具调用复测：绑定有效、无 invocation 的有限范围准入与写入成功（见 6.6 记录），agent 缺失／归属不唯一的真实拒绝在本单用户宿主无法构造，维持单测证据并如实标注。每项 pass 绑定实际对象与版本，实际代码变化后按影响复核。路线图原“树与路线图一致”的 R1 核查明确以树／规划摘要代替，路线图 UI 一致性留 R2，不因 V30 pass 宣称已验收路线图。外部 v1 基础接入在 V38 验证；新机器／Git 完整协作属于 R2，真实跨环境试用属于 R6，本机双目录不冒充它们已完成。
