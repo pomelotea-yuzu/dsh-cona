@@ -7,6 +7,7 @@
 // 边界：本文件只做准入、参数补齐与结果转交；一致性读取、命令序列、隔离与修订都在应用层。
 // 运行时（实例 + 两个应用服务）由宿主在配置解析与资料打开后提供；未配置时面板得到明确码。
 
+import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
 import type { RemoteInvocation } from '@deepseek-ai/dsh-typert-protocol'
@@ -17,6 +18,8 @@ import type {
   ProjectCommandService,
   TrustedContext,
 } from '../application/command-service.js'
+import type { FollowResult } from '../application/snapshot.js'
+import { FollowSessions, type FollowEventBatch, type FollowHandleView } from './follow-sessions.js'
 import type { ConversationOutcome, ChatsView } from '../application/conversations.js'
 import { ConversationService } from '../application/conversations.js'
 import type {
@@ -36,6 +39,11 @@ declare module '@deepseek-ai/cordis' {
     conaProject: ConaProjectService
   }
 }
+
+/** follow 建订阅结果（V32）：following 带句柄与 ready；拒绝带稳定码。 */
+export type FollowOutcome<T> =
+  | { status: 'following'; value: T }
+  | { status: 'rejected'; code: string; message: string };
 
 /** 面板启动信息：是否已配置、打开到哪个实例、位置显示与失败原因。 */
 export interface ConaProjectStatus {
@@ -144,6 +152,9 @@ const OWNER: TrustedContext = { kind: 'remote-owner' }
 
 /** `conaProject`：面板读取与保存的唯一 Remote 入口。 */
 export class ConaProjectService extends TypertRemoteService {
+  /** follow 订阅句柄表（V32）：HTTP Client 以句柄拉取失效事件，替代纯 snapshot 轮询。 */
+  private readonly follows = new FollowSessions()
+
   constructor(
     ctx: Context,
     private readonly deps: ConaProjectServiceDeps,
@@ -196,6 +207,56 @@ export class ConaProjectService extends TypertRemoteService {
       connectionGeneration,
       ...(request.minStateRevision === undefined ? {} : { minStateRevision: request.minStateRevision }),
     })
+  }
+
+  /**
+   * 建立失效订阅（V32）：先订阅再回读。返回 ready 与 subscriptionId；
+   * 事件经 followEvents 拉取（HTTP unary 载体无法直接消费 typert stream 的 AsyncIterable）。
+   * 新订阅由应用层 nextGeneration 关闭同实例旧订阅，句柄表同步标记旧句柄关闭。
+   */
+  @Remote('follow')
+  async follow(request: { instanceId?: string; afterStateRevision?: number }): Promise<FollowOutcome<FollowHandleView>> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    const instanceId = request.instanceId ?? runtime.value.instance.instanceId
+    if (instanceId !== runtime.value.instance.instanceId) {
+      return { status: 'rejected', code: 'forbidden', message: '订阅实例与已配置实例不一致' }
+    }
+    if (request.afterStateRevision !== undefined
+      && (!Number.isSafeInteger(request.afterStateRevision) || request.afterStateRevision < 0)) {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'afterStateRevision 必须是非负整数' }
+    }
+    const result: FollowResult = await runtime.value.snapshot.follow(OWNER, {
+      instanceId,
+      ...(request.afterStateRevision === undefined ? {} : { afterStateRevision: request.afterStateRevision }),
+    })
+    if (result.status !== 'following') return result
+    const subscriptionId = randomUUID()
+    return { status: 'following', value: this.follows.start(subscriptionId, instanceId, result) }
+  }
+
+  /** 拉取订阅的新失效事件（含 ready 作为首事件）；无新事件返回空批，不阻塞。 */
+  @Remote('followEvents')
+  async followEvents(request: { subscriptionId: string }): Promise<FollowEventBatch | { status: 'rejected'; code: string; message: string }> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    if (typeof request.subscriptionId !== 'string' || request.subscriptionId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 subscriptionId' }
+    }
+    return this.follows.drain(request.subscriptionId)
+  }
+
+  /** 关闭订阅句柄（面板卸载／重连释放）；重复关闭返回 false。 */
+  @Remote('followClose')
+  async followClose(request: { subscriptionId: string }): Promise<{ closed: boolean } | { status: 'rejected'; code: string; message: string }> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    if (typeof request.subscriptionId !== 'string' || request.subscriptionId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 subscriptionId' }
+    }
+    return { closed: this.follows.dispose(request.subscriptionId) }
   }
 
   /** 统一命令入口：与 CLI 同一应用服务，面板不能绕过校验。 */

@@ -83,6 +83,8 @@ export type IngestOutcome = 'applied' | 'stale-generation' | 'stale-source' | 's
 export class PanelController {
   private state: PanelState = EMPTY;
   private readonly listeners = new Set<(state: PanelState) => void>();
+  /** 当前失效订阅（V32）；null 表示宿主无 follow 或订阅失败，回退 snapshot 轮询。 */
+  private followHandle: { id: string; generation: number; nextIndex: number } | null = null;
 
   constructor(private readonly deps: PanelControllerDeps) {}
 
@@ -113,20 +115,60 @@ export class PanelController {
     return draft.baseline.sourceEpoch !== snapshot.sourceEpoch || draft.baseline.planRevision !== snapshot.planRevision;
   }
 
-  /** 打开／重新读取权威快照。草稿与原因不被清空。 */
+  /** 打开／重新读取权威快照。草稿与原因不被清空。先订阅再回读（design §8）。 */
   async open(): Promise<void> {
-    await this.load();
+    const minRevision = await this.establishFollow();
+    await this.load(minRevision);
   }
 
   /**
-   * 重连：递增连接代际后完整回读。
+   * 重连：递增连接代际，释放旧订阅并重新订阅（真正的“重新订阅”），再完整回读。
    * 旧代际的迟到答复因代际不符被丢弃；草稿保留。
    */
   async reconnect(): Promise<void> {
+    const previous = this.followHandle;
+    this.followHandle = null;
+    if (previous !== null && this.deps.transport.followClose !== undefined) {
+      void this.deps.transport.followClose({ subscriptionId: previous.id }).catch(() => {});
+    }
     this.patch({
       connection: { generation: this.state.connection.generation + 1, status: 'connected', error: null },
     });
-    await this.load();
+    const minRevision = await this.establishFollow();
+    await this.load(minRevision);
+  }
+
+  /**
+   * 建立失效订阅并返回 ready 水位（design §8：先订阅再回读，通知不是内容来源）。
+   * 宿主不支持 follow 或订阅被拒时返回 undefined，调用方回退到普通快照读取。
+   */
+  private async establishFollow(): Promise<number | undefined> {
+    const follow = this.deps.transport.follow;
+    if (follow === undefined) return undefined;
+    const generation = this.state.connection.generation;
+    try {
+      const result = await follow({
+        ...(this.state.snapshot === undefined || this.state.snapshot === null
+          ? {}
+          : { afterStateRevision: this.state.snapshot.stateRevision }),
+      });
+      if (generation !== this.state.connection.generation) return undefined;
+      if (result.status !== 'following') return undefined;
+      // host 的 change-stream 代际是权威：client 本地代际必须与之一致，
+      // 否则 snapshot 带旧代际会被 stale-connection 拒绝（面板卡在 Loading）。
+      this.patch({
+        connection: { ...this.state.connection, generation: result.value.connectionGeneration },
+      });
+      this.followHandle = {
+        id: result.value.subscriptionId,
+        generation: result.value.connectionGeneration,
+        nextIndex: 0,
+      };
+      return result.value.ready.stateRevision;
+    } catch {
+      // 传输失败不阻断面板：回退到 snapshot 轮询，连接状态由后续 markOffline 反映。
+      return undefined;
+    }
   }
 
   /** 连接失败：保留内容与草稿，只标离线。 */
@@ -135,12 +177,37 @@ export class PanelController {
   }
 
   /**
-   * 轮询一次快照（R1 的失效检测）：带 `minStateRevision` 追读；受代际与修订守卫约束。
-   * 失败只标离线，不清空树与草稿。
+   * 检测一次权威变化（V32）：有失效订阅时先拉订阅事件，只有出现更高修订才回读快照；
+   * 无订阅（旧宿主／订阅失败）时回退到 snapshot 轮询。受代际与修订守卫约束，失败只标离线。
    */
   async poll(): Promise<IngestOutcome> {
     if (this.state.snapshot === null) return 'failed';
     const generation = this.state.connection.generation;
+    const handle = this.followHandle;
+    if (handle !== null && handle.generation === generation && this.deps.transport.followEvents !== undefined) {
+      try {
+        const batch = await this.deps.transport.followEvents({ subscriptionId: handle.id });
+        if (generation !== this.state.connection.generation) return 'stale-generation';
+        if (batch.status === 'not-found' || batch.closed) {
+          // 订阅终结（源代际替换／服务端关闭）：重新订阅一次，再完整回读。
+          this.followHandle = null;
+          const minRevision = await this.establishFollow();
+          await this.load(minRevision);
+          return 'applied';
+        }
+        handle.nextIndex = batch.nextIndex;
+        const changed = batch.events.some((event) => event.stateRevision > this.state.snapshot!.stateRevision);
+        if (changed) {
+          await this.load();
+          return 'applied';
+        }
+        return 'stale-revision'; // 无新事实：未改动的正常结果
+      } catch {
+        // 订阅拉取失败（断线窗口）：保留订阅与草稿，标离线，交给重连重建订阅。
+        this.markOffline('订阅拉取失败');
+        return 'failed';
+      }
+    }
     try {
       const result = await this.deps.transport.snapshot({
         connectionGeneration: generation,
@@ -328,7 +395,7 @@ export class PanelController {
     });
   }
 
-  private async load(): Promise<void> {
+  private async load(minStateRevision?: number): Promise<void> {
     const generation = this.state.connection.generation;
     this.patch({ phase: this.state.snapshot === null ? 'loading' : this.state.phase, message: null });
     let status: ConaProjectStatus;
@@ -346,7 +413,10 @@ export class PanelController {
     }
     let result: Awaited<ReturnType<PanelTransport['snapshot']>>;
     try {
-      result = await this.deps.transport.snapshot({ connectionGeneration: generation });
+      result = await this.deps.transport.snapshot({
+        connectionGeneration: generation,
+        ...(minStateRevision === undefined ? {} : { minStateRevision }),
+      });
     } catch (error) {
       this.markOffline((error as Error).message);
       if (this.state.snapshot === null) this.patch({ phase: 'error', status, message: (error as Error).message });

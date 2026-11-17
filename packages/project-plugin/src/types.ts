@@ -16,7 +16,10 @@ export type {
   PendingCommand,
   CommittedCommand,
 } from './application/command-service.js'
-export type { ProjectSnapshot, SnapshotResult, PlanSummary, SnapshotSync } from './application/snapshot.js'
+export type { ProjectSnapshot, SnapshotResult, PlanSummary, SnapshotSync, StreamEventView, FollowResult } from './application/snapshot.js'
+// follow 订阅（V32）：Remote follow/followEvents/followClose 的边界类型。
+export type { FollowOutcome } from './host/project-service.js'
+export type { FollowHandleView, FollowEventBatch } from './host/follow-sessions.js'
 // 聊天关联（tasks 6.1）：Remote chats/createChat/linkChat/unlinkChat/reconcileChats 的边界类型。
 export type {
   ConversationOutcome,

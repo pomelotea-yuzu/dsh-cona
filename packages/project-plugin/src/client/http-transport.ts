@@ -9,7 +9,9 @@
 // 边界：本文件只做线协议编解码与错误归一；不做业务判断，也不缓存快照。
 // 换成宿主生成的 Remote 代理时，只需另写一个实现 `PanelTransport` 的模块。
 
-import type { CommandResult, ConaProjectStatus, ExecuteRequest, PanelTransport, SnapshotResult } from './api.js';
+import type {
+  CommandResult, ConaProjectStatus, ExecuteRequest, FollowEventBatch, FollowHandle, PanelTransport, SnapshotResult,
+} from './api.js';
 
 interface ServerResponse<T> {
   type: 'server-response';
@@ -84,5 +86,8 @@ export function createHttpTransport(options: HttpTransportOptions = {}): PanelTr
     status: () => call<ConaProjectStatus>('conaProject/status', {}),
     snapshot: (request) => call<SnapshotResult>('conaProject/snapshot', { request }),
     execute: (request: ExecuteRequest) => call<CommandResult>('conaProject/execute', { request }),
+    follow: (request) => call<{ status: 'following'; value: FollowHandle } | { status: 'rejected'; code: string; message: string }>('conaProject/follow', { request }),
+    followEvents: (request) => call<FollowEventBatch>('conaProject/followEvents', { request }),
+    followClose: (request) => call<{ closed: boolean }>('conaProject/followClose', { request }),
   };
 }
