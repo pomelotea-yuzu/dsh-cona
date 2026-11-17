@@ -1,6 +1,6 @@
 # 项目管理插件开发路线图草案
 
-日期：2026-11-12。状态：依据现有需求、架构和开工复核整理的实施建议，尚未定稿；[R1 change](../../openspec/changes/establish-r1-project-plugin/proposal.md) 已完成第 1 轮外部审阅并按意见修订，尚未实施；全部里程碑运行验证均为 `untested`。本文管理 dsh-cona 自身的开发，插件内的路线图功能另见[产品讨论](../product/2026-11-12-project-roadmap-design.md)。
+日期：2026-11-12。状态：依据现有需求、架构和开工复核整理的实施建议，尚未定稿；[R1 change](../../openspec/changes/establish-r1-project-plugin/proposal.md) 已实施至第 7 段收口——R1 核心闭环（独立打包安装→面板→保存→聊天→真实 Agent 授权内调整→UI 已提交→重连→重启→卸载重装）经 7.1／7.2 真实宿主实测并可重复演示，V37／V32／V04 pass，六份 specs 的 74 个 Scenario 全部映射验证矩阵、无 fail；矩阵 39 条中 10 pass／1 blocked（V25b(ii) R1 边界例外）／28 untested（多为 H 层未逐条复现、A/F 层有证据），R1 是接入实验、不代表首版产品完成，完整验收状态见该 change 的 validation-matrix 与 [7.3 收尾核对](../../openspec/changes/establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md)。R2–R6 里程碑尚未开始。本文管理 dsh-cona 自身的开发，插件内的路线图功能另见[产品讨论](../product/2026-11-12-project-roadmap-design.md)。
 
 2026-11-14 范围补充：用户明确将“接着上次做”卡片纳入首版，建议随 R2 的项目概览／工作接续实现，在 R6 首版试用中验收。卡片尚未实现或验证，不修改当前 R1 change 验收；其他新增创意不随此补充自动进入首版。R1 实施进展以活动 change 的 tasks 与运行记录为准，本文早期状态摘要不作为最新执行结论。
 
@@ -16,7 +16,7 @@
 
 | 里程碑 | 用户可见的交付成果 | 依赖 | 对应现有架构 | 当前状态 |
 |---|---|---|---|---|
-| R1：插件贯通实验 | 三种位置保存同格式项目资料，面板、聊天、Agent 更新与重启恢复贯通，本机运行数据独立 | 固定宿主与独立测试环境 | 切片 A 的接入与数据实验 | 提案已审阅修订／未实施／`untested` |
+| R1：插件贯通实验 | 三种位置保存同格式项目资料，面板、聊天、Agent 更新与重启恢复贯通，本机运行数据独立 | 固定宿主与独立测试环境 | 切片 A 的接入与数据实验 | 核心闭环已实测 pass（V37／V32／V04，2026-11-17 7.1–7.3 收口）；矩阵另有 28 项 untested／1 项 blocked 待后续复测 |
 | R2：项目树、协作与工作接续 | 用户搭建流程，多对多关联聊天；“接着上次做”卡片；Git 交换资料，其他 Agent 可读改，新机器 DSH 接续 | R1 | 完成切片 A，加入协作场景 | 未开始／`untested` |
 | R3：项目分析与自主规划 | 对已有项目或进行中的工作发起分析，保留来源，依据新信息调整规划 | R2 | 切片 B | 未开始／`untested` |
 | R4：开发、SDD 与成果 | 讨论进入开发，关联规范与 change，记录实际成果、验证及遗留事项 | R2、R3 | 切片 C | 未开始／`untested` |
@@ -43,7 +43,7 @@ R1 内先做公开格式与校验、独立包接入和文件提交，再做 Agen
 
 上述边界已形成 [R1 change 设计](../../openspec/changes/establish-r1-project-plugin/design.md) 与[验证矩阵](../../openspec/changes/establish-r1-project-plugin/validation-matrix.md)，已按第 1 轮外部 review 修订。设计暂选独立文件型本机状态后端，storageDomain 保留为未采用候选；这不改变公开／私有隔离目标，也不代表后端恢复已验证。接入实验失败时记录具体失败和待改方案，再复核受影响里程碑。
 
-以下场景纳入 R1 验收，当前全部为 `untested`：
+以下场景纳入 R1 验收。2026-11-17 状态：核心闭环（含卸载清理与 Client 重连）已按 7.1／7.2 真实宿主实测并可重复演示（V37 pass）；下表场景对应的矩阵条目中，A（自动）／F（文件后端）层证据大多已落地，H（真实宿主）层部分由整体闭环覆盖、部分仍保持 `untested` 待逐条复测，1 项 `blocked`（non-owner 边界）。逐条对应与证据见 [7.3 收尾核对](../../openspec/changes/establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md) 与 [验证矩阵](../../openspec/changes/establish-r1-project-plugin/validation-matrix.md)：
 
 | 场景 | 必须观察的结果 |
 |---|---|

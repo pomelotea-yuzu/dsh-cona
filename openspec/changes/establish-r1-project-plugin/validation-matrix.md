@@ -1,6 +1,6 @@
 # R1 验证矩阵
 
-日期：2026-11-12（2026-11-13、2026-11-14、2026-11-17 更新）。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V04／V12／V25a／V29／V32／V34／V35／V36／V37 `pass`，V25b `blocked`（i 准入路径已真实 Agent 复测、ii 为 R1 边界）；V05／V10／V11／V13／V14／V15／V16／V17／V18／V19／V20／V21／V22／V30／V33／V38 已有自动化或文件层部分证据但宿主层或后续阶段未做，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
+日期：2026-11-12（2026-11-13、2026-11-14、2026-11-17 更新）。2026-11-17 7.3 收尾核对：六份 specs 的 31 Requirement／74 Scenario 全部映射到下表条目、无遗漏；无 `fail`。核对发现并修正的记录层不一致（头部摘要漏列 V23、V06–V09 证据括号滞后）见 [7.3 记录](implementation/2026-11-17-7.3-final-audit.md)，未改任何运行判据。初始为验证计划、下表全部 `untested`；2026-11-13 起按实测更新状态（当前 V04／V12／V23／V25a／V29／V32／V34／V35／V36／V37 `pass`，V25b `blocked`（i 准入路径已真实 Agent 复测、ii 为 R1 边界）；V05／V10／V11／V13／V14／V15／V16／V17／V18／V19／V20／V21／V22／V30／V33／V38 已有自动化或文件层部分证据但宿主层或后续阶段未做，仍为 `untested`）。第 1 轮外部提案评审见 [review](review.md)，修订及版本化校验记录见 [review-response](review-response.md)。协议向量核算／OpenSpec 校验不改变本表产品运行状态，本文件不代替外部 review。
 
 方法：`A` 为自动业务／Client 测试，`F` 为实际文件后端与中断注入，`H` 为独立 profile 的真实 DSH 检查，`E` 为真实 Agent 端到端。含多种方法的条目须分别记录观察；替身通过不代替真实宿主。运行时追加实际版本、步骤、预期／观察、证据定位与限制，状态仅 `pass / fail / blocked / untested`。
 
@@ -11,10 +11,10 @@
 | V03 | plugin-integration：Remote | H | 自有 contribution 往返可用，未挂载或断线不显示保存成功 | untested |
 | V04 | plugin-integration：隔离、卸载及重载 | H、F | 个人 profile 不改，入口／监听／字典无重复且可清理，资料和回执不删，在途命令保留结果 | pass（2026-11-17 7.1：在隔离 tarball home（个人 desktop profile 未改）`dsh plugin remove dsh-cona-project` 卸载后 `project.json`／`local/registry.json` SHA-256 字节不变、资料与回执不删；重新 `add` 同一 tarball 后宿主 apply、同一 instanceId、工作事件监听重新挂载（apply 日志 1 条，无重复导航／字典）、旧 WorkRun `effective=false`，见 [7.1 记录](implementation/2026-11-17-7.1-tarball-closed-loop.md)。2026-11-17 7.2 细核补齐：安装态/重装态各 11/11——apply 日志 `host apply`／`work event observers`／`project tools registered` 各恰 1 条、boot graph `dsh-cona-project` 1 entry、侧栏导航中英各 1、字典无原始 key、pageerror 0；卸载与重装前后 `project.json`／`registry.json`／`state.json` SHA-256 逐字节不变；重装后 Client follow→带代际 snapshot→followClose→重 follow→回读 8/8。「在途命令保留结果」由 7.2 F 层在最终包编译产物注入 prepared/头/回执 unknown 实测：重开实例后写/回执/恢复拒绝、只读诊断可读、显式核对补回执且双修订只推一次，18/18，见 [7.2 记录](implementation/2026-11-17-7.2-reload-inflight.md)） |
 | V05 | portable-project-data：三种位置 | F、H | 同格式同语义，实际位置和可得 Git 状态可见，不静默改位置或自动 Git 操作 | untested（2026-11-14 文件层已实测：三位置同格式字节一致、实际路径与 Git 四态只读可见、非空目标拒绝，见 [3.1 记录](implementation/2026-11-14-3.1-positions.md)；H 待第 5 段面板接入后复测） |
-| V06 | portable-project-data：无代码目录、无 DSH 阅读 | A、F | 可先建逻辑项目；README／schema／独立校验足够，不依赖宿主数据库／模型服务 | untested |
-| V07 | portable-project-data：正文发布边界 | A、F | 未引用正文不算发布，资料指令／远程 schema 不自动执行或获取 | untested |
-| V08 | portable-project-data：树、依赖、身份 | A | 重复 id、缺父、树环、依赖环及非法引用拒绝，批量拆分全部接受或拒绝 | untested |
-| V09 | portable-project-data：完成语义 | A | 过程结束和子节点全完成不标父完成，显式完成核对条件与所需证据 | untested |
+| V06 | portable-project-data：无代码目录、无 DSH 阅读 | A、F | 可先建逻辑项目；README／schema／独立校验足够，不依赖宿主数据库／模型服务 | untested（2026-11-17 7.3 核对补注：1.5 CLI 在无 DSH 进程校验样例与错误/未知字段资料已实测，3.1 无代码目录建逻辑项目文件层已实测；H 层未单独复，状态不变） |
+| V07 | portable-project-data：正文发布边界 | A、F | 未引用正文不算发布，资料指令／远程 schema 不自动执行或获取 | untested（2026-11-17 7.3 核对补注：1.5 CLI 孤立正文与哈希不符正文拒绝、错误/未知字段资料实测；H 层未单独复，状态不变） |
+| V08 | portable-project-data：树、依赖、身份 | A | 重复 id、缺父、树环、依赖环及非法引用拒绝，批量拆分全部接受或拒绝 | untested（2026-11-17 7.3 核对补注：1.2 领域测试覆盖重复 id／缺父／树环／依赖环／批量拆分整体拒绝；H 层由 V29／V37 真实闭环间接覆盖，本条未单独复，状态不变） |
+| V09 | portable-project-data：完成语义 | A | 过程结束和子节点全完成不标父完成，显式完成核对条件与所需证据 | untested（2026-11-17 7.3 核对补注：1.4 领域测试覆盖完成条件/证据校验与孤立正文；H 层未单独复，状态不变） |
 | V10 | portable-project-data：公开／私有隔离 | F、H | 三种位置均不泄漏实际 Session、机器路径、授权、草稿或回执，外部结论非本机复测 | untested（2026-11-14 部分实测：登记后 `project.json` 字节不变且不含实例 id／本机根；会话与回执字段待第 4／6 段填充后复测） |
 | V11 | portable-project-data：指纹、未知格式 | A、F | 随格式分发的 v1-plan 正文／17 个强制向量可读；主实现及第二份独立实现得到同一字节／散列并拒绝负向输入，排版／记录追加不变、目标／顺序改变；伪造哈希或未知格式不覆盖 | untested（2026-11-14 补证：仅排版变化 headChanged 而 planVersion 不变；schemaVersion=2 与伪造 planVersion 均拒绝且不覆盖原文件；A 层已过，H 层未测） |
 | V12 | portable-project-data：实例与路径 | A、F | 同项目双目录身份稳定但实例隔离，越界／symlink／hardlink／大小写／权限结果按平台实记 | pass（2026-11-14，macOS APFS：双目录两实例且聚合隔离；越界／symlink／hardlink／FIFO／chmod 000 均以稳定码拒绝；大小写不可并存已实记。Linux／Windows 未测，不继承该结论） |

@@ -1,6 +1,6 @@
 # R1：项目管理插件贯通实验
 
-日期：2026-11-12。状态：第 1 轮外部审阅已完成，已按 [review](review.md) 修订，处理与复查记录见 [review-response](review-response.md)。按[工作流](../../../docs/development/workflow.md)修订复查后提交提案；尚未实施，运行场景均为 `untested`，不将作者复查写成外部二次审阅或产品验收。
+日期：2026-11-12。状态：第 1 轮外部审阅已完成，已按 [review](review.md) 修订，处理与复查记录见 [review-response](review-response.md)。按[工作流](../../../docs/development/workflow.md)修订复查后提交提案；不将作者复查写成外部二次审阅或产品验收。2026-11-17 实施更新：tasks 1–7 段已实施并收口（2.4b 除外，blocked 拆口径），R1 核心闭环 V37／V32／V04 经真实宿主实测 pass，验证矩阵另有 28 项 untested／V25b(ii) blocked 维持原状，实施证据与收尾核对见 [implementation 记录](implementation/2026-11-17-7.3-final-audit.md)；本段提案文本保留提交时原貌。
 
 ## Why
 
