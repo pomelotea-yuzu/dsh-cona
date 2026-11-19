@@ -18,12 +18,15 @@ export interface HostConfigInput {
   localDataRoot?: string;
   /** 已登记实例；配置了但仍需与 projectRoot 一致。 */
   instanceId?: string;
+  /** 每实例本机工作副本根（instanceId → 绝对路径）；用于只读代码观察（3.2）。 */
+  workCopyRoots?: Record<string, string>;
 }
 
 export interface HostConfig {
   projectRoot?: string;
   localDataRoot?: string;
   instanceId?: string;
+  workCopyRoots?: Record<string, string>;
 }
 
 export interface ConfigIssue {
@@ -49,6 +52,18 @@ export function resolveHostConfig(input: HostConfigInput): ConfigResult {
   }
   if (input.instanceId !== undefined && input.instanceId.trim() !== '') {
     out.instanceId = input.instanceId.trim();
+  }
+  if (input.workCopyRoots !== undefined) {
+    const roots: Record<string, string> = {};
+    for (const [id, root] of Object.entries(input.workCopyRoots)) {
+      if (id.trim() === '' || root.trim() === '') continue;
+      if (!path.isAbsolute(root)) {
+        issues.push({ code: 'cona-config-not-absolute', message: `workCopyRoots[${id}] 必须是绝对路径：${root}` });
+        continue;
+      }
+      roots[id.trim()] = path.normalize(root);
+    }
+    if (Object.keys(roots).length > 0) out.workCopyRoots = roots;
   }
   if (issues.length > 0) return { ok: false, issues };
   return { ok: true, config: out };

@@ -150,6 +150,8 @@ export interface ConaProjectRuntime {
   work: WorkService;
   /** 接续卡片用；未装配读取器时 resumeCard 给明确拒绝码。 */
   recordReader?: RecordBodyReader;
+  /** 每实例只读工作副本观察（3.2）；未配置该实例映射时返回 null。 */
+  observeWorkCopy?: (instanceId: string) => import('../adapters/fs/work-copy.js').WorkCopyObservation | null;
 }
 
 export type RuntimeResult =

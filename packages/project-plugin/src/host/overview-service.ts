@@ -49,9 +49,15 @@ export interface ConaOverviewFollowRequest {
   afterStateRevision?: number;
 }
 
+/** 代码观察（3.2）：观察成功带 HEAD 与脏计数；未配置/不可观察给稳定状态。 */
+export type CodeObservationView =
+  | { status: 'observed'; head: string; dirtyCount: number }
+  | { status: 'not-configured' }
+  | { status: 'unavailable'; reason: string };
+
 /** 接续卡片读取结果：卡片载荷、空态，或稳定诊断（不可读时不回退）。 */
 export type ResumeCardResult =
-  | { status: 'card'; recordId: string; path: string; payload: ResumePayload }
+  | { status: 'card'; recordId: string; path: string; payload: ResumePayload; codeObservation: CodeObservationView }
   | { status: 'empty' }
   | { status: 'rejected'; code: string; message: string }
   | OwnerDenial;
@@ -194,7 +200,15 @@ export class ConaOverviewService extends TypertRemoteService {
     if (!read.ok) return { status: 'rejected', code: read.code, message: read.message }
     const parsed = parseResumeBody(read.body)
     if (!parsed.ok) return { status: 'rejected', code: parsed.code, message: parsed.message }
-    return { status: 'card', recordId: candidate.id, path: candidate.path, payload: parsed.payload }
+    // 代码观察只读、失败不阻塞卡片；未配置该实例映射时如实显示"未配置"。
+    const observed = runtime.value.observeWorkCopy?.(request.instanceId)
+    const codeObservation: CodeObservationView =
+      observed === null || observed === undefined
+        ? { status: 'not-configured' }
+        : observed.status === 'observed'
+          ? { status: 'observed', head: observed.head, dirtyCount: observed.dirtyCount }
+          : { status: 'unavailable', reason: observed.reason }
+    return { status: 'card', recordId: candidate.id, path: candidate.path, payload: parsed.payload, codeObservation }
   }
 
   /** 按实例读完整快照；沿用 R1 的连接代际/源代际检查。 */

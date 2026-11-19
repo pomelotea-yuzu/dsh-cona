@@ -66,5 +66,10 @@
   "resumeSaveConflict": "Source changed, please retry",
   "resumeSavePending": "Pending reconciliation",
   "resumeMissingRequired": "Stopped-at and next step are required",
-  "resumeSaving": "Saving…"
+  "resumeSaving": "Saving…",
+  "codeObserved": "Code observation: HEAD {head} · {worktree}",
+  "codeNotConfigured": "Code not verified: no work copy configured for this instance",
+  "codeUnavailable": "Code not verified: {reason}",
+  "worktreeClean": "worktree clean",
+  "worktreeDirty": "worktree has {count} uncommitted"
 }

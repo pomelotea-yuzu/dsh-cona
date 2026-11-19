@@ -19,6 +19,7 @@ import {
   DelegatingPanelController,
   type OverviewListResult,
   type ResumeCardView,
+  type CodeObservationView,
 } from './project-overview-controller.js'
 import type { PanelTransport } from './api.js'
 import type { ResumePayload } from '../domain/resume.js'
@@ -70,14 +71,21 @@ async function readResumeCandidate(instanceId: string): Promise<ResumeCardView> 
   })
   if (!response.ok) return { status: 'diagnostic', code: 'transport-http', message: `HTTP ${response.status}` }
   const body = await response.json() as {
-    result?: { ok: true; value: { status: string; payload?: unknown; code?: string; message?: string } }
+    result?: { ok: true; value: { status: string; payload?: unknown; code?: string; message?: string; codeObservation?: { status: string; head?: string; dirtyCount?: number; reason?: string } } }
       | { ok: false; error: { code: string; message: string } }
   }
   if (body.result === undefined) return { status: 'diagnostic', code: 'transport-parse', message: '响应缺少结果' }
   if (!body.result.ok) return { status: 'diagnostic', code: body.result.error.code, message: body.result.error.message }
   const value = body.result.value
   if (value.status === 'card' && value.payload !== undefined) {
-    return { status: 'card', recordId: String((value as { recordId?: string }).recordId ?? ''), payload: value.payload as ResumePayload }
+    const raw = value.codeObservation
+    const codeObservation: CodeObservationView =
+      raw === undefined || raw.status === 'not-configured'
+        ? { status: 'not-configured' }
+        : raw.status === 'observed' && typeof raw.head === 'string' && typeof raw.dirtyCount === 'number'
+          ? { status: 'observed', head: raw.head, dirtyCount: raw.dirtyCount }
+          : { status: 'unavailable', reason: String(raw.reason ?? 'unknown') }
+    return { status: 'card', recordId: String((value as { recordId?: string }).recordId ?? ''), payload: value.payload as ResumePayload, codeObservation }
   }
   if (value.status === 'empty') return { status: 'empty' }
   if (value.status === 'rejected' || value.status === 'forbidden') {

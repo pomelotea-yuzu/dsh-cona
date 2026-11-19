@@ -34,6 +34,10 @@
 
 任务 3.1 的格式与保存闭环完成，见 [实施记录](implementation/2026-11-19-3.1-resume-record.md)：真实文件后端证实带前缀 execution-note 经 append-record 保存、只推进状态修订、索引候选选取、正文哈希核对、解析往返、同 operationId 幂等只一条、普通记录不误选；不可读分支各有稳定码。这支撑 **O05（保存并重读）与 O06（响应丢失/基线过期的幂等部分）的后端能力**，但聊天指针分项（O07）、共享预览、针对接续命令的故障注入、卡片 UI 未做，故对应产品场景仍保持 `untested`，不因格式/保存闭环完成改标 pass。
 
+## 3.2 接续卡片与代码观察注记（2026-11-19）
+
+任务 3.2 三段完成，见实施记录（[3.2a 卡片投影](implementation/2026-11-19-3.2-resume-card.md)／[3.2b 保存 UI](implementation/2026-11-19-3.2-resume-save.md)／[3.2c 代码观察](implementation/2026-11-19-3.2-work-copy.md)）。真实浏览器实测通过的可观察项：A 卡片齐全/B 空态与诊断（O04 部分分句）、表单保存→回执→卡片刷新→幂等重试（O05 部分分句：必填缺失保留草稿、预览带前缀、修订只推进状态）、`workCopyRoots` 映射下 HEAD+脏计数显示与资料目录排除、纯映射缺失实例显示"代码未核对：未配置"（O08 部分分句）、坏 marker/坏 JSON/版本未知/超限的领域级诊断单测与哈希不符集成测试（O09 部分分句）。**但** O04 的无配置/默认配置失败分支、O05 的 B 双条保存与重启返回、O08 的分别改变规划/HEAD/工件字节的核对矩阵、O09 的浏览器级损坏正文注入均未跑；O10（引用查阅/越界）未实现。故 O04–O09 产品场景仍保持 `untested`，不因部分可观察项通过改标 pass。
+
 ## 编写交接
 
 2026-11-18 在本机使用 Node `26.13.0` 与独立安装的 OpenSpec `1.17.0`。`openspec validate add-project-overview-and-resume --type change --strict --no-interactive --json` 返回 `valid: true`，1 项通过，0 问题。`node scripts/check-repo.mjs --all` 在包含新增文件和索引改动的临时 Git 快照中通过，洁净度 0 失败、0 警告，文档链接与双语检查均为 0 问题。13 个增量场景与 O01–O13 逐项对应。

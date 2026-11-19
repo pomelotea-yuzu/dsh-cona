@@ -270,6 +270,15 @@ function ResumeCardView(props: { state: ResumeCardState | null; t: TopTranslate 
     </p>;
   }
   const p = state.payload;
+  const obs = state.codeObservation;
+  const worktree = obs.status === 'observed'
+    ? (obs.dirtyCount === 0 ? t('worktreeClean') : t('worktreeDirty', { count: String(obs.dirtyCount) }))
+    : '';
+  const obsLine = obs.status === 'observed'
+    ? t('codeObserved', { head: obs.head.slice(0, 7), worktree })
+    : obs.status === 'not-configured'
+      ? t('codeNotConfigured')
+      : t('codeUnavailable', { reason: obs.reason });
   return (
     <section data-cona-resume-card="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
       <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>{t('resumeTitle')}</h4>
@@ -285,6 +294,7 @@ function ResumeCardView(props: { state: ResumeCardState | null; t: TopTranslate 
           {t('resumeVerification', { status: v.status, label: v.label ?? v.subjectId })}
         </p>
       ))}
+      <p style={{ margin: '2px 0', fontSize: 12, color: obs.status === 'observed' ? undefined : '#8a6d3b' }}>{obsLine}</p>
     </section>
   );
 }

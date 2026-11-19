@@ -66,5 +66,10 @@
   "resumeSaveConflict": "资料已变化，请重试",
   "resumeSavePending": "结果待核对",
   "resumeMissingRequired": "停点与下一步为必填",
-  "resumeSaving": "正在保存…"
+  "resumeSaving": "正在保存…",
+  "codeObserved": "代码观察：HEAD {head} · {worktree}",
+  "codeNotConfigured": "代码未核对：未配置本实例工作副本",
+  "codeUnavailable": "代码未核对：{reason}",
+  "worktreeClean": "工作区干净",
+  "worktreeDirty": "工作区有 {count} 处未提交"
 }

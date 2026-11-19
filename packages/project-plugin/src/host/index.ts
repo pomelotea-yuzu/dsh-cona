@@ -26,6 +26,7 @@ import { LocalStateStore } from '../adapters/fs/local-state.js'
 import { resolveLocalRoot, rootRelation } from '../adapters/fs/local-root.js'
 import { inspectPrivateRoot } from '../adapters/fs/git-guard.js'
 import { describeRoot } from '../adapters/fs/location.js'
+import { observeWorkCopy } from '../adapters/fs/work-copy.js'
 import type { Sha256Fn } from '../domain/types.js'
 import { ConaDiagnosticService } from './diagnostic-service.js'
 import { createLocalStateService, openConfiguredInstance, resolveHostConfig, type HostConfigInput, type HostWiring } from './bootstrap.js'
@@ -43,6 +44,8 @@ export const Config = z.object({
   projectRoot: z.string().optional(),
   localDataRoot: z.string().optional(),
   instanceId: z.string().optional(),
+  /** 每实例本机工作副本根（instanceId → 绝对路径），只读代码观察用（3.2）。 */
+  workCopyRoots: z.record(z.string(), z.string()).optional(),
 })
 
 const sha256: Sha256Fn = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -327,9 +330,21 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
         return { ok: true as const, body: new TextDecoder().decode(bytes) }
       },
     }
-    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, recordReader }
+    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, recordReader, observeWorkCopy: observeWorkCopyFor(instance) }
     return { ok: true, value }
   }
+
+  /** resolveHostConfig 成功后暂存的工作副本映射；assembleRuntime 构造观察闭包时读取。 */
+  let configuredWorkCopyRoots: Record<string, string> | undefined
+
+  /** 每实例只读工作副本观察：未配置映射返回 null；观察失败给 unavailable 原因。 */
+  const observeWorkCopyFor = (instance: import('./bootstrap.js').OpenedInstance) =>
+    (instanceId: string): import('../adapters/fs/work-copy.js').WorkCopyObservation | null => {
+      if (instanceId !== instance.instanceId) return null
+      const root = configuredWorkCopyRoots?.[instanceId]
+      if (root === undefined) return null
+      return observeWorkCopy(root, [instance.sourceRoot])
+    }
 
   /** 配置实例 A（R1）：解析配置并打开，失败结果被记忆。行为与 R1 完全一致。 */
   const resolveRuntime = async (): Promise<RuntimeResult> => {
@@ -337,6 +352,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
     if (!resolved.ok) {
       return { ok: false, code: resolved.issues[0]?.code ?? 'cona-config-invalid', message: resolved.issues.map((issue) => issue.message).join('；') }
     }
+    configuredWorkCopyRoots = resolved.config.workCopyRoots
     const opened = await openConfiguredInstance(resolved.config, {
       files,
       store,

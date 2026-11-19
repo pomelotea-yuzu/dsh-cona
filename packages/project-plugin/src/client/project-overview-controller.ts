@@ -6,9 +6,15 @@ import { PanelController, type IPanelController, type IngestOutcome, type PanelD
 import type { PanelTransport } from './api.js';
 import { buildResume, type NextStepKind, type ResumePayload } from '../domain/resume.js';
 
+/** 代码观察视图（由 Host 只读观察投影）：历史验证之外的"待核对"呈现。 */
+export type CodeObservationView =
+  | { status: 'observed'; head: string; dirtyCount: number }
+  | { status: 'not-configured' }
+  | { status: 'unavailable'; reason: string };
+
 /** 接续卡片视图（由 Host resumeCandidate 投影）。 */
 export type ResumeCardView =
-  | { status: 'card'; recordId: string; payload: ResumePayload }
+  | { status: 'card'; recordId: string; payload: ResumePayload; codeObservation: CodeObservationView }
   | { status: 'empty' }
   | { status: 'unread' }
   | { status: 'diagnostic'; code: string; message: string };
