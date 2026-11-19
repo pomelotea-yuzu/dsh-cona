@@ -9,8 +9,8 @@
 
 import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
-import { Remote, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
-import type { RemoteInvocation } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { denyNonOwner, OWNER_CONTEXT, type OwnerDenial } from './owner-admission.js'
 import type {
   Command,
   CommandEnvelope,
@@ -148,7 +148,7 @@ export interface ConaProjectServiceDeps {
   localRootDisplay: (root: string) => string;
 }
 
-const OWNER: TrustedContext = { kind: 'remote-owner' }
+const OWNER: TrustedContext = OWNER_CONTEXT
 
 /** `conaProject`：面板读取与保存的唯一 Remote 入口。 */
 export class ConaProjectService extends TypertRemoteService {
@@ -488,18 +488,8 @@ export class ConaProjectService extends TypertRemoteService {
   }
 
   /** 准入：缺 invocation、非 owner、或 `principalOf` 非空都拒绝，不降级。 */
-  private deny(): { status: 'rejected'; code: string; message: string } | null {
-    const invocation: RemoteInvocation | undefined = this.ctx.invocation
-    if (invocation === undefined) {
-      return { status: 'rejected', code: 'forbidden', message: '缺少宿主生成的 Remote invocation；不降级为进程内 owner' }
-    }
-    if (invocation.peer.principal.kind !== 'owner') {
-      return { status: 'rejected', code: 'forbidden', message: '该 Remote 入口只允许 owner 主体' }
-    }
-    if (principalOf(invocation) !== undefined) {
-      return { status: 'rejected', code: 'forbidden', message: 'principalOf 非空；该入口只接受 owner 直接调用' }
-    }
-    return null
+  private deny(): OwnerDenial {
+    return denyNonOwner(this.ctx)
   }
 }
 

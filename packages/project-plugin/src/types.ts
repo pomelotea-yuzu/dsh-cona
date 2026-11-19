@@ -47,3 +47,12 @@ export type {
   ConaWorkPrepareRequest,
   ConaWorkStartRequest,
 } from './host/project-service.js'
+// R2 任务 2.1：conaOverview Remote 边界类型（owner 多实例概览入口）。
+export type { OverviewInstanceRow } from './host/instance-runtime-registry.js'
+export type {
+  OverviewListResult,
+  ConaOverviewSnapshotRequest,
+  ConaOverviewExecuteRequest,
+  ConaOverviewFollowRequest,
+} from './host/overview-service.js'
+export type { OwnerDenial } from './host/owner-admission.js'

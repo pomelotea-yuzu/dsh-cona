@@ -29,8 +29,9 @@ import { describeRoot } from '../adapters/fs/location.js'
 import type { Sha256Fn } from '../domain/types.js'
 import { ConaDiagnosticService } from './diagnostic-service.js'
 import { createLocalStateService, openConfiguredInstance, resolveHostConfig, type HostConfigInput, type HostWiring } from './bootstrap.js'
-import { ConaProjectService } from './project-service.js'
-import type { RuntimeResult } from './project-service.js'
+import { ConaProjectService, type ConaProjectRuntime, type RuntimeResult } from './project-service.js'
+import { ConaOverviewService } from './overview-service.js'
+import { InstanceRuntimeRegistry, type OpenInstanceInput } from './instance-runtime-registry.js'
 import { attachWorkEventObservers } from './work-events.js'
 import { ProjectToolAdapter, defineProjectTools, type ConaToolDefinition, type ConaToolExec, type ConaToolsRegistry } from './project-tools.js'
 import { planNodeView, sessionDirectory, unavailableSessionDirectory } from './session-directory.js'
@@ -217,53 +218,35 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
   const files = createSourceFiles(path.join(packageRootDir(), 'formats', 'v1'), sha256)
   const describe = (root: string): { displayPath: string } => ({ displayPath: describeRoot(root).displayPath })
 
-  const resolveRuntime = async (): Promise<RuntimeResult> => {
-    const resolved = resolveHostConfig(config)
-    if (!resolved.ok) {
-      return { ok: false, code: resolved.issues[0]?.code ?? 'cona-config-invalid', message: resolved.issues.map((issue) => issue.message).join('；') }
-    }
-    const wiring: HostWiring = {
-      files,
-      store,
-      resolver: { resolveLocal: resolveLocalRoot, relation: rootRelation },
-      git: { inspect: inspectPrivateRoot },
-      sha256,
-      clock,
-      newInstanceId: () => randomUUID(),
-      defaultLocalRoot: async () => defaultLocalRootDir(),
-      describeLocation: describe,
-    }
-    const localState = createLocalStateService(wiring, ({ entry, aggregate }) => {
-      stream.publish(
-        notificationForRefresh(
-          {
-            instanceId: entry.instanceId,
-            projectId: entry.projectId,
-            sourceEpoch: entry.sourceGeneration,
-            stateRevision: aggregate.revisions.state,
-            planRevision: aggregate.revisions.plan,
-          },
-          clock(),
-        ),
-      )
-    })
-    const opened = await openConfiguredInstance(resolved.config, {
-      files,
-      store,
-      sha256,
-      clock,
-      localState,
-      defaultLocalRoot: async () => defaultLocalRootDir(),
-      describeLocation: describe,
-    })
-    if (opened.status !== 'opened') {
-      return {
-        ok: false,
-        code: opened.status === 'not-configured' ? 'binding-expired' : opened.code,
-        message: opened.message,
-      }
-    }
-    const instance = opened.instance
+  const wiring: HostWiring = {
+    files,
+    store,
+    resolver: { resolveLocal: resolveLocalRoot, relation: rootRelation },
+    git: { inspect: inspectPrivateRoot },
+    sha256,
+    clock,
+    newInstanceId: () => randomUUID(),
+    defaultLocalRoot: async () => defaultLocalRootDir(),
+    describeLocation: describe,
+  }
+  // 宿主与每个实例共用同一 LocalStateService（注册表在一个共享本机根下）。
+  const localState = createLocalStateService(wiring, ({ entry, aggregate }) => {
+    stream.publish(
+      notificationForRefresh(
+        {
+          instanceId: entry.instanceId,
+          projectId: entry.projectId,
+          sourceEpoch: entry.sourceGeneration,
+          stateRevision: aggregate.revisions.state,
+          planRevision: aggregate.revisions.plan,
+        },
+        clock(),
+      ),
+    )
+  })
+
+  /** 由已打开实例装配四个应用服务；A 与 B 走同一路径，各自得到隔离的运行时。 */
+  const assembleRuntime = (instance: import('./bootstrap.js').OpenedInstance): RuntimeResult => {
     // 会话目录（tasks 6.1）：cwd 绑定实例资料根；宿主 sessionController 缺失时用稳定拒绝的占位实现。
     const directoryResult = sessionDirectory(ctx, instance.sourceRoot)
     const directory = directoryResult.ok
@@ -293,7 +276,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       newNodeId: () => randomUUID(),
       newRecordId: () => randomUUID(),
       queue,
-      work, // agent-work 上下文的有限范围准入与绑定版本推进（tasks 6.2）
+      work,
       notify: (result, envelope) =>
         stream.publish(
           notificationForCommit(
@@ -322,20 +305,98 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       stream,
       describeLocation: describe,
     })
-    return { ok: true, value: { instance, snapshot, command, chats, work } }
+    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work }
+    return { ok: true, value }
+  }
+
+  /** 配置实例 A（R1）：解析配置并打开，失败结果被记忆。行为与 R1 完全一致。 */
+  const resolveRuntime = async (): Promise<RuntimeResult> => {
+    const resolved = resolveHostConfig(config)
+    if (!resolved.ok) {
+      return { ok: false, code: resolved.issues[0]?.code ?? 'cona-config-invalid', message: resolved.issues.map((issue) => issue.message).join('；') }
+    }
+    const opened = await openConfiguredInstance(resolved.config, {
+      files,
+      store,
+      sha256,
+      clock,
+      localState,
+      defaultLocalRoot: async () => defaultLocalRootDir(),
+      describeLocation: describe,
+    })
+    if (opened.status !== 'opened') {
+      return {
+        ok: false,
+        code: opened.status === 'not-configured' ? 'binding-expired' : opened.code,
+        message: opened.message,
+      }
+    }
+    return assembleRuntime(opened.instance)
+  }
+
+  /** 其他已登记实例 B：从 entry 派生 config 复用同一打开路径；不猜路径、不改公开头。 */
+  const openInstanceRuntime = async (input: OpenInstanceInput): Promise<RuntimeResult> => {
+    const localRoot = config.localDataRoot ?? await defaultLocalRootDir()
+    if (localRoot === undefined) {
+      return { ok: false, code: 'cona-local-root-missing', message: '无法确定本机运行数据根' }
+    }
+    const opened = await openConfiguredInstance(
+      {
+        projectRoot: input.sourceRoot,
+        localDataRoot: localRoot,
+        instanceId: input.instanceId,
+      },
+      {
+        files,
+        store,
+        sha256,
+        clock,
+        localState,
+        defaultLocalRoot: async () => defaultLocalRootDir(),
+        describeLocation: describe,
+      },
+    )
+    if (opened.status !== 'opened') {
+      return {
+        ok: false,
+        code: opened.status === 'not-configured' ? 'binding-expired' : opened.code,
+        message: opened.message,
+      }
+    }
+    if (opened.instance.projectId !== input.projectId) {
+      return { ok: false, code: 'cona-instance-mismatch', message: '实例项目身份与登记不一致' }
+    }
+    return assembleRuntime(opened.instance)
   }
 
   let runtime: Promise<RuntimeResult> | null = null
   const shared = (): Promise<RuntimeResult> => (runtime ??= resolveRuntime())
 
+  // 多实例共享运行时表：配置实例复用已打开的 runtime，其他实例按 entry 懒装配。
+  const instanceRegistry = new InstanceRuntimeRegistry({
+    listEntries: async () => {
+      const localRoot = config.localDataRoot ?? await defaultLocalRootDir()
+      const result = await localState.list(localRoot === undefined ? {} : { localDataRoot: localRoot })
+      return result.ok ? result.entries : []
+    },
+    open: openInstanceRuntime,
+    describeLocation: (root) => describeRoot(root).displayPath,
+  })
+  // 配置实例 A 的运行时注入表中，与概览/既有 Remote 共享同一个 promise。
+  void shared().then((result) => {
+    if (result.ok) instanceRegistry.register(result.value.instance.instanceId, shared())
+  })
+
   // 宿主事件自动订阅（tasks 6.6）：真实 inbox／turn 事件经 work-events 适配器
   // 转到 WorkService 的消息准入映射，工具侧据此取得活动 WorkRun 绑定。
+  // 仍绑定配置实例 A，浏览其他实例不改变事件与工具的执行目标。
   attachWorkEventObservers(ctx, shared)
 
   ctx.plugin(ConaProjectService, {
     runtime: shared,
     localRootDisplay: (root: string) => describeRoot(root).displayPath,
   })
+  ctx.plugin(ConaOverviewService, { registry: instanceRegistry })
 
   // 启动即尝试打开一次：成功与失败都留一行宿主日志作为直接证据。
   void shared().then((result) => {
