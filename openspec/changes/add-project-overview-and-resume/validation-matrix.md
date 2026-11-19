@@ -18,6 +18,10 @@
 | O12 | 原聊天已失效或从干净环境接入 | F＋H · 解绑或删除后回读，再把公开资料交给干净 profile，放入同名会话。按文件检查公开结构无私有指针、Session 或执行授权，摘要仍可读 | `untested` |
 | O13 | 在编辑中切换宿主语言 | A＋H · 字典校验，真实切换中英与日语回退。核对长文本、日期、空态、错误状态和草稿原文 | `untested` |
 
+## 1.1 宿主探针注记（2026-11-19）
+
+任务 1.1 在真实 DSH `0.2.2-rc.2` 隔离 profile + 预构建包上完成候选路径探针，结论见 [实施记录](implementation/2026-11-19-1.1-host-probe.md)：`shell.overlay` root slot 实渲染并可见（含窄窗口/跨页）、`layout`／`uiWorkspace` 可注入、`selectPanel('cona-project')` 在 slot 注册后落到 R1 既有树编辑器、`openSession` 落到指定 Session。这证明 **O01／O02／O11 的宿主接入路径可用**，但产品按钮、键盘收起、草稿保留与安全复查尚未实现，故三条产品场景仍保持 `untested`，不因探针改标 pass。selectPanel 的注册时机约束带入任务 2.2。
+
 ## 编写交接
 
 2026-11-18 在本机使用 Node `26.13.0` 与独立安装的 OpenSpec `1.17.0`。`openspec validate add-project-overview-and-resume --type change --strict --no-interactive --json` 返回 `valid: true`，1 项通过，0 问题。`node scripts/check-repo.mjs --all` 在包含新增文件和索引改动的临时 Git 快照中通过，洁净度 0 失败、0 警告，文档链接与双语检查均为 0 问题。13 个增量场景与 O01–O13 逐项对应。

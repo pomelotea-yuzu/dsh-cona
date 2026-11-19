@@ -4,7 +4,7 @@
 
 ## 1. 宿主探针与范围核对
 
-- [ ] 1.1 在固定 DSH `0.2.2-rc.2` 的隔离 profile 用预构建插件核对窗口级顶部挂载与向下展开、键盘焦点和跨页面访问。验证安全会话导航落到预期 Session，核对 `layout` 注入和 `ctx.layout.selectPanel` 或等效入口，实证可进入既有树编辑器。记录环境、调用路径和受阻场景；失败时回写提案并按工作流复核受影响范围。对应 O01、O02、O11。
+- [ ] 1.1 在固定 DSH `0.2.2-rc.2` 的隔离 profile 用预构建插件核对窗口级顶部挂载与向下展开、键盘焦点和跨页面访问。验证安全会话导航落到预期 Session，核对 `layout` 注入和 `ctx.layout.selectPanel` 或等效入口，实证可进入既有树编辑器。记录环境、调用路径和受阻场景；失败时回写提案并按工作流复核受影响范围。对应 O01、O02、O11（2026-11-19：隔离 profile + 预构建包真实浏览器探针。`shell.overlay` root slot 实体渲染并可见（含窄窗口/跨页）；`layout`／`uiWorkspace` 可注入；`selectPanel('cona-project')` 在 slot 注册后落到 R1 既有树编辑器并真实显示，`openSession` 落到指定 Session 并切到会话界面。发现调用时机约束：selectPanel 须等 main slot 注册后，已记入实施记录第 3 节供 2.2 遵守。键盘 Escape 焦点返回、产品概览交互与安全复查属 2.2／3.3，本探针未测。候选路径成立，design 不需回退。见 [1.1 探针记录](implementation/2026-11-19-1.1-host-probe.md)。）
 
 ## 2. 实例读取与界面接入
 
