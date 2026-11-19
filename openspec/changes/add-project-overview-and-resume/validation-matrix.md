@@ -30,6 +30,10 @@
 
 任务 2.2 主体完成，见 [实施记录](implementation/2026-11-19-2.2-overview-ui.md)。真实浏览器实测通过的可观察项：顶部按钮可见/展开（O01）、两实例列表、Escape 收起+焦点返回与键盘展开（O02）、窄窗口、进入所选实例 B 的树编辑器显示 B 的资料（浏览隔离，关联 O11）、不可读实例禁用+诊断（O04）。**但** O13（运行中语言切换）、草稿按实例保留的 UI 复测、跨页保留未做，故 O01/O02/O13 的产品场景状态仍保持 `untested`，不因部分可观察项通过改标 pass。
 
+## 3.1 接续记录注记（2026-11-19）
+
+任务 3.1 的格式与保存闭环完成，见 [实施记录](implementation/2026-11-19-3.1-resume-record.md)：真实文件后端证实带前缀 execution-note 经 append-record 保存、只推进状态修订、索引候选选取、正文哈希核对、解析往返、同 operationId 幂等只一条、普通记录不误选；不可读分支各有稳定码。这支撑 **O05（保存并重读）与 O06（响应丢失/基线过期的幂等部分）的后端能力**，但聊天指针分项（O07）、共享预览、针对接续命令的故障注入、卡片 UI 未做，故对应产品场景仍保持 `untested`，不因格式/保存闭环完成改标 pass。
+
 ## 编写交接
 
 2026-11-18 在本机使用 Node `26.13.0` 与独立安装的 OpenSpec `1.17.0`。`openspec validate add-project-overview-and-resume --type change --strict --no-interactive --json` 返回 `valid: true`，1 项通过，0 问题。`node scripts/check-repo.mjs --all` 在包含新增文件和索引改动的临时 Git 快照中通过，洁净度 0 失败、0 警告，文档链接与双语检查均为 0 问题。13 个增量场景与 O01–O13 逐项对应。
