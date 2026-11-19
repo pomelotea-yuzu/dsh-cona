@@ -7,6 +7,13 @@ import type { ConaProjectStatus } from '../host/project-service.js';
 
 export type PanelSnapshot = ProjectSnapshot;
 
+export interface SnapshotRequest {
+  connectionGeneration: number;
+  minStateRevision?: number;
+  /** 目标实例；缺省为宿主配置的实例（R1 conaProject 契约）。 */
+  instanceId?: string;
+}
+
 /** 面板可用的命令请求（与 `conaProject.execute` 的 request 同形）。 */
 export interface ExecuteRequest {
   operationId: string;
@@ -14,6 +21,8 @@ export interface ExecuteRequest {
   expectedPlanVersion: string;
   expectedPlanRevision: number;
   sourceEpoch?: number;
+  /** 目标实例；缺省为宿主配置的实例。 */
+  instanceId?: string;
 }
 
 /** follow 订阅句柄（V32）：先订阅再回读，事件驱动失效替代纯 snapshot 轮询。 */
@@ -34,7 +43,7 @@ export interface FollowEventBatch {
  * follow 相关方法可选：旧宿主没有时，controller 回退到 snapshot 定时轮询。 */
 export interface PanelTransport {
   status(): Promise<ConaProjectStatus>;
-  snapshot(request: { connectionGeneration: number; minStateRevision?: number }): Promise<SnapshotResult>;
+  snapshot(request: SnapshotRequest): Promise<SnapshotResult>;
   execute(request: ExecuteRequest): Promise<CommandResult>;
   follow?(request: { instanceId?: string; afterStateRevision?: number }): Promise<
     | { status: 'following'; value: FollowHandle }

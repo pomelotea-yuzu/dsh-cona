@@ -35,5 +35,8 @@
   "saveStatusPending": "结果待核对：草稿已保留，先核对再重试",
   "saveStatusFailed": "保存失败：草稿已保留",
   "saveStatusPartial": "部分保存：规划已保存，变更原因未写入",
-  "errorCode": "错误码：{code}"
+  "errorCode": "错误码：{code}",
+  "overviewTitle": "项目概览",
+  "noInstances": "没有已登记的项目",
+  "enterTree": "进入树编辑"
 }

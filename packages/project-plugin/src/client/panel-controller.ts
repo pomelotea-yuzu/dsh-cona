@@ -79,8 +79,29 @@ const EMPTY: PanelState = {
 /** 一次读取的结论：是否被采纳、是否因代际／修订过旧被丢弃。 */
 export type IngestOutcome = 'applied' | 'stale-generation' | 'stale-source' | 'stale-revision' | 'unsynced' | 'failed';
 
+/** 面板渲染层所需的最小控制器接口（允许按实例委托，见 project-overview-controller）。 */
+export interface IPanelController {
+  getState(): PanelState;
+  subscribe(listener: (state: PanelState) => void): () => void;
+  isDirty(): boolean;
+  isSaved(): boolean;
+  isDraftBaselineStale(): boolean;
+  open(): Promise<void>;
+  reconnect(): Promise<void>;
+  markOffline(reason: string): void;
+  poll(): Promise<IngestOutcome>;
+  select(nodeId: string): void;
+  editGoal(nodeId: string, goal: string): void;
+  beginAddNode(parentId?: string): void;
+  editDraft(patch: Partial<Pick<PanelDraft, 'goal' | 'title' | 'criteria'>>): void;
+  setReason(reason: string): void;
+  discardDraft(): void;
+  save(): Promise<SaveStatus>;
+  ingest(result: Awaited<ReturnType<PanelTransport['snapshot']>>, generation: number): IngestOutcome;
+}
+
 /** 面板状态机：所有写入都返回新状态并通知订阅者。 */
-export class PanelController {
+export class PanelController implements IPanelController {
   private state: PanelState = EMPTY;
   private readonly listeners = new Set<(state: PanelState) => void>();
   /** 当前失效订阅（V32）；null 表示宿主无 follow 或订阅失败，回退 snapshot 轮询。 */

@@ -16,7 +16,12 @@ import {
   InstanceRuntimeRegistry,
   type OverviewInstanceRow,
 } from './instance-runtime-registry.js'
-import type { ConaExecuteRequest, ConaSnapshotRequest, FollowOutcome } from './project-service.js'
+import type {
+  ConaExecuteRequest,
+  ConaProjectStatus,
+  ConaSnapshotRequest,
+  FollowOutcome,
+} from './project-service.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -26,6 +31,8 @@ declare module '@deepseek-ai/cordis' {
 
 export interface ConaOverviewServiceDeps {
   registry: InstanceRuntimeRegistry;
+  /** 本机根显示路径（home 折叠）；与 conaProject 同一实现。 */
+  localRootDisplay: (root: string) => string;
 }
 
 export interface ConaOverviewSnapshotRequest extends ConaSnapshotRequest {
@@ -95,6 +102,52 @@ export class ConaOverviewService extends TypertRemoteService {
       return { status: 'unconfigured', message: '没有已登记实例' }
     }
     return { status: 'listed', instances: await this.deps.registry.overviewRows() }
+  }
+
+  /** 按实例的面板启动信息，与 conaProject/status 同形，供同一 PanelController 使用。 */
+  @Remote('status')
+  async status(request: { instanceId: string }): Promise<ConaProjectStatus> {
+    const denied = this.deny()
+    if (denied !== null) {
+      return {
+        configured: false, instanceId: null, projectId: null, sourceKind: null,
+        sourceDisplay: null, localRootDisplay: null, created: false,
+        error: { code: denied.code, message: denied.message },
+      }
+    }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) {
+      return {
+        configured: false, instanceId: null, projectId: null, sourceKind: null,
+        sourceDisplay: null, localRootDisplay: null, created: false, error: badId,
+      }
+    }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) {
+      return {
+        configured: false, instanceId: null, projectId: null, sourceKind: null,
+        sourceDisplay: null, localRootDisplay: null, created: false, error: resolved.denied,
+      }
+    }
+    const runtime = resolved.runtime
+    if (!runtime.ok) {
+      return {
+        configured: false, instanceId: null, projectId: null, sourceKind: null,
+        sourceDisplay: null, localRootDisplay: null, created: false,
+        error: { code: runtime.code, message: runtime.message },
+      }
+    }
+    const instance = runtime.value.instance
+    return {
+      configured: true,
+      instanceId: instance.instanceId,
+      projectId: instance.projectId,
+      sourceKind: instance.sourceKind,
+      sourceDisplay: instance.sourceDisplay,
+      localRootDisplay: this.deps.localRootDisplay(instance.localRoot),
+      created: instance.created,
+      error: null,
+    }
   }
 
   /** 按实例读完整快照；沿用 R1 的连接代际/源代际检查。 */

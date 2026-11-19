@@ -396,7 +396,10 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
     runtime: shared,
     localRootDisplay: (root: string) => describeRoot(root).displayPath,
   })
-  ctx.plugin(ConaOverviewService, { registry: instanceRegistry })
+  ctx.plugin(ConaOverviewService, {
+    registry: instanceRegistry,
+    localRootDisplay: (root: string) => describeRoot(root).displayPath,
+  })
 
   // 启动即尝试打开一次：成功与失败都留一行宿主日志作为直接证据。
   void shared().then((result) => {

@@ -22,6 +22,16 @@ interface ServerResponse<T> {
 export interface HttpTransportOptions {
   /** 默认 `/api`（与页面同源，Cookie 由浏览器自动带上）。 */
   base?: string;
+  /**
+   * Remote 命名空间。默认 `conaProject`（R1 配置实例，契约不含 instanceId）；
+   * 概览按实例读写用 `conaOverview`（request 带 instanceId）。
+   */
+  namespace?: string;
+  /**
+   * 绑定实例 id。仅用于 `conaOverview` 命名空间：所有请求自动带上它，
+   * 使 PanelController 无需感知实例。`conaProject` 命名空间忽略此值。
+   */
+  instanceId?: string;
   /** 测试注入。 */
   fetchImpl?: typeof fetch;
   /** rpcId 生成；默认递增计数。 */
@@ -41,7 +51,13 @@ export class TransportError extends Error {
 }
 
 export function createHttpTransport(options: HttpTransportOptions = {}): PanelTransport {
-  const base = options.base ?? '/api';
+  const base = options.base ?? '/api'
+  const namespace = options.namespace ?? 'conaProject'
+  const method = (name: string): string => `${namespace}/${name}`
+  // conaOverview 的每个方法都以 request.instanceId 定向；conaProject 契约不含该字段。
+  const bound = options.namespace === 'conaOverview' && options.instanceId !== undefined
+    ? { instanceId: options.instanceId }
+    : {};
   const doFetch = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   let counter = 0;
   const nextRpcId = options.rpcId ?? (() => `cona-panel-${(counter += 1)}`);
@@ -82,12 +98,14 @@ export function createHttpTransport(options: HttpTransportOptions = {}): PanelTr
     return body.result.value;
   }
 
+  // conaProject/status 无参（line 166 of project-service），conaOverview/status 带 request。
+  const statusArgs = options.namespace === 'conaOverview' ? { request: bound } : {};
   return {
-    status: () => call<ConaProjectStatus>('conaProject/status', {}),
-    snapshot: (request) => call<SnapshotResult>('conaProject/snapshot', { request }),
-    execute: (request: ExecuteRequest) => call<CommandResult>('conaProject/execute', { request }),
-    follow: (request) => call<{ status: 'following'; value: FollowHandle } | { status: 'rejected'; code: string; message: string }>('conaProject/follow', { request }),
-    followEvents: (request) => call<FollowEventBatch>('conaProject/followEvents', { request }),
-    followClose: (request) => call<{ closed: boolean }>('conaProject/followClose', { request }),
+    status: () => call<ConaProjectStatus>(method('status'), statusArgs),
+    snapshot: (request) => call<SnapshotResult>(method('snapshot'), { request: { ...request, ...bound } }),
+    execute: (request: ExecuteRequest) => call<CommandResult>(method('execute'), { request: { ...request, ...bound } }),
+    follow: (request) => call<{ status: 'following'; value: FollowHandle } | { status: 'rejected'; code: string; message: string }>(method('follow'), { request: { ...request, ...bound } }),
+    followEvents: (request) => call<FollowEventBatch>(method('followEvents'), { request }),
+    followClose: (request) => call<{ closed: boolean }>(method('followClose'), { request }),
   };
 }

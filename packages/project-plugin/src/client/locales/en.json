@@ -35,5 +35,8 @@
   "saveStatusPending": "Outcome pending review: draft kept, verify before retrying",
   "saveStatusFailed": "Save failed: draft kept",
   "saveStatusPartial": "Partially saved: plan saved, change reason not written",
-  "errorCode": "Error code: {code}"
+  "errorCode": "Error code: {code}",
+  "overviewTitle": "Project overview",
+  "noInstances": "No registered projects",
+  "enterTree": "Open tree"
 }

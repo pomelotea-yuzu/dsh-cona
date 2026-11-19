@@ -6,11 +6,11 @@
 
 import { useEffect, useState } from 'react';
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
-import type { PanelController, PanelState, SaveStatus } from './panel-controller.js';
+import type { IPanelController, PanelState, SaveStatus } from './panel-controller.js';
 import type { PanelSnapshot } from './api.js';
 import type { LocaleKey } from './locales.js';
 
-export type ProjectPanelInjected = { controller: PanelController };
+export type ProjectPanelInjected = { controller: IPanelController };
 
 export type ProjectPanelProps = PropsRuntime<'main'>
   & InjectFace<ProjectPanelInjected>
@@ -165,7 +165,7 @@ function Header(props: {
 }
 
 function NodeDetail(props: {
-  controller: PanelController;
+  controller: IPanelController;
   state: PanelState;
   node: PanelSnapshot['tree'][number];
   t: Translate;
@@ -262,7 +262,7 @@ function NodeDetail(props: {
   );
 }
 
-function SaveBar(props: { controller: PanelController; state: PanelState; t: Translate }): JSX.Element {
+function SaveBar(props: { controller: IPanelController; state: PanelState; t: Translate }): JSX.Element {
   const { controller, state, t } = props;
   const { status, code, message } = state.save;
   const key: LocaleKey = status === 'idle' && controller.isDirty() ? 'saveStatusDirty' : SAVE_LABEL[status];

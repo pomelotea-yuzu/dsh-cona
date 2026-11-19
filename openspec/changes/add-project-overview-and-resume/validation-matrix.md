@@ -26,6 +26,10 @@
 
 任务 2.1 的 Host 层完成，见 [实施记录](implementation/2026-11-19-2.1-instance-runtime.md)：`conaOverview` owner 入口实测可列出同 projectId 两实例、按 instanceId 读快照（B 按需装配）、未登记实例 `forbidden`、R1 `conaProject` Remote 不受影响；6 项单测覆盖实例隔离与不可读诊断。这支撑 **O03（实例路由/未登记拒绝）与 O04（不可读诊断）的后端能力**，但订阅切换的迟到事件丢弃、草稿隔离与「保存 B 时 A 不变」依赖 2.2/3.x 的 UI 与接续写入，三条产品场景仍保持 `untested`，不因后端完成改标 pass。
 
+## 2.2 概览 UI 注记（2026-11-19）
+
+任务 2.2 主体完成，见 [实施记录](implementation/2026-11-19-2.2-overview-ui.md)。真实浏览器实测通过的可观察项：顶部按钮可见/展开（O01）、两实例列表、Escape 收起+焦点返回与键盘展开（O02）、窄窗口、进入所选实例 B 的树编辑器显示 B 的资料（浏览隔离，关联 O11）、不可读实例禁用+诊断（O04）。**但** O13（运行中语言切换）、草稿按实例保留的 UI 复测、跨页保留未做，故 O01/O02/O13 的产品场景状态仍保持 `untested`，不因部分可观察项通过改标 pass。
+
 ## 编写交接
 
 2026-11-18 在本机使用 Node `26.13.0` 与独立安装的 OpenSpec `1.17.0`。`openspec validate add-project-overview-and-resume --type change --strict --no-interactive --json` 返回 `valid: true`，1 项通过，0 问题。`node scripts/check-repo.mjs --all` 在包含新增文件和索引改动的临时 Git 快照中通过，洁净度 0 失败、0 警告，文档链接与双语检查均为 0 问题。13 个增量场景与 O01–O13 逐项对应。

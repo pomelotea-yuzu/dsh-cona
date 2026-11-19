@@ -1,0 +1,131 @@
+// 顶部「项目」入口与向下展开概览（R2 任务 2.2，design §1）。
+// 注册在 root 作用域的 shell.overlay list slot：按钮在窗口顶部，概览在当前页面展开。
+// 全部文案来自 dsh-cona.project 字典；实例原文（标题/路径/错误码）保持原样。
+
+import { useEffect, useRef, useState } from 'react';
+import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
+import type { PanelState } from './panel-controller.js';
+import type { LocaleKey } from './locales.js';
+import { ProjectOverviewController, type OverviewRow, type OverviewState } from './project-overview-controller.js';
+
+export interface ProjectTopBarInjected {
+  controller: ProjectOverviewController;
+  /** 进入所选实例的既有树编辑器；由 client/index.ts 提供（持有 ctx.layout）。 */
+  onEnterTree: (instanceId: string) => Promise<void>;
+}
+
+export type ProjectTopBarProps = PropsRuntime<'shell.overlay'>
+  & InjectFace<ProjectTopBarInjected>
+  & PropsLocale<'dsh-cona.project'>;
+
+const labelOf = (key: LocaleKey): LocaleKey => key;
+
+/** 顶部入口组件：按钮 + 折叠概览。 */
+export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
+  const { controller, onEnterTree, t } = props;
+  const [state, setState] = useState<OverviewState>(controller.getState());
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => controller.subscribe(setState), [controller]);
+
+  const onButtonClick = (): void => {
+    void controller.toggle();
+  };
+  const onButtonKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+    if (event.key === 'Escape') {
+      controller.collapse();
+      buttonRef.current?.focus();
+    }
+  };
+  const onPanelKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      controller.collapse();
+      buttonRef.current?.focus();
+    }
+  };
+
+  const enterTree = (row: OverviewRow): void => {
+    if (!row.readable) return;
+    if (!controller.select(row.instanceId)) return;
+    void onEnterTree(row.instanceId).then(() => controller.collapse());
+  };
+
+  return (
+    <div data-cona-top="1" style={{ position: 'fixed', left: 8, top: 6, zIndex: 1000 }}>
+      <button
+        ref={buttonRef}
+        type="button"
+        data-cona-top-button="1"
+        aria-expanded={state.expanded}
+        onClick={onButtonClick}
+        onKeyDown={onButtonKeyDown}
+        style={{ cursor: 'pointer' }}
+      >
+        {t(labelOf('panel'))}
+      </button>
+      {state.expanded ? (
+        <div
+          data-cona-overview="1"
+          role="dialog"
+          aria-label={t(labelOf('overviewTitle'))}
+          onKeyDown={onPanelKeyDown}
+          style={{
+            position: 'absolute', left: 0, top: '100%', marginTop: 4,
+            minWidth: 260, maxWidth: 360, padding: 12,
+            background: 'var(--dsh-surface, #fff)', color: 'var(--dsh-text, #222)',
+            border: '1px solid var(--dsh-border, #ccc)', borderRadius: 8,
+            boxShadow: '0 6px 24px rgba(0,0,0,.18)',
+          }}
+        >
+          <h3 style={{ margin: '0 0 8px', fontSize: 14 }}>{t(labelOf('overviewTitle'))}</h3>
+          {state.phase === 'loading' ? <p style={{ margin: 0 }}>{t(labelOf('loading'))}</p> : null}
+          {state.phase === 'error' ? (
+            <p style={{ margin: 0, color: '#b3261e' }}>
+              {state.code !== null ? `${state.code}: ` : ''}{state.message ?? t(labelOf('loadError'))}
+            </p>
+          ) : null}
+          {state.phase === 'ready' && state.instances.length === 0 ? (
+            <p style={{ margin: 0 }}>{t(labelOf('noInstances'))}</p>
+          ) : null}
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {state.instances.map((row) => (
+              <li
+                key={row.instanceId}
+                data-cona-instance={row.instanceId}
+                style={{ padding: '6px 0', borderTop: '1px solid var(--dsh-border, #eee)' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="radio"
+                    name="cona-instance"
+                    checked={state.selectedId === row.instanceId}
+                    disabled={!row.readable}
+                    onChange={() => controller.select(row.instanceId)}
+                  />
+                  <span style={{ flex: 1, opacity: row.readable ? 1 : 0.6 }}>
+                    {row.sourceDisplay ?? row.instanceId}
+                  </span>
+                  <button
+                    type="button"
+                    data-cona-enter-tree={row.instanceId}
+                    disabled={!row.readable}
+                    onClick={() => enterTree(row)}
+                    title={row.readable ? t(labelOf('enterTree')) : `${row.code ?? 'unreadable'}`}
+                  >
+                    {t(labelOf('enterTree'))}
+                  </button>
+                </div>
+                {!row.readable ? (
+                  <div style={{ fontSize: 12, color: '#b3261e', marginTop: 4 }}>
+                    {row.code ?? 'unreadable'}{row.message ? `: ${row.message}` : ''}
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
