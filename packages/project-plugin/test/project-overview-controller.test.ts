@@ -24,6 +24,7 @@ function transport(): PanelTransport {
 function controller(list: OverviewListResult): ProjectOverviewController {
   return new ProjectOverviewController({
     listInstances: async () => list,
+    readResumeCard: async () => ({ status: 'empty' }),
     transportFor: () => transport(),
     newOperationId: () => `op-${Math.random()}`,
   });
@@ -112,4 +113,53 @@ test('委托控制器：选中切换时改绑，未选中时 getState 安全', a
   // 委托应把 B 的状态推给订阅者
   assert.ok(states.length >= 1);
   delegate.dispose();
+});
+
+test('load 后自动读接续卡片，默认选中首个可读实例', async () => {
+  let readFor: string | null = null;
+  const c = new ProjectOverviewController({
+    listInstances: async () => ({
+      status: 'listed',
+      instances: [
+        { instanceId: A, projectId: 'p', readable: true },
+        { instanceId: B, projectId: 'p', readable: false },
+      ],
+    }),
+    readResumeCard: async (id) => { readFor = id; return { status: 'empty' }; },
+    transportFor: () => transport(),
+    newOperationId: () => 'op',
+  });
+  await c.load();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(readFor, A);
+  assert.equal(c.getState().resumeCard?.status, 'empty');
+});
+
+test('切换实例丢弃迟到的卡片响应', async () => {
+  const resolvers: { a?: (v: import('../src/client/project-overview-controller.js').ResumeCardView) => void } = {};
+  const c = new ProjectOverviewController({
+    listInstances: async () => ({
+      status: 'listed',
+      instances: [
+        { instanceId: A, projectId: 'p', readable: true },
+        { instanceId: B, projectId: 'p', readable: true },
+      ],
+    }),
+    readResumeCard: (id) => new Promise((resolve) => {
+      if (id === A) resolvers.a = resolve;
+      else resolve({ status: 'empty' });
+    }),
+    transportFor: () => transport(),
+    newOperationId: () => 'op',
+  });
+  await c.load();
+  await new Promise((r) => setTimeout(r, 0));
+  // 切到 B，B 的卡片立即到达
+  c.select(B);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(c.getState().resumeCard?.status, 'empty');
+  // A 的迟到响应到达，不应覆盖 B
+  resolvers.a?.({ status: 'diagnostic', code: 'stale', message: 'late' });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(c.getState().resumeCard?.status, 'empty', '迟到响应被丢弃');
 });

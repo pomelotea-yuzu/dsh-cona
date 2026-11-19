@@ -18,8 +18,10 @@ import {
   ProjectOverviewController,
   DelegatingPanelController,
   type OverviewListResult,
+  type ResumeCardView,
 } from './project-overview-controller.js'
 import type { PanelTransport } from './api.js'
+import type { ResumePayload } from '../domain/resume.js'
 
 export const name = 'dsh-cona-project.client'
 
@@ -53,6 +55,37 @@ async function listInstances(): Promise<OverviewListResult> {
   return body.result.value
 }
 
+/** 读取所选实例的接续卡片（conaOverview/resumeCandidate）。 */
+async function readResumeCandidate(instanceId: string): Promise<ResumeCardView> {
+  const response = await fetch('/api/conaOverview/resumeCandidate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({
+      type: 'client-request',
+      rpcId: `cona-resume-${globalThis.crypto.randomUUID()}`,
+      method: 'conaOverview/resumeCandidate',
+      payload: { args: { request: { instanceId } } },
+    }),
+  })
+  if (!response.ok) return { status: 'diagnostic', code: 'transport-http', message: `HTTP ${response.status}` }
+  const body = await response.json() as {
+    result?: { ok: true; value: { status: string; payload?: unknown; code?: string; message?: string } }
+      | { ok: false; error: { code: string; message: string } }
+  }
+  if (body.result === undefined) return { status: 'diagnostic', code: 'transport-parse', message: '响应缺少结果' }
+  if (!body.result.ok) return { status: 'diagnostic', code: body.result.error.code, message: body.result.error.message }
+  const value = body.result.value
+  if (value.status === 'card' && value.payload !== undefined) {
+    return { status: 'card', recordId: String((value as { recordId?: string }).recordId ?? ''), payload: value.payload as ResumePayload }
+  }
+  if (value.status === 'empty') return { status: 'empty' }
+  if (value.status === 'rejected' || value.status === 'forbidden') {
+    return { status: 'diagnostic', code: value.code ?? value.status, message: value.message ?? '不可读' }
+  }
+  return { status: 'unread' }
+}
+
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, dictionaries), 'dsh-cona-project: dictionaries')
   const t = ctx.locale.bind(NS)
@@ -60,6 +93,7 @@ export function apply(ctx: ClientContext): void {
 
   const overview = new ProjectOverviewController({
     listInstances,
+    readResumeCard: readResumeCandidate,
     // 所有实例（含配置实例）统一走 conaOverview：它按 instanceId 路由并覆盖已登记实例。
     // 若误用 conaProject，请求会落到配置实例，浏览 B 时错误显示 A 的资料。
     transportFor: (instanceId): PanelTransport =>

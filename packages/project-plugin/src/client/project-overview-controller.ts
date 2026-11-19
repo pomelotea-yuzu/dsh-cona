@@ -4,6 +4,14 @@
 
 import { PanelController, type IPanelController, type IngestOutcome, type PanelDraft, type PanelState, type SaveStatus } from './panel-controller.js';
 import type { PanelTransport } from './api.js';
+import type { ResumePayload } from '../domain/resume.js';
+
+/** 接续卡片视图（由 Host resumeCandidate 投影）。 */
+export type ResumeCardView =
+  | { status: 'card'; recordId: string; payload: ResumePayload }
+  | { status: 'empty' }
+  | { status: 'unread' }
+  | { status: 'diagnostic'; code: string; message: string };
 
 export interface OverviewRow {
   instanceId: string;
@@ -24,6 +32,8 @@ export type OverviewListResult =
 export interface OverviewControllerDeps {
   /** 列出已登记实例（conaOverview/instances）。 */
   listInstances: () => Promise<OverviewListResult>;
+  /** 读取所选实例的接续卡片（conaOverview/resumeCandidate）。 */
+  readResumeCard: (instanceId: string) => Promise<ResumeCardView>;
   /** 为指定实例构造独立 transport（A→conaProject，B→conaOverview）。 */
   transportFor: (instanceId: string) => PanelTransport;
   newOperationId: () => string;
@@ -37,6 +47,8 @@ export interface OverviewState {
   message: string | null;
   /** 未配置/拒绝的稳定码（用于诊断展示）。 */
   code: string | null;
+  /** 当前选中实例的接续卡片；null 表示尚未读取。 */
+  resumeCard: ResumeCardView | null;
 }
 
 const EMPTY: OverviewState = {
@@ -46,6 +58,7 @@ const EMPTY: OverviewState = {
   expanded: false,
   message: null,
   code: null,
+  resumeCard: null,
 };
 
 export class ProjectOverviewController {
@@ -87,11 +100,14 @@ export class ProjectOverviewController {
     const instances = result.instances;
     const stillPresent = instances.some((row) => row.instanceId === this.state.selectedId);
     const firstReadable = instances.find((row) => row.readable)?.instanceId ?? null;
+    const selected = stillPresent ? this.state.selectedId : firstReadable;
     this.patch({
       phase: 'ready',
       instances,
-      selectedId: stillPresent ? this.state.selectedId : firstReadable,
+      selectedId: selected,
+      resumeCard: selected === null ? null : this.state.selectedId === selected ? this.state.resumeCard : null,
     });
+    if (selected !== null && !stillPresent) void this.loadResumeCard(selected);
   }
 
   /** 顶部按钮：展开/收起。首次展开时读取列表。 */
@@ -106,12 +122,27 @@ export class ProjectOverviewController {
     this.patch({ expanded: false });
   }
 
-  /** 选择实例；只接受已登记且可读的行。 */
+  /** 选择实例；只接受已登记且可读的行。切换时清旧卡片并读取新卡片。 */
   select(instanceId: string): boolean {
     const row = this.state.instances.find((item) => item.instanceId === instanceId);
     if (row === undefined || !row.readable) return false;
-    this.patch({ selectedId: instanceId });
+    if (this.state.selectedId === instanceId) return true;
+    this.patch({ selectedId: instanceId, resumeCard: null });
+    void this.loadResumeCard(instanceId);
     return true;
+  }
+
+  /** 读取当前选中实例的接续卡片；任何失败显示为诊断，不影响实例选择。 */
+  async loadResumeCard(instanceId: string): Promise<void> {
+    try {
+      const card = await this.deps.readResumeCard(instanceId);
+      // 只接受当前仍选中的实例结果，丢弃切换后的迟到响应（design §2 代际）。
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ resumeCard: card });
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ resumeCard: { status: 'diagnostic', code: 'transport-failed', message: (error as Error).message } });
+    }
   }
 
   /** 取（或建）某实例的面板控制器；同实例复用，草稿/选择/代际保持。 */

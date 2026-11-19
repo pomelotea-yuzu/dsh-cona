@@ -38,5 +38,18 @@
   "errorCode": "错误码：{code}",
   "overviewTitle": "项目概览",
   "noInstances": "没有已登记的项目",
-  "enterTree": "进入树编辑"
+  "enterTree": "进入树编辑",
+  "resumeTitle": "工作接续",
+  "noResume": "暂无接续记录",
+  "resumeStopped": "停点：{text}",
+  "resumeNext": "下一步（{kind}）：{text}",
+  "nextSuggested": "建议",
+  "nextConfirmed": "已确认",
+  "resumeOutcome": "成果：{text}",
+  "resumeDecisions": "决定：{text}",
+  "resumeOpenIssues": "未解决：{text}",
+  "resumeVerification": "历史：{status} · {label}",
+  "resumeUnread": "接续记录暂不可读",
+  "resumeDiagnostic": "接续诊断：{code} · {message}",
+  "resumeLoading": "正在读取接续…"
 }

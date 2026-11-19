@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
 import type { PanelState } from './panel-controller.js';
 import type { LocaleKey } from './locales.js';
-import { ProjectOverviewController, type OverviewRow, type OverviewState } from './project-overview-controller.js';
+import { ProjectOverviewController, type OverviewRow, type OverviewState, type ResumeCardView as ResumeCardState } from './project-overview-controller.js';
 
 export interface ProjectTopBarInjected {
   controller: ProjectOverviewController;
@@ -124,8 +124,44 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
               </li>
             ))}
           </ul>
+          <ResumeCardView state={state.resumeCard} t={t} />
         </div>
       ) : null}
     </div>
+  );
+}
+
+type TopTranslate = ProjectTopBarProps['t'];
+
+/** 接续卡片：从已核对的公开正文投影，区分历史验证状态并保留空态/诊断。 */
+function ResumeCardView(props: { state: ResumeCardState | null; t: TopTranslate }): JSX.Element | null {
+  const { state, t } = props;
+  if (state === null) return <p style={{ margin: '8px 0 0', fontSize: 12 }}>{t('resumeLoading')}</p>;
+  if (state.status === 'empty') return <p style={{ margin: '8px 0 0', fontSize: 12 }}>{t('noResume')}</p>;
+  if (state.status === 'unread') {
+    return <p style={{ margin: '8px 0 0', fontSize: 12, color: '#b3261e' }}>{t('resumeUnread')}</p>;
+  }
+  if (state.status === 'diagnostic') {
+    return <p style={{ margin: '8px 0 0', fontSize: 12, color: '#b3261e' }}>
+      {t('resumeDiagnostic', { code: state.code, message: state.message })}
+    </p>;
+  }
+  const p = state.payload;
+  return (
+    <section data-cona-resume-card="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
+      <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>{t('resumeTitle')}</h4>
+      <p style={{ margin: '2px 0', fontSize: 12 }}>{t('resumeStopped', { text: p.stoppedAt })}</p>
+      <p style={{ margin: '2px 0', fontSize: 12 }}>
+        {t('resumeNext', { kind: p.nextStepKind === 'confirmed' ? t('nextConfirmed') : t('nextSuggested'), text: p.nextStep })}
+      </p>
+      {p.outcome ? <p style={{ margin: '2px 0', fontSize: 12 }}>{t('resumeOutcome', { text: p.outcome })}</p> : null}
+      {p.decisions ? <p style={{ margin: '2px 0', fontSize: 12 }}>{t('resumeDecisions', { text: p.decisions })}</p> : null}
+      {p.openIssues ? <p style={{ margin: '2px 0', fontSize: 12 }}>{t('resumeOpenIssues', { text: p.openIssues })}</p> : null}
+      {p.verifications?.map((v, i) => (
+        <p key={i} style={{ margin: '2px 0', fontSize: 12 }}>
+          {t('resumeVerification', { status: v.status, label: v.label ?? v.subjectId })}
+        </p>
+      ))}
+    </section>
   );
 }

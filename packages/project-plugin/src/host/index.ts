@@ -305,7 +305,29 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       stream,
       describeLocation: describe,
     })
-    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work }
+    /** 接续卡片用：按公开资料相对路径读正文并核 contentHash（R1 baseline 同规则）。 */
+    const recordReader = {
+      async readRecord(recordPath: string, expectedHash: string) {
+        if (typeof recordPath !== 'string' || recordPath === '' || !recordPath.startsWith('records/')) {
+          return { ok: false as const, code: 'record-path-invalid', message: '记录路径不合法' }
+        }
+        let bytes: Uint8Array
+        try {
+          const read = await files.readScopedFile(instance.sourceRoot, recordPath)
+          if (!read.ok) {
+            return { ok: false as const, code: 'body-missing', message: read.issues[0]?.message ?? '正文不可读' }
+          }
+          bytes = read.bytes
+        } catch (error) {
+          return { ok: false as const, code: 'body-unreadable', message: (error as Error).message }
+        }
+        if (`sha256:${sha256(bytes)}` !== expectedHash) {
+          return { ok: false as const, code: 'body-hash-mismatch', message: '正文哈希与索引不一致' }
+        }
+        return { ok: true as const, body: new TextDecoder().decode(bytes) }
+      },
+    }
+    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, recordReader }
     return { ok: true, value }
   }
 

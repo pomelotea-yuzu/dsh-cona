@@ -38,5 +38,18 @@
   "errorCode": "Error code: {code}",
   "overviewTitle": "Project overview",
   "noInstances": "No registered projects",
-  "enterTree": "Open tree"
+  "enterTree": "Open tree",
+  "resumeTitle": "Work resume",
+  "noResume": "No resume record yet",
+  "resumeStopped": "Stopped at: {text}",
+  "resumeNext": "Next ({kind}): {text}",
+  "nextSuggested": "suggested",
+  "nextConfirmed": "confirmed",
+  "resumeOutcome": "Outcome: {text}",
+  "resumeDecisions": "Decisions: {text}",
+  "resumeOpenIssues": "Open: {text}",
+  "resumeVerification": "History: {status} · {label}",
+  "resumeUnread": "Resume record unavailable",
+  "resumeDiagnostic": "Resume diagnostic: {code} · {message}",
+  "resumeLoading": "Loading resume…"
 }

@@ -54,5 +54,9 @@ export type {
   ConaOverviewSnapshotRequest,
   ConaOverviewExecuteRequest,
   ConaOverviewFollowRequest,
+  ResumeCardResult,
+  ConaResumeCandidateRequest,
 } from './host/overview-service.js'
 export type { OwnerDenial } from './host/owner-admission.js'
+// R2 任务 3.1/3.2：接续正文载荷（Remote resumeCard 边界类型）。
+export type { ResumePayload, ResumeVerification, NextStepKind } from './domain/resume.js'

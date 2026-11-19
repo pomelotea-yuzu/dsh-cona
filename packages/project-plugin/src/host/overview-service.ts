@@ -10,6 +10,7 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { CommandEnvelope, CommandResult } from '../application/command-service.js'
 import type { SnapshotResult } from '../application/snapshot.js'
 import { denyNonOwner, OWNER_CONTEXT, type OwnerDenial } from './owner-admission.js'
+import { parseResumeBody, selectResumeCandidate, type ResumePayload } from '../domain/resume.js'
 import { FollowSessions, type FollowEventBatch, type FollowHandleView } from './follow-sessions.js'
 import type { FollowResult } from '../application/snapshot.js'
 import {
@@ -46,6 +47,17 @@ export interface ConaOverviewExecuteRequest extends ConaExecuteRequest {
 export interface ConaOverviewFollowRequest {
   instanceId: string;
   afterStateRevision?: number;
+}
+
+/** 接续卡片读取结果：卡片载荷、空态，或稳定诊断（不可读时不回退）。 */
+export type ResumeCardResult =
+  | { status: 'card'; recordId: string; path: string; payload: ResumePayload }
+  | { status: 'empty' }
+  | { status: 'rejected'; code: string; message: string }
+  | OwnerDenial;
+
+export interface ConaResumeCandidateRequest {
+  instanceId: string;
 }
 
 /** owner 概览实例列表结果。 */
@@ -148,6 +160,41 @@ export class ConaOverviewService extends TypertRemoteService {
       created: instance.created,
       error: null,
     }
+  }
+
+  /**
+   * 接续卡片：从当前已接纳索引选唯一候选并读正文投影（design §3）。
+   * 无候选→empty；候选不可读→稳定诊断且不回退；一次最多解码一条。
+   */
+  @Remote('resumeCandidate')
+  async resumeCandidate(request: ConaResumeCandidateRequest): Promise<ResumeCardResult> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return badId
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    if (runtime.value.recordReader === undefined) {
+      return { status: 'rejected', code: 'record-reader-unavailable', message: '此宿主未提供正文读取器' }
+    }
+    // 读完整快照（含已接纳的完整记录索引），不在 client 重复选取逻辑。
+    const snap = await runtime.value.snapshot.read(OWNER_CONTEXT, {
+      instanceId: request.instanceId,
+      connectionGeneration: 0,
+    })
+    if (snap.status === 'rejected') return { status: 'rejected', code: snap.code, message: snap.message }
+    if (snap.status === 'unsynced') {
+      return { status: 'rejected', code: 'resume-unsynced', message: `资料未同步：${snap.reason}` }
+    }
+    const candidate = selectResumeCandidate(snap.snapshot.records)
+    if (candidate === null) return { status: 'empty' }
+    const read = await runtime.value.recordReader.readRecord(candidate.path, candidate.contentHash)
+    if (!read.ok) return { status: 'rejected', code: read.code, message: read.message }
+    const parsed = parseResumeBody(read.body)
+    if (!parsed.ok) return { status: 'rejected', code: parsed.code, message: parsed.message }
+    return { status: 'card', recordId: candidate.id, path: candidate.path, payload: parsed.payload }
   }
 
   /** 按实例读完整快照；沿用 R1 的连接代际/源代际检查。 */

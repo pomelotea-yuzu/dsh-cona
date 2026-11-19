@@ -129,13 +129,27 @@ export interface ConaWorkObserveRequest {
   endKind?: 'completed' | 'aborted';
 }
 
-/** 已打开的运行时：实例 + 四个应用服务。 */
+/** 已打开实例 + 按路径读并核哈希的记录正文读取器。 */
+export interface RecordBodyReader {
+  /**
+   * 按公开资料内的相对路径读记录正文并核对其 contentHash。
+   * 返回 UTF-8 文本；不存在/越界/哈希不符时给稳定拒绝码，不返回半截内容。
+   */
+  readRecord(path: string, expectedHash: string): Promise<
+    | { ok: true; body: string }
+    | { ok: false; code: string; message: string }
+  >;
+}
+
+/** 已打开的运行时：实例 + 四个应用服务 + 正文读取器。 */
 export interface ConaProjectRuntime {
   instance: OpenedInstance;
   snapshot: ProjectSnapshotService;
   command: ProjectCommandService;
   chats: ConversationService;
   work: WorkService;
+  /** 接续卡片用；未装配读取器时 resumeCard 给明确拒绝码。 */
+  recordReader?: RecordBodyReader;
 }
 
 export type RuntimeResult =
