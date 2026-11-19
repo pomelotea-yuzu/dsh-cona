@@ -1,6 +1,6 @@
 # DSH 插件开发与 Typert 生成踩坑契约（0.2.2-rc.2 实测）
 
-> 2026-11-13 在 R1 插件贯通实验中实测得出（tasks 2.1–2.3），全部为本机验证事实，不是推断。适用范围：DSH `0.2.2-rc.2`、从独立插件仓（非 DSH monorepo 内）开发插件、使用 `@deepseek-ai/dsh-typert-generator` 生成 typert 产物。上游改版后需重测。证据原文见 [R1 环境记录](../../openspec/changes/establish-r1-project-plugin/implementation/2026-11-13-environment-record.md)。
+> 2026-11-13 在 R1 插件贯通实验中实测得出（tasks 2.1–2.3），全部为本机验证事实，不是推断。适用范围：DSH `0.2.2-rc.2`、从独立插件仓（非 DSH monorepo 内）开发插件、使用 `@deepseek-ai/dsh-typert-generator` 生成 typert 产物。上游改版后需重测。证据原文见 [R1 环境记录](../../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/implementation/2026-11-13-environment-record.md)。
 
 ## 版本事实（2026-11-13 实测）
 
@@ -44,5 +44,5 @@
 
 ## 关联
 
-- R1 实施细节与接手状态：[R1 接手记录](../../openspec/changes/establish-r1-project-plugin/implementation/2026-11-13-handoff.md)
+- R1 实施细节与接手状态：[R1 接手记录](../../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/implementation/2026-11-13-handoff.md)
 - 版本基线：N11（固定 `0.2.2-rc.2`，见[决定索引](decisions.md)）

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const changeFormats = path.resolve(packageRoot, '..', '..', 'openspec', 'changes', 'establish-r1-project-plugin', 'formats', 'v1');
+const changeFormats = path.resolve(packageRoot, '..', '..', 'openspec', 'changes', 'archive', '2026-11-19-establish-r1-project-plugin', 'formats', 'v1');
 const packageFormats = path.join(packageRoot, 'formats', 'v1');
 
 const files = ['plan-canonicalization.md', 'plan-vectors.json'];

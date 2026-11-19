@@ -4,7 +4,7 @@
 
 ## Why
 
-R1 已跑通独立安装、规划保存、聊天关联与授权内 Agent 调整。当前入口仍在侧栏，Host 启动默认打开一个已配置实例。用户隔天回到项目时，需要在 DSH 当前页面就能找到上次停点、成果、验证结果、下一步及原聊天。顶部入口和接续卡片均为用户已明确的首版需求。[项目入口与接续范围](../../../docs/product/2026-11-11-project-management-design.md#项目入口与面板) · [R1 收尾核对](../establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md)
+R1 已跑通独立安装、规划保存、聊天关联与授权内 Agent 调整。当前入口仍在侧栏，Host 启动默认打开一个已配置实例。用户隔天回到项目时，需要在 DSH 当前页面就能找到上次停点、成果、验证结果、下一步及原聊天。顶部入口和接续卡片均为用户已明确的首版需求。[项目入口与接续范围](../../../docs/product/2026-11-11-project-management-design.md#项目入口与面板) · [R1 收尾核对](../archive/2026-11-19-establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md)
 
 ## What Changes
 

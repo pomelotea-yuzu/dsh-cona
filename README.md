@@ -6,7 +6,8 @@
 
 ## 状态
 
-- 2026-11-12：固定 DSH `0.2.2-rc.2`，已有设计与静态调研；[R1 change](openspec/changes/establish-r1-project-plugin/proposal.md) 已完成第 1 轮外部审阅并按意见修订，按[工作流](docs/development/workflow.md)复查后提交提案；处理记录见 [review-response](openspec/changes/establish-r1-project-plugin/review-response.md)，待实施。**未编写插件代码、未安装依赖，接入能力尚未运行验证**。
+- 2026-11-19：R1 插件贯通实验已完成并[归档](openspec/changes/archive/2026-11-19-establish-r1-project-plugin/proposal.md)；六份能力 specs 并入主 [openspec/specs/](openspec/specs/)，核心闭环（独立打包安装→面板→保存→聊天→真实 Agent 调整→UI 已提交→重连→重启→卸载重装）经真实宿主实测可重复演示，V37／V32／V04 pass。1 项 blocked、28 项 untested 如实随归档保留，见 [R1 收尾核对](openspec/changes/archive/2026-11-19-establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md)。R1 是接入实验，不代表首版产品完成。
+- 2026-11-12：固定 DSH `0.2.2-rc.2`，完成设计与静态调研，R1 change 提案按[工作流](docs/development/workflow.md)双审、修订并提交；处理记录见 [review-response](openspec/changes/archive/2026-11-19-establish-r1-project-plugin/review-response.md)。
 - 当前需求与设计建议：[项目管理插件设计草案](docs/product/2026-11-11-project-management-design.md)。方向已确认，具体使用流程与实现方案待讨论。
 - 第一版架构：[项目开发管理架构草案](docs/architecture/2026-11-11-project-development-architecture.md)，覆盖调研、持续分析、项目树和聊天接续；默认方式通过实践优化。
 - 当前方向与仍有效边界：[docs/knowledge/decisions.md](docs/knowledge/decisions.md)。

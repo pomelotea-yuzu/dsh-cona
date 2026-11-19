@@ -4,5 +4,5 @@
 
 | Change | 里程碑 | 状态 |
 |---|---|---|
-| [establish-r1-project-plugin](establish-r1-project-plugin/proposal.md) | R1：插件贯通实验 | 7.3 收尾完成，核心闭环 V37 已通过，完整状态见 [R1 收尾核对](establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md)。待归档 |
+| [establish-r1-project-plugin](archive/2026-11-19-establish-r1-project-plugin/proposal.md) | R1：插件贯通实验 | 7.3 收尾完成，核心闭环 V37／V32／V04 pass，六份能力 specs 已并入主 [specs](../specs/)；1 项 blocked、28 项 untested 随归档保留，见 [R1 收尾核对](archive/2026-11-19-establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md)。2026-11-19 已归档 |
 | [add-project-overview-and-resume](add-project-overview-and-resume/proposal.md) | R2 首切片｜顶部项目概览与工作接续 | [双审确认放行](add-project-overview-and-resume/review-response.md#复审结论与实施记录)，待实施，运行验证 `untested` |

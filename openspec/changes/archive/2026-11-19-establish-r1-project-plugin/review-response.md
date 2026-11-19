@@ -14,11 +14,11 @@
 | B2 | proposal 范围段、矩阵映射与完成判据、路线图 R1 对应行明确树／规划摘要是 R1 的第二投影，R2 再验实际路线图 UI | 不把摘要一致当作路线图已实现或已验收；N12 整体方向保留 |
 | B3 | 公开资料 spec 新增全新本机环境首次接入场景，tasks 3.1 和矩阵 V38 独立覆盖：仅外部 v1 文件、原 id 保留、新本机实例、不依赖原数据库、不导入授权／回执 | 本机新根基础接入不代替 R2 Git 协作或 R6 真实跨环境；运行 untested |
 | B4 | 下节补录原编写工具为独立安装的 OpenSpec 1.17.0、本轮准确版本／命令／输出摘要；config 标注 R1 所用版本，工作流增加版本化交接要求。外部 review 的 2.0.0 补跑单列归属 | 原编写结果来自本聊天的实际工具输出，不是用 review 的 latest 结果补冒；本轮重新运行 1.17.0。2.0.0 未由作者重跑，不升级工具或混同结论 |
-| C1 | design §1 去掉“系统 Node 26”固定前提；tasks 2.1／2.3 要求二进制与补丁版本；[宿主复审](../../../docs/research/2026-11-11-dsh-host-capability-review.md)与[开工复核](../../../docs/reviews/2026-11-12-dsh-rc2-development-readiness.md)分别保留环境观察并补说明 | 本轮 shell 实测 v26.13.0，随包独立二进制 v24.21.0；review 的 v22.22.2 保留为其环境观察，缺当时 PATH 不推断升级／降级；未启动 Host，不代表 Host 实际使用版本 |
+| C1 | design §1 去掉“系统 Node 26”固定前提；tasks 2.1／2.3 要求二进制与补丁版本；[宿主复审](../../../../docs/research/2026-11-11-dsh-host-capability-review.md)与[开工复核](../../../../docs/reviews/2026-11-12-dsh-rc2-development-readiness.md)分别保留环境观察并补说明 | 本轮 shell 实测 v26.13.0，随包独立二进制 v24.21.0；review 的 v22.22.2 保留为其环境观察，缺当时 PATH 不推断升级／降级；未启动 Host，不代表 Host 实际使用版本 |
 | C2 | design §7 补工具 agent 可选性、缺失即拒绝绑定条件，并补 Agent.id 的 types.ts:18 与工具 contracts.ts:188 等固定源码链接；tasks 2.4／V25 同步 | 缺 agent／归属不唯一显式为 blocked 条件，不通过模型补值。实际工具映射 untested |
 | C3 | design §1 和 tasks 2.2 列全 manifest 字段，tasks 2.1 分别验证包管理器 engines 和宿主 includePrerelease 兼容处理 | 不假定字符串比较或安装／启动判据相同；依赖安装和真实启动仍 untested |
 | C4 | proposal、tasks、矩阵、config、change 索引、AGENTS、文档地图／决定索引／路线图／架构／产品及中英 README 同步为第 1 轮外审后修订、待实施；workflow.md 与 review／response 随提案一同纳入本次提交 | 不写外部二次放行，不把提案提交当产品完成；原 review 内的历史“未提交”描述保持原样 |
-| C5 | [接入调研新增静态补核](../../../docs/research/2026-11-11-dsh-project-management-review.md#2026-11-12-r1-审阅修订身份与请求边界静态补核)，登记 principalOf、可选 agent、Agent.id、rpcId、claimed／pre-step、home 解析和兼容检查源码事实 | 每项都注明只读 rc.2 源码、运行 untested；design 不把符号存在当真实接入通过 |
+| C5 | [接入调研新增静态补核](../../../../docs/research/2026-11-11-dsh-project-management-review.md#2026-11-12-r1-审阅修订身份与请求边界静态补核)，登记 principalOf、可选 agent、Agent.id、rpcId、claimed／pre-step、home 解析和兼容检查源码事实 | 每项都注明只读 rc.2 源码、运行 untested；design 不把符号存在当真实接入通过 |
 
 原 review 引用工作流“第 9／11／14 条”是其当时行级定位表述；当前工作流正文是六步编号及后续规则，处理依据为“保留 review、逐项修订、复查后再提交”的实际条款，不改动审阅原文来修正其定位。
 

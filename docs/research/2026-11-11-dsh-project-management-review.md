@@ -156,4 +156,4 @@ DSH profile 模板用于启动组合和插件配置；Agent preset 用于选择 
 | dshHomePath 使用已解析的 DSH home 拼接片段 | [home-paths/index.ts:160](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/util/home-paths/src/index.ts#L160) | 只证明路径工具存在，不预定插件默认位置或证明文件后端可用 |
 | 宿主 DSH 兼容检查使用 semver.satisfies 并 includePrerelease | [plugin-compatibility.ts:52](https://github.com/deepseek-ai/deepseek-harness/blob/ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c/packages/boot/app-boot/src/plugin-compatibility.ts#L52) | 精确 rc.2 范围仍要分别实测包管理器冻结安装与宿主启动，不假定同一判据 |
 
-R1 的两类可信主体、拒绝条件和必须实测项见 [change design](../../openspec/changes/establish-r1-project-plugin/design.md)及 V25。源码抽查不能把 V25 或真实 Agent 闭环改标 pass。
+R1 的两类可信主体、拒绝条件和必须实测项见 [change design](../../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/design.md)及 V25。源码抽查不能把 V25 或真实 Agent 闭环改标 pass。

@@ -1,6 +1,6 @@
 # 项目管理插件开发路线图草案
 
-日期：2026-11-12。状态：依据现有需求、架构和开工复核整理的实施建议，尚未定稿；[R1 change](../../openspec/changes/establish-r1-project-plugin/proposal.md) 已实施至第 7 段收口——R1 核心闭环（独立打包安装→面板→保存→聊天→真实 Agent 授权内调整→UI 已提交→重连→重启→卸载重装）经 7.1／7.2 真实宿主实测并可重复演示，V37／V32／V04 pass，六份 specs 的 74 个 Scenario 全部映射验证矩阵、无 fail；矩阵 39 条中 10 pass／1 blocked（V25b(ii) R1 边界例外）／28 untested（多为 H 层未逐条复现、A/F 层有证据），R1 是接入实验、不代表首版产品完成，完整验收状态见该 change 的 validation-matrix 与 [7.3 收尾核对](../../openspec/changes/establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md)。R2–R6 里程碑尚未开始。本文管理 dsh-cona 自身的开发，插件内的路线图功能另见[产品讨论](../product/2026-11-12-project-roadmap-design.md)。
+日期：2026-11-12。状态：依据现有需求、架构和开工复核整理的实施建议，尚未定稿；[R1 change](../../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/proposal.md) 已实施至第 7 段收口——R1 核心闭环（独立打包安装→面板→保存→聊天→真实 Agent 授权内调整→UI 已提交→重连→重启→卸载重装）经 7.1／7.2 真实宿主实测并可重复演示，V37／V32／V04 pass，六份 specs 的 74 个 Scenario 全部映射验证矩阵、无 fail；矩阵 39 条中 10 pass／1 blocked（V25b(ii) R1 边界例外）／28 untested（多为 H 层未逐条复现、A/F 层有证据），R1 是接入实验、不代表首版产品完成，完整验收状态见该 change 的 validation-matrix 与 [7.3 收尾核对](../../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md)。R2–R6 里程碑尚未开始。本文管理 dsh-cona 自身的开发，插件内的路线图功能另见[产品讨论](../product/2026-11-12-project-roadmap-design.md)。
 
 2026-11-14 范围补充：用户明确将“接着上次做”卡片纳入首版，建议随 R2 的项目概览／工作接续实现，在 R6 首版试用中验收。卡片尚未实现或验证，不修改当前 R1 change 验收；其他新增创意不随此补充自动进入首版。R1 实施进展以活动 change 的 tasks 与运行记录为准，本文早期状态摘要不作为最新执行结论。
 
@@ -41,9 +41,9 @@ R1 内先做公开格式与校验、独立包接入和文件提交，再做 Agen
 
 完成标准：能重复演示“独立打包安装 → 面板显示小树 → 保存 → 打开关联聊天 → Agent 根据新信息在授权内新增或拆分节点并记录原因 → UI 显示已提交状态 → 重启恢复”，同时核查卸载清理和 Client 重连。保存失败、重复操作、过期修订、错误会话关联及浏览节点切换均有真实检查结果。
 
-上述边界已形成 [R1 change 设计](../../openspec/changes/establish-r1-project-plugin/design.md) 与[验证矩阵](../../openspec/changes/establish-r1-project-plugin/validation-matrix.md)，已按第 1 轮外部 review 修订。设计暂选独立文件型本机状态后端，storageDomain 保留为未采用候选；这不改变公开／私有隔离目标，也不代表后端恢复已验证。接入实验失败时记录具体失败和待改方案，再复核受影响里程碑。
+上述边界已形成 [R1 change 设计](../../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/design.md) 与[验证矩阵](../../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/validation-matrix.md)，已按第 1 轮外部 review 修订。设计暂选独立文件型本机状态后端，storageDomain 保留为未采用候选；这不改变公开／私有隔离目标，也不代表后端恢复已验证。接入实验失败时记录具体失败和待改方案，再复核受影响里程碑。
 
-以下场景纳入 R1 验收。2026-11-17 状态：核心闭环（含卸载清理与 Client 重连）已按 7.1／7.2 真实宿主实测并可重复演示（V37 pass）；下表场景对应的矩阵条目中，A（自动）／F（文件后端）层证据大多已落地，H（真实宿主）层部分由整体闭环覆盖、部分仍保持 `untested` 待逐条复测，1 项 `blocked`（non-owner 边界）。逐条对应与证据见 [7.3 收尾核对](../../openspec/changes/establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md) 与 [验证矩阵](../../openspec/changes/establish-r1-project-plugin/validation-matrix.md)：
+以下场景纳入 R1 验收。2026-11-17 状态：核心闭环（含卸载清理与 Client 重连）已按 7.1／7.2 真实宿主实测并可重复演示（V37 pass）；下表场景对应的矩阵条目中，A（自动）／F（文件后端）层证据大多已落地，H（真实宿主）层部分由整体闭环覆盖、部分仍保持 `untested` 待逐条复测，1 项 `blocked`（non-owner 边界）。逐条对应与证据见 [7.3 收尾核对](../../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md) 与 [验证矩阵](../../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/validation-matrix.md)：
 
 | 场景 | 必须观察的结果 |
 |---|---|
@@ -139,7 +139,7 @@ R1 内先做公开格式与校验、独立包接入和文件提交，再做 Agen
 
 ## 开工与维护方式
 
-R1 首个 change 已完成第 1 轮外部审阅，编写 Agent 已按 `review.md` 修订；逐项处理和版本化校验见 [review-response](../../openspec/changes/establish-r1-project-plugin/review-response.md)，按 [Change 工作流](../development/workflow.md)复查后提交。提案修订不等于实施或外部二次放行。本路线图不替代 change 的 proposal、design、spec 和 tasks，也不要求小修复全部建立完整流程。
+R1 首个 change 已完成第 1 轮外部审阅，编写 Agent 已按 `review.md` 修订；逐项处理和版本化校验见 [review-response](../../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/review-response.md)，按 [Change 工作流](../development/workflow.md)复查后提交。提案修订不等于实施或外部二次放行。本路线图不替代 change 的 proposal、design、spec 和 tasks，也不要求小修复全部建立完整流程。
 
 每个实施 change 标明服务哪个里程碑；一个里程碑可由多个 change 完成。完成后把代码版本、实际验证、未解决项和下一项工作回写到本路线图；详细运行证据保留在本机，手写结论进入对应文档。状态始终区分计划、实现和验证，不凭任务勾选推断里程碑完成。
 
