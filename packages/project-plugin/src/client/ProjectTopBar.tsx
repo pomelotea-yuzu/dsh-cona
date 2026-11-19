@@ -125,6 +125,7 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
             ))}
           </ul>
           <ResumeCardView state={state.resumeCard} t={t} />
+          <ResumeSaveSection controller={controller} state={state} t={t} />
         </div>
       ) : null}
     </div>
@@ -132,6 +133,128 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
 }
 
 type TopTranslate = ProjectTopBarProps['t'];
+
+const fieldStyle = { width: '100%', boxSizing: 'border-box' as const, fontSize: 12, padding: '4px 6px' };
+const rowStyle = { margin: '6px 0', fontSize: 12 };
+
+/** 接续保存区：入口按钮 + 表单 + 共享内容预览 + 保存回执状态。 */
+function ResumeSaveSection(props: { controller: ProjectOverviewController; state: OverviewState; t: TopTranslate }): JSX.Element | null {
+  const { controller, state, t } = props;
+  const [, force] = useState(0);
+  if (state.selectedId === null) return null;
+  const draft = state.resumeDraft;
+  if (draft === null) {
+    return (
+      <p style={{ margin: '10px 0 0', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button
+          type="button"
+          data-cona-resume-edit="1"
+          onClick={() => { controller.editResume(); force((n) => n + 1); }}
+        >
+          {t('resumeEdit')}
+        </button>
+        {state.resumeSave.status === 'saved' ? (
+          <span data-cona-resume-saved="1" style={{ fontSize: 12, color: '#1b5e20' }}>{t('resumeSaved')}</span>
+        ) : null}
+        {state.resumeSave.status === 'pending' ? (
+          <span style={{ fontSize: 12, color: '#b3261e' }}>{t('resumeSavePending')}</span>
+        ) : null}
+      </p>
+    );
+  }
+  const save = state.resumeSave;
+  const preview = controller.resumePreview();
+  const statusLine = save.status === 'saving'
+    ? t('resumeSaving')
+    : save.status === 'saved'
+      ? t('resumeSaved')
+      : save.status === 'conflict'
+        ? t('resumeSaveConflict')
+        : save.status === 'pending'
+          ? t('resumeSavePending')
+          : save.status === 'failed'
+            ? `${t('resumeSaveFailed')}${save.code === 'missing-required' ? `：${t('resumeMissingRequired')}` : save.code !== null ? `：${save.code}` : ''}`
+            : null;
+  return (
+    <section data-cona-resume-form="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
+      <div style={rowStyle}>
+        <label>{t('resumeEditStop')}</label>
+        <input
+          data-cona-resume-stopped="1"
+          value={draft.stoppedAt}
+          style={fieldStyle}
+          onChange={(e) => { controller.patchResumeDraft({ stoppedAt: e.target.value }); force((n) => n + 1); }}
+        />
+      </div>
+      <div style={rowStyle}>
+        <label>{t('resumeEditNext')}</label>
+        <input
+          data-cona-resume-next="1"
+          value={draft.nextStep}
+          style={fieldStyle}
+          onChange={(e) => { controller.patchResumeDraft({ nextStep: e.target.value }); force((n) => n + 1); }}
+        />
+        <span style={{ marginLeft: 8 }}>
+          <label style={{ marginRight: 8 }}>
+            <input
+              type="radio"
+              name="cona-resume-kind"
+              checked={draft.nextStepKind === 'suggested'}
+              onChange={() => { controller.patchResumeDraft({ nextStepKind: 'suggested' }); force((n) => n + 1); }}
+            />
+            {t('nextSuggested')}
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="cona-resume-kind"
+              checked={draft.nextStepKind === 'confirmed'}
+              onChange={() => { controller.patchResumeDraft({ nextStepKind: 'confirmed' }); force((n) => n + 1); }}
+            />
+            {t('nextConfirmed')}
+          </label>
+        </span>
+      </div>
+      <div style={rowStyle}>
+        <label>{t('resumeEditOutcome')}</label>
+        <textarea value={draft.outcome} style={fieldStyle} rows={2}
+          onChange={(e) => { controller.patchResumeDraft({ outcome: e.target.value }); force((n) => n + 1); }} />
+      </div>
+      <div style={rowStyle}>
+        <label>{t('resumeEditDecisions')}</label>
+        <textarea value={draft.decisions} style={fieldStyle} rows={2}
+          onChange={(e) => { controller.patchResumeDraft({ decisions: e.target.value }); force((n) => n + 1); }} />
+      </div>
+      <div style={rowStyle}>
+        <label>{t('resumeEditOpenIssues')}</label>
+        <textarea value={draft.openIssues} style={fieldStyle} rows={2}
+          onChange={(e) => { controller.patchResumeDraft({ openIssues: e.target.value }); force((n) => n + 1); }} />
+      </div>
+      <div style={{ ...rowStyle, whiteSpace: 'pre-wrap', background: 'var(--dsh-surface, #f7f7f7)', padding: 6 }}>
+        <strong>{t('resumePreviewTitle')}</strong>
+        {preview.ok ? (
+          <pre style={{ margin: '4px 0 0', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{preview.summary}</pre>
+        ) : (
+          <span style={{ color: '#b3261e' }}> {preview.code}</span>
+        )}
+      </div>
+      {statusLine !== null ? <p style={{ ...rowStyle, color: save.status === 'saved' ? '#1b5e20' : '#b3261e' }}>{statusLine}</p> : null}
+      <p style={{ margin: '8px 0 0', display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          data-cona-resume-save="1"
+          disabled={save.status === 'saving'}
+          onClick={() => { void controller.saveResume().then(() => force((n) => n + 1)); }}
+        >
+          {t('resumeSave')}
+        </button>
+        <button type="button" data-cona-resume-cancel="1" onClick={() => { controller.discardResumeDraft(); force((n) => n + 1); }}>
+          {t('resumeCancel')}
+        </button>
+      </p>
+    </section>
+  );
+}
 
 /** 接续卡片：从已核对的公开正文投影，区分历史验证状态并保留空态/诊断。 */
 function ResumeCardView(props: { state: ResumeCardState | null; t: TopTranslate }): JSX.Element | null {

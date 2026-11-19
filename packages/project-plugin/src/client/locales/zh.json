@@ -51,5 +51,20 @@
   "resumeVerification": "历史：{status} · {label}",
   "resumeUnread": "接续记录暂不可读",
   "resumeDiagnostic": "接续诊断：{code} · {message}",
-  "resumeLoading": "正在读取接续…"
+  "resumeLoading": "正在读取接续…",
+  "resumeEdit": "写接续",
+  "resumeEditStop": "停点（必填）",
+  "resumeEditNext": "下一步（必填）",
+  "resumeEditOutcome": "成果（可选）",
+  "resumeEditDecisions": "已有决定（可选）",
+  "resumeEditOpenIssues": "未解决问题（可选）",
+  "resumePreviewTitle": "保存预览（共享内容，不含本机数据）",
+  "resumeSave": "保存接续",
+  "resumeCancel": "取消",
+  "resumeSaved": "已保存",
+  "resumeSaveFailed": "保存失败",
+  "resumeSaveConflict": "资料已变化，请重试",
+  "resumeSavePending": "结果待核对",
+  "resumeMissingRequired": "停点与下一步为必填",
+  "resumeSaving": "正在保存…"
 }

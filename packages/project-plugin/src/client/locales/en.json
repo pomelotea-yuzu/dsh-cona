@@ -51,5 +51,20 @@
   "resumeVerification": "History: {status} · {label}",
   "resumeUnread": "Resume record unavailable",
   "resumeDiagnostic": "Resume diagnostic: {code} · {message}",
-  "resumeLoading": "Loading resume…"
+  "resumeLoading": "Loading resume…",
+  "resumeEdit": "Write resume",
+  "resumeEditStop": "Stopped at (required)",
+  "resumeEditNext": "Next step (required)",
+  "resumeEditOutcome": "Outcome (optional)",
+  "resumeEditDecisions": "Decisions (optional)",
+  "resumeEditOpenIssues": "Open issues (optional)",
+  "resumePreviewTitle": "Save preview (shared content only, no local data)",
+  "resumeSave": "Save resume",
+  "resumeCancel": "Cancel",
+  "resumeSaved": "Saved",
+  "resumeSaveFailed": "Save failed",
+  "resumeSaveConflict": "Source changed, please retry",
+  "resumeSavePending": "Pending reconciliation",
+  "resumeMissingRequired": "Stopped-at and next step are required",
+  "resumeSaving": "Saving…"
 }

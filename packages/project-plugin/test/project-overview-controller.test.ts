@@ -8,7 +8,7 @@ import {
   DelegatingPanelController,
   type OverviewListResult,
 } from '../src/client/project-overview-controller.js';
-import type { PanelTransport } from '../src/client/api.js';
+import type { PanelTransport, SnapshotResult } from '../src/client/api.js';
 
 const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -162,4 +162,118 @@ test('切换实例丢弃迟到的卡片响应', async () => {
   resolvers.a?.({ status: 'diagnostic', code: 'stale', message: 'late' });
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(c.getState().resumeCard?.status, 'empty', '迟到响应被丢弃');
+});
+
+// —— 3.2b 接续保存流程 ——
+
+import { RESUME_SUMMARY_PREFIX } from '../src/domain/resume.js';
+
+const SNAP = ({
+  status: 'snapshot' as const,
+  snapshot: {
+    projectId: 'p', instanceId: A, sourceEpoch: 1, schemaVersion: 1,
+    planVersion: 'v1', planRevision: 0, stateRevision: 0, connectionGeneration: 0,
+    sync: { status: 'ready' } as never,
+    source: { kind: 'custom' as const, displayPath: '/a' },
+    project: { title: 't' } as never,
+    tree: [{ id: 'n1', parentId: null, order: 0, title: '根', goal: '', criteria: [] } as never],
+    dependencies: [],
+    records: [],
+    summary: {} as never,
+  },
+}) as unknown as SnapshotResult;
+
+test('saveResume 必填缺失：failed missing-required，不触 transport', async () => {
+  let executed = 0;
+  const c = new ProjectOverviewController({
+    listInstances: async () => listed(),
+    readResumeCard: async () => ({ status: 'empty' }),
+    transportFor: () => ({ ...transport(), execute: async () => { executed += 1; return { status: 'rejected', code: 'stub', message: '' }; } }),
+    newOperationId: () => 'op-x',
+  });
+  await c.load();
+  c.editResume();
+  assert.equal(await c.saveResume(), 'failed');
+  assert.equal(c.getState().resumeSave.code, 'missing-required');
+  assert.equal(executed, 0);
+});
+
+test('saveResume 提交成功：清草稿、刷新卡片、summary 带前缀', async () => {
+  const requests: Array<{ command: { summary: string; kind: string; subjectNodeIds: string[] }; operationId: string }> = [];
+  let cardReads = 0;
+  const c = new ProjectOverviewController({
+    listInstances: async () => listed(),
+    readResumeCard: async () => { cardReads += 1; return { status: 'empty' }; },
+    transportFor: () => ({
+      ...transport(),
+      snapshot: async () => SNAP,
+      execute: async (req) => {
+        requests.push({ command: req.command as never, operationId: req.operationId });
+        return { status: 'committed', planVersion: 'v1', planRevision: 0, stateRevision: 1, sourceEpoch: 1, impact: 'state' } as never;
+      },
+    }),
+    newOperationId: () => 'op-new',
+  });
+  await c.load();
+  c.editResume();
+  c.patchResumeDraft({ stoppedAt: '完成卡片', nextStep: '做代码观察', nextStepKind: 'confirmed', outcome: 'UI 可用' });
+  assert.equal(await c.saveResume(), 'saved');
+  assert.equal(c.getState().resumeDraft, null);
+  assert.equal(c.getState().resumeSave.status, 'saved');
+  assert.equal(requests.length, 1);
+  const first = requests[0];
+  assert.ok(first !== undefined);
+  assert.ok(first.command.summary.startsWith(RESUME_SUMMARY_PREFIX));
+  assert.equal(first.command.kind, 'execution-note');
+  assert.deepEqual(first.command.subjectNodeIds, ['n1']);
+  // 保存后刷新卡片（初始 load 1 次 + 保存后 1 次）
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(cardReads, 2);
+});
+
+test('saveResume 冲突：conflict 状态，草稿与 operationId 保留供幂等重试', async () => {
+  const ops: string[] = [];
+  const c = new ProjectOverviewController({
+    listInstances: async () => listed(),
+    readResumeCard: async () => ({ status: 'empty' }),
+    transportFor: () => ({
+      ...transport(),
+      snapshot: async () => SNAP,
+      execute: async (req) => {
+        ops.push(req.operationId);
+        return { status: 'rejected', code: 'plan-conflict', message: '已变化' };
+      },
+    }),
+    newOperationId: () => 'op-gen',
+  });
+  await c.load();
+  c.editResume();
+  c.patchResumeDraft({ stoppedAt: 'a', nextStep: 'b' });
+  assert.equal(await c.saveResume(), 'conflict');
+  assert.equal(c.getState().resumeSave.status, 'conflict');
+  assert.notEqual(c.getState().resumeDraft, null);
+  assert.equal(c.getState().resumeDraft?.operationId, 'op-gen');
+  // 重试复用同一 operationId
+  await c.saveResume();
+  assert.deepEqual(ops, ['op-gen', 'op-gen']);
+});
+
+test('saveResume 传输异常：transport-unknown，草稿保留', async () => {
+  const c = new ProjectOverviewController({
+    listInstances: async () => listed(),
+    readResumeCard: async () => ({ status: 'empty' }),
+    transportFor: () => ({
+      ...transport(),
+      snapshot: async () => SNAP,
+      execute: async () => { throw new Error('网络断开'); },
+    }),
+    newOperationId: () => 'op-t',
+  });
+  await c.load();
+  c.editResume();
+  c.patchResumeDraft({ stoppedAt: 'a', nextStep: 'b' });
+  assert.equal(await c.saveResume(), 'failed');
+  assert.equal(c.getState().resumeSave.code, 'transport-unknown');
+  assert.notEqual(c.getState().resumeDraft, null);
+  assert.equal(c.getState().resumeDraft?.operationId, 'op-t');
 });

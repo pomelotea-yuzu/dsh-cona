@@ -4,7 +4,7 @@
 
 import { PanelController, type IPanelController, type IngestOutcome, type PanelDraft, type PanelState, type SaveStatus } from './panel-controller.js';
 import type { PanelTransport } from './api.js';
-import type { ResumePayload } from '../domain/resume.js';
+import { buildResume, type NextStepKind, type ResumePayload } from '../domain/resume.js';
 
 /** 接续卡片视图（由 Host resumeCandidate 投影）。 */
 export type ResumeCardView =
@@ -12,6 +12,35 @@ export type ResumeCardView =
   | { status: 'empty' }
   | { status: 'unread' }
   | { status: 'diagnostic'; code: string; message: string };
+
+/** 接续保存草稿：全部为共享内容字段；operationId 复用以幂等重试。 */
+export interface ResumeDraft {
+  stoppedAt: string;
+  nextStep: string;
+  nextStepKind: NextStepKind;
+  outcome: string;
+  decisions: string;
+  openIssues: string;
+  operationId: string | null;
+}
+
+export type ResumeSaveStatus = 'idle' | 'saving' | 'saved' | 'failed' | 'conflict' | 'pending';
+
+export interface ResumeSaveState {
+  status: ResumeSaveStatus;
+  code: string | null;
+  message: string | null;
+}
+
+const EMPTY_DRAFT: ResumeDraft = {
+  stoppedAt: '',
+  nextStep: '',
+  nextStepKind: 'suggested',
+  outcome: '',
+  decisions: '',
+  openIssues: '',
+  operationId: null,
+};
 
 export interface OverviewRow {
   instanceId: string;
@@ -49,6 +78,10 @@ export interface OverviewState {
   code: string | null;
   /** 当前选中实例的接续卡片；null 表示尚未读取。 */
   resumeCard: ResumeCardView | null;
+  /** 接续保存草稿；null 表示未在编辑。切换实例即丢弃。 */
+  resumeDraft: ResumeDraft | null;
+  /** 接续保存回执状态。 */
+  resumeSave: ResumeSaveState;
 }
 
 const EMPTY: OverviewState = {
@@ -59,6 +92,8 @@ const EMPTY: OverviewState = {
   message: null,
   code: null,
   resumeCard: null,
+  resumeDraft: null,
+  resumeSave: { status: 'idle', code: null, message: null },
 };
 
 export class ProjectOverviewController {
@@ -127,7 +162,7 @@ export class ProjectOverviewController {
     const row = this.state.instances.find((item) => item.instanceId === instanceId);
     if (row === undefined || !row.readable) return false;
     if (this.state.selectedId === instanceId) return true;
-    this.patch({ selectedId: instanceId, resumeCard: null });
+    this.patch({ selectedId: instanceId, resumeCard: null, resumeDraft: null, resumeSave: { status: 'idle', code: null, message: null } });
     void this.loadResumeCard(instanceId);
     return true;
   }
@@ -143,6 +178,122 @@ export class ProjectOverviewController {
       if (this.state.selectedId !== instanceId) return;
       this.patch({ resumeCard: { status: 'diagnostic', code: 'transport-failed', message: (error as Error).message } });
     }
+  }
+
+  /** 开始写接续：清空草稿（不预填旧卡片，新停点应新写）。 */
+  editResume(): void {
+    if (this.state.selectedId === null) return;
+    this.patch({ resumeDraft: { ...EMPTY_DRAFT }, resumeSave: { status: 'idle', code: null, message: null } });
+  }
+
+  /** 修改草稿字段。 */
+  patchResumeDraft(patch: Partial<Omit<ResumeDraft, 'operationId'>>): void {
+    if (this.state.resumeDraft === null) return;
+    this.patch({ resumeDraft: { ...this.state.resumeDraft, ...patch } });
+  }
+
+  /** 丢弃草稿与保存状态。 */
+  discardResumeDraft(): void {
+    this.patch({ resumeDraft: null, resumeSave: { status: 'idle', code: null, message: null } });
+  }
+
+  /** 生成保存预览（共享内容：带前缀 summary + 版本化正文）；必填缺失时给稳定码。 */
+  resumePreview(): { ok: true; summary: string; body: string } | { ok: false; code: string; message: string } {
+    const draft = this.state.resumeDraft;
+    if (draft === null) return { ok: false, code: 'no-draft', message: '未在编辑接续' };
+    const built = buildResume({
+      stoppedAt: draft.stoppedAt,
+      nextStep: draft.nextStep,
+      nextStepKind: draft.nextStepKind,
+      savedAt: new Date().toISOString(),
+      ...(draft.outcome.trim() === '' ? {} : { outcome: draft.outcome.trim() }),
+      ...(draft.decisions.trim() === '' ? {} : { decisions: draft.decisions.trim() }),
+      ...(draft.openIssues.trim() === '' ? {} : { openIssues: draft.openIssues.trim() }),
+    });
+    if (!built.ok) return built;
+    return { ok: true, summary: built.summary, body: built.body };
+  }
+
+  /**
+   * 保存接续：先取快照基线，再经 conaOverview/execute 提交 append-record。
+   * 失败/冲突/未知一律保留草稿与原 operationId（幂等重试不产生第二条记录）；
+   * 提交成功清草稿并刷新卡片。
+   */
+  async saveResume(): Promise<ResumeSaveStatus> {
+    const draft = this.state.resumeDraft;
+    const instanceId = this.state.selectedId;
+    if (draft === null || instanceId === null) return 'idle';
+    if (this.state.resumeSave.status === 'saving') return 'saving';
+    if (draft.stoppedAt.trim() === '' || draft.nextStep.trim() === '') {
+      this.patch({ resumeSave: { status: 'failed', code: 'missing-required', message: null } });
+      return 'failed';
+    }
+    this.patch({ resumeSave: { status: 'saving', code: null, message: null } });
+    const transport = this.deps.transportFor(instanceId);
+    let baseline;
+    try {
+      baseline = await transport.snapshot({ connectionGeneration: 0 });
+    } catch (error) {
+      this.patch({ resumeSave: { status: 'failed', code: 'transport-unknown', message: (error as Error).message } });
+      return 'failed';
+    }
+    if (baseline.status !== 'snapshot') {
+      const code = baseline.status === 'rejected' ? baseline.code : `unsynced-${baseline.reason}`;
+      const message = baseline.status === 'rejected' ? baseline.message : baseline.detail;
+      this.patch({ resumeSave: { status: 'failed', code, message } });
+      return 'failed';
+    }
+    const snap = baseline.snapshot;
+    const built = buildResume({
+      stoppedAt: draft.stoppedAt,
+      nextStep: draft.nextStep,
+      nextStepKind: draft.nextStepKind,
+      savedAt: new Date().toISOString(),
+      ...(draft.outcome.trim() === '' ? {} : { outcome: draft.outcome.trim() }),
+      ...(draft.decisions.trim() === '' ? {} : { decisions: draft.decisions.trim() }),
+      ...(draft.openIssues.trim() === '' ? {} : { openIssues: draft.openIssues.trim() }),
+    });
+    if (!built.ok) {
+      this.patch({ resumeSave: { status: 'failed', code: built.code, message: built.message } });
+      return 'failed';
+    }
+    const subjectId = snap.tree[0]?.id;
+    const operationId = draft.operationId ?? this.deps.newOperationId();
+    if (draft.operationId === null) this.patch({ resumeDraft: { ...draft, operationId } });
+    let result;
+    try {
+      result = await transport.execute({
+        operationId,
+        command: {
+          type: 'append-record',
+          kind: 'execution-note',
+          subjectNodeIds: subjectId === undefined ? [] : [subjectId],
+          summary: built.summary,
+          sources: [],
+          body: built.body,
+        },
+        expectedPlanVersion: snap.planVersion,
+        expectedPlanRevision: snap.planRevision,
+        sourceEpoch: snap.sourceEpoch,
+      });
+    } catch (error) {
+      this.patch({ resumeSave: { status: 'failed', code: 'transport-unknown', message: (error as Error).message } });
+      return 'failed';
+    }
+    if (result.status === 'committed') {
+      this.patch({ resumeDraft: null, resumeSave: { status: 'saved', code: null, message: null } });
+      void this.loadResumeCard(instanceId);
+      return 'saved';
+    }
+    if (result.status === 'pending-reconciliation') {
+      this.patch({ resumeSave: { status: 'pending', code: result.stage, message: result.message } });
+      return 'pending';
+    }
+    const conflict = result.code === 'plan-conflict' || result.code === 'source-changed';
+    this.patch({
+      resumeSave: { status: conflict ? 'conflict' : 'failed', code: result.code, message: result.message },
+    });
+    return conflict ? 'conflict' : 'failed';
   }
 
   /** 取（或建）某实例的面板控制器；同实例复用，草稿/选择/代际保持。 */
