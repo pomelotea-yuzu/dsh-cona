@@ -18,7 +18,7 @@
 ### project_read（只读）
 - 参数：无（`additionalProperties: false`，不接受任何键）。
 - 输出 `read`：`instanceId / projectId / planVersion / planRevision / stateRevision / sourceEpoch / binding{workRunId, bindingVersion, turn, targets[], allowedActions[]} / nodes[]（完整小树）/ dependencies[] / recordCount / readAt`。
-- 用途：取得后续写入所需的**明确最新基线**（`expectedPlanVersion` / `expectedPlanRevision` / `sourceEpoch`）。
+- 用途：读取当前规划、当前版本和绑定范围。后续写入要求当前规划基线与该 WorkRun 的已接受基线一致。owner 写入造成规划变化时，读取仍可用于了解当前规划，已接受基线沿用原运行记录。需要按新规划写入时，待原运行结束后由 owner 从当前规划显式发起新工作。
 
 ### project_apply（五类规划命令）
 - 参数（全部必填）：`operationId`（UUID v4）、`command`（`add-nodes / update-node / split-node / set-dependencies / set-node-status` 之一）、`expectedPlanVersion`、`expectedPlanRevision`、`sourceEpoch`。
