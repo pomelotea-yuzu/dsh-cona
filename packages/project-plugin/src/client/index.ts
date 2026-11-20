@@ -23,11 +23,22 @@ import {
 } from './project-overview-controller.js'
 import type { PanelTransport } from './api.js'
 import type { ResumePayload } from '../domain/resume.js'
+import type { ResumeChatPointerView } from '../application/resume-chat.js'
+import type {
+  ResumeChatTargetResult,
+  ResumeChatsResult,
+  ResumeLinkResult,
+} from '../host/overview-service.js'
+
+/** client 侧结果：OwnerDenial 的 null 在 callOverview 归一为 rejected，不进入控制器。 */
+type ResumeChatsView = Exclude<ResumeChatsResult, null>
+type ResumeLinkView = Exclude<ResumeLinkResult, null>
+type ResumeChatTargetView = Exclude<ResumeChatTargetResult, null>
 
 export const name = 'dsh-cona-project.client'
 
-/** `slots` 服务就绪后注册；顶部入口另需 `layout` 以导航到既有树面板。 */
-export const inject: readonly string[] = ['slots', 'locale', 'layout']
+/** `slots` 服务就绪后注册；顶部入口另需 `layout` 导航到既有树面板、`uiWorkspace` 打开原聊天。 */
+export const inject: readonly string[] = ['slots', 'locale', 'layout', 'uiWorkspace']
 
 /** 面板 id：同时作为侧栏入口与主区域 keyed slot 的键。 */
 const PANEL_ID = 'cona-project'
@@ -71,7 +82,7 @@ async function readResumeCandidate(instanceId: string): Promise<ResumeCardView> 
   })
   if (!response.ok) return { status: 'diagnostic', code: 'transport-http', message: `HTTP ${response.status}` }
   const body = await response.json() as {
-    result?: { ok: true; value: { status: string; payload?: unknown; code?: string; message?: string; codeObservation?: { status: string; head?: string; dirtyCount?: number; reason?: string } } }
+    result?: { ok: true; value: { status: string; payload?: unknown; code?: string; message?: string; contentHash?: string; codeObservation?: { status: string; head?: string; dirtyCount?: number; reason?: string }; chat?: { status: string; linkId?: string; sessionId?: string; purpose?: string; visible?: boolean | null; reason?: string } } }
       | { ok: false; error: { code: string; message: string } }
   }
   if (body.result === undefined) return { status: 'diagnostic', code: 'transport-parse', message: '响应缺少结果' }
@@ -85,13 +96,85 @@ async function readResumeCandidate(instanceId: string): Promise<ResumeCardView> 
         : raw.status === 'observed' && typeof raw.head === 'string' && typeof raw.dirtyCount === 'number'
           ? { status: 'observed', head: raw.head, dirtyCount: raw.dirtyCount }
           : { status: 'unavailable', reason: String(raw.reason ?? 'unknown') }
-    return { status: 'card', recordId: String((value as { recordId?: string }).recordId ?? ''), payload: value.payload as ResumePayload, codeObservation }
+    const rawChat = value.chat
+    const chat: ResumeChatPointerView =
+      rawChat === undefined || rawChat.status === 'unavailable'
+        ? { status: 'unavailable', reason: String(rawChat?.reason ?? 'unknown') }
+        : rawChat.status === 'linked' && typeof rawChat.linkId === 'string' && typeof rawChat.sessionId === 'string'
+          ? { status: 'linked', linkId: rawChat.linkId, sessionId: rawChat.sessionId, purpose: String(rawChat.purpose ?? ''), visible: rawChat.visible === null ? null : rawChat.visible === true }
+          : { status: 'unlinked' }
+    return {
+      status: 'card',
+      recordId: String((value as { recordId?: string }).recordId ?? ''),
+      contentHash: String(value.contentHash ?? ''),
+      payload: value.payload as ResumePayload,
+      codeObservation,
+      chat,
+    }
   }
   if (value.status === 'empty') return { status: 'empty' }
   if (value.status === 'rejected' || value.status === 'forbidden') {
     return { status: 'diagnostic', code: value.code ?? value.status, message: value.message ?? '不可读' }
   }
   return { status: 'unread' }
+}
+
+/** conaOverview 带 request 的通用 POST（ok:false 与 OwnerDenial null 都归一为 rejected 形状）。 */
+async function callOverview<T extends { status: string; code?: string; message?: string }>(
+  method: string,
+  request: Record<string, unknown>,
+  onHttpFail: (code: string, message: string) => T,
+): Promise<T> {
+  const response = await fetch(`/api/conaOverview/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({
+      type: 'client-request',
+      rpcId: `cona-overview-${globalThis.crypto.randomUUID()}`,
+      method: `conaOverview/${method}`,
+      payload: { args: { request } },
+    }),
+  })
+  if (!response.ok) return onHttpFail('transport-http', `HTTP ${response.status}`)
+  const body = await response.json() as {
+    result?: { ok: true; value: T | null } | { ok: false; error: { code: string; message: string } }
+  }
+  if (body.result === undefined) return onHttpFail('transport-parse', '响应缺少结果')
+  if (!body.result.ok) return onHttpFail(body.result.error.code, body.result.error.message)
+  const value = body.result.value
+  // OwnerDenial 的 null（非 owner）与形状不合法的响应统一转 rejected，不进入控制器。
+  if (value === null || typeof value !== 'object' || typeof value.status !== 'string') {
+    return onHttpFail('forbidden', '非 owner 或响应形状不合法')
+  }
+  return value
+}
+
+/** 保存表单的聊天选项（conaOverview/resumeChats）。 */
+function listResumeChats(instanceId: string): Promise<ResumeChatsView> {
+  return callOverview<ResumeChatsView>(
+    'resumeChats',
+    { instanceId },
+    (code, message) => ({ status: 'rejected', code, message }),
+  )
+}
+
+/** 保存聊天指针（conaOverview/linkResume）；失败不影响已提交的公开记录。 */
+function linkResume(instanceId: string, recordId: string, linkId: string): Promise<ResumeLinkView> {
+  return callOverview<ResumeLinkView>(
+    'linkResume',
+    { instanceId, recordId, linkId },
+    (code, message) => ({ status: 'rejected', code, message }),
+  )
+}
+
+/** 打开原聊天前复查（conaOverview/resumeChatTarget）。 */
+function resolveChatTarget(instanceId: string, recordId: string, contentHash: string, linkId: string): Promise<ResumeChatTargetView> {
+  return callOverview<ResumeChatTargetView>(
+    'resumeChatTarget',
+    { instanceId, recordId, contentHash, linkId },
+    (code, message) => ({ status: 'rejected', code, message }),
+  )
 }
 
 export function apply(ctx: ClientContext): void {
@@ -102,6 +185,19 @@ export function apply(ctx: ClientContext): void {
   const overview = new ProjectOverviewController({
     listInstances,
     readResumeCard: readResumeCandidate,
+    listResumeChats,
+    linkResume,
+    resolveChatTarget,
+    // 1.1 探针实证：fiber 注入 uiWorkspace 后 openSession(id) 落到指定 Session。
+    // 宿主生成的类型不随插件分发，这里按探针实证的最小结构访问。
+    openSession: (sessionId) => {
+      const workspace = (ctx as unknown as { uiWorkspace?: { openSession: (id: string) => unknown } }).uiWorkspace
+      if (workspace === undefined) {
+        console.warn('[dsh-cona-project] uiWorkspace 未注入；无法打开原聊天')
+        return
+      }
+      void workspace.openSession(sessionId)
+    },
     // 所有实例（含配置实例）统一走 conaOverview：它按 instanceId 路由并覆盖已登记实例。
     // 若误用 conaProject，请求会落到配置实例，浏览 B 时错误显示 A 的资料。
     transportFor: (instanceId): PanelTransport =>

@@ -61,3 +61,14 @@ export type {
 export type { OwnerDenial } from './host/owner-admission.js'
 // R2 任务 3.1/3.2：接续正文载荷（Remote resumeCard 边界类型）。
 export type { ResumePayload, ResumeVerification, NextStepKind } from './domain/resume.js'
+// R2 任务 3.3：接续聊天指针（Remote resumeChats/linkResume/resumeChatTarget 边界类型）。
+export type { ResumeChatPointerView } from './application/resume-chat.js'
+export type {
+  ResumeChatChoiceView,
+  ResumeChatsResult,
+  ResumeLinkResult,
+  ResumeChatTargetResult,
+  ConaResumeChatsRequest,
+  ConaLinkResumeRequest,
+  ConaResumeChatTargetRequest,
+} from './host/overview-service.js'

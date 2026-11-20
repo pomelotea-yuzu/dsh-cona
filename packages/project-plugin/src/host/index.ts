@@ -18,6 +18,7 @@ import { z } from 'zod'
 import { ProjectCommandService } from '../application/command-service.js'
 import { InstanceCommandQueue } from '../application/command-queue.js'
 import { ConversationService } from '../application/conversations.js'
+import { ResumeChatService } from '../application/resume-chat.js'
 import { WorkService } from '../application/work.js'
 import { InMemoryChangeStream, notificationForCommit, notificationForRefresh } from '../application/change-stream.js'
 import { ProjectSnapshotService } from '../application/snapshot.js'
@@ -34,6 +35,7 @@ import { ConaProjectService, type ConaProjectRuntime, type RuntimeResult } from 
 import { ConaOverviewService } from './overview-service.js'
 import { InstanceRuntimeRegistry, type OpenInstanceInput } from './instance-runtime-registry.js'
 import { attachWorkEventObservers } from './work-events.js'
+import { OWNER_CONTEXT } from './owner-admission.js'
 import { ProjectToolAdapter, defineProjectTools, type ConaToolDefinition, type ConaToolExec, type ConaToolsRegistry } from './project-tools.js'
 import { planNodeView, sessionDirectory, unavailableSessionDirectory } from './session-directory.js'
 
@@ -308,6 +310,24 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       stream,
       describeLocation: describe,
     })
+    // 接续聊天指针（3.3）：记录版本复查走本实例快照服务的已接纳索引。
+    const resumeChats = new ResumeChatService({
+      localRoot: instance.localRoot,
+      instanceId: instance.instanceId,
+      store,
+      queue,
+      clock,
+      directory,
+      findRecord: async (recordId) => {
+        const snap = await snapshot.read(OWNER_CONTEXT, {
+          instanceId: instance.instanceId,
+          connectionGeneration: 0,
+        })
+        if (snap.status !== 'snapshot') return 'unavailable'
+        const record = snap.snapshot.records.find((entry) => entry.id === recordId)
+        return record === undefined ? null : { contentHash: record.contentHash }
+      },
+    })
     /** 接续卡片用：按公开资料相对路径读正文并核 contentHash（R1 baseline 同规则）。 */
     const recordReader = {
       async readRecord(recordPath: string, expectedHash: string) {
@@ -330,7 +350,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
         return { ok: true as const, body: new TextDecoder().decode(bytes) }
       },
     }
-    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, recordReader, observeWorkCopy: observeWorkCopyFor(instance) }
+    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, resumeChats, recordReader, observeWorkCopy: observeWorkCopyFor(instance) }
     return { ok: true, value }
   }
 

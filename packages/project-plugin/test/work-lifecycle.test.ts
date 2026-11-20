@@ -351,7 +351,7 @@ test('6.5 工具 abort 观测接线：signal 中止的写操作完成后新写�
     created: false,
     baselineEstablished: true,
   };
-  const adapter = new ProjectToolAdapter({ runtime: async () => ({ ok: true as const, value: { instance, snapshot: {} as never, command, chats: {} as never, work } }) });
+  const adapter = new ProjectToolAdapter({ runtime: async () => ({ ok: true as const, value: { instance, snapshot: {} as never, command, chats: {} as never, resumeChats: {} as never, work } }) });
 
   const sessionId = 'session-abort';
   const rpcId = 'rpc-abort';

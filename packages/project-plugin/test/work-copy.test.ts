@@ -29,13 +29,21 @@ function initRepo(dir: string): string {
   execFileSync(gitBin, ['init', '--quiet'], { cwd: dir, env: { ...process.env, GIT_CEILING_DIRECTORIES: artifacts } });
   writeFileSync(path.join(dir, 'README.md'), '# t\n');
   execFileSync(gitBin, ['add', '.'], { cwd: dir });
-  execFileSync(gitBin, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'init'], { cwd: dir });
+  try {
+    execFileSync(gitBin, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'init'], { cwd: dir });
+  } catch (error) {
+    const err = error as { stderr?: Buffer; stdout?: Buffer; status?: number; signal?: string; message: string };
+    throw new Error(
+      `git commit 失败：status=${err.status} stderr=${err.stderr?.toString() ?? ''} stdout=${err.stdout?.toString() ?? ''}`,
+    );
+  }
   return dir;
 }
 
 test('干净仓库：observed，dirty 0', () => {
   if (!gitAvailable()) return;
-  const repo = initRepo(path.join(artifacts, 'clean'));
+  // mkdtemp 唯一目录：固定名会在重跑时留下已提交仓库，commit 因无变更而失败。
+  const repo = initRepo(mkdtempSync(path.join(artifacts, 'work-copy-clean-')));
   const obs = observeWorkCopy(repo, [], { env: { GIT_CEILING_DIRECTORIES: artifacts } });
   assert.equal(obs.status, 'observed');
   if (obs.status === 'observed') {
@@ -46,7 +54,7 @@ test('干净仓库：observed，dirty 0', () => {
 
 test('改动文件与新增文件：dirty 计数；rename 只计一次', () => {
   if (!gitAvailable()) return;
-  const repo = initRepo(path.join(artifacts, 'dirty'));
+  const repo = initRepo(mkdtempSync(path.join(artifacts, 'work-copy-dirty-')));
   appendFileSync(path.join(repo, 'README.md'), 'more\n');
   writeFileSync(path.join(repo, 'new.txt'), 'x\n');
   const obs = observeWorkCopy(repo, [], { env: { GIT_CEILING_DIRECTORIES: artifacts } });
@@ -56,7 +64,7 @@ test('改动文件与新增文件：dirty 计数；rename 只计一次', () => {
 
 test('排除资料目录下的条目：不计入 dirty', () => {
   if (!gitAvailable()) return;
-  const repo = initRepo(path.join(artifacts, 'exclude'));
+  const repo = initRepo(mkdtempSync(path.join(artifacts, 'work-copy-exclude-')));
   const dataDir = path.join(repo, 'data-root');
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(path.join(dataDir, 'project.json'), '{}');

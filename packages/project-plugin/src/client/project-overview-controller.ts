@@ -5,6 +5,18 @@
 import { PanelController, type IPanelController, type IngestOutcome, type PanelDraft, type PanelState, type SaveStatus } from './panel-controller.js';
 import type { PanelTransport } from './api.js';
 import { buildResume, type NextStepKind, type ResumePayload } from '../domain/resume.js';
+import type {
+  ResumeChatChoiceView,
+  ResumeChatsResult,
+  ResumeLinkResult,
+  ResumeChatTargetResult,
+} from '../host/overview-service.js';
+import type { ResumeChatPointerView } from '../application/resume-chat.js';
+
+/** client 侧结果：OwnerDenial 的 null 已在传输层归一为 rejected，不再出现在控制器输入。 */
+type ResumeChatsView = Exclude<ResumeChatsResult, null>;
+type ResumeLinkView = Exclude<ResumeLinkResult, null>;
+type ResumeChatTargetView = Exclude<ResumeChatTargetResult, null>;
 
 /** 代码观察视图（由 Host 只读观察投影）：历史验证之外的"待核对"呈现。 */
 export type CodeObservationView =
@@ -12,14 +24,22 @@ export type CodeObservationView =
   | { status: 'not-configured' }
   | { status: 'unavailable'; reason: string };
 
-/** 接续卡片视图（由 Host resumeCandidate 投影）。 */
+/** 接续卡片视图（由 Host resumeCandidate 投影；chat 为本机聊天指针三态）。 */
 export type ResumeCardView =
-  | { status: 'card'; recordId: string; payload: ResumePayload; codeObservation: CodeObservationView }
+  | {
+      status: 'card';
+      recordId: string;
+      /** 候选正文哈希；打开原聊天前按它复查记录版本。 */
+      contentHash: string;
+      payload: ResumePayload;
+      codeObservation: CodeObservationView;
+      chat: ResumeChatPointerView;
+    }
   | { status: 'empty' }
   | { status: 'unread' }
   | { status: 'diagnostic'; code: string; message: string };
 
-/** 接续保存草稿：全部为共享内容字段；operationId 复用以幂等重试。 */
+/** 接续保存草稿：全部为共享内容字段 + 本机聊天选择；operationId 复用以幂等重试。 */
 export interface ResumeDraft {
   stoppedAt: string;
   nextStep: string;
@@ -27,15 +47,23 @@ export interface ResumeDraft {
   outcome: string;
   decisions: string;
   openIssues: string;
+  /** 选中的本机聊天链接；null = 本次保存不关联聊天（公开摘要仍保存）。 */
+  chatLinkId: string | null;
   operationId: string | null;
 }
 
-export type ResumeSaveStatus = 'idle' | 'saving' | 'saved' | 'failed' | 'conflict' | 'pending';
+export type ResumeSaveStatus = 'idle' | 'saving' | 'saved' | 'partial' | 'failed' | 'conflict' | 'pending';
 
 export interface ResumeSaveState {
   status: ResumeSaveStatus;
   code: string | null;
   message: string | null;
+}
+
+/** 部分保存：公开记录已提交，聊天指针未保存；就现有记录重试不产生第二条记录。 */
+export interface ResumePartial {
+  recordId: string;
+  linkId: string;
 }
 
 const EMPTY_DRAFT: ResumeDraft = {
@@ -45,6 +73,7 @@ const EMPTY_DRAFT: ResumeDraft = {
   outcome: '',
   decisions: '',
   openIssues: '',
+  chatLinkId: null,
   operationId: null,
 };
 
@@ -69,6 +98,14 @@ export interface OverviewControllerDeps {
   listInstances: () => Promise<OverviewListResult>;
   /** 读取所选实例的接续卡片（conaOverview/resumeCandidate）。 */
   readResumeCard: (instanceId: string) => Promise<ResumeCardView>;
+  /** 保存表单的聊天选项（conaOverview/resumeChats）。 */
+  listResumeChats: (instanceId: string) => Promise<ResumeChatsView>;
+  /** 保存聊天指针（conaOverview/linkResume）；失败不影响已提交的公开记录。 */
+  linkResume: (instanceId: string, recordId: string, linkId: string) => Promise<ResumeLinkView>;
+  /** 打开原聊天前复查（conaOverview/resumeChatTarget）。 */
+  resolveChatTarget: (instanceId: string, recordId: string, contentHash: string, linkId: string) => Promise<ResumeChatTargetView>;
+  /** 宿主导航打开会话（uiWorkspace.openSession；仅 DSH 导航，不带任何执行绑定）。 */
+  openSession: (sessionId: string) => void;
   /** 为指定实例构造独立 transport（A→conaProject，B→conaOverview）。 */
   transportFor: (instanceId: string) => PanelTransport;
   newOperationId: () => string;
@@ -88,6 +125,12 @@ export interface OverviewState {
   resumeDraft: ResumeDraft | null;
   /** 接续保存回执状态。 */
   resumeSave: ResumeSaveState;
+  /** 保存表单的聊天选项（打开表单时读取）。 */
+  resumeChats: { phase: 'idle' | 'loading' | 'ready' | 'unavailable'; chats: ResumeChatChoiceView[]; reason: string | null };
+  /** 部分保存：公开记录已提交、聊天指针未保存。 */
+  resumePartial: ResumePartial | null;
+  /** 打开原聊天失败提示（稳定码）。 */
+  chatNotice: { code: string; message: string } | null;
 }
 
 const EMPTY: OverviewState = {
@@ -100,6 +143,9 @@ const EMPTY: OverviewState = {
   resumeCard: null,
   resumeDraft: null,
   resumeSave: { status: 'idle', code: null, message: null },
+  resumeChats: { phase: 'idle', chats: [], reason: null },
+  resumePartial: null,
+  chatNotice: null,
 };
 
 export class ProjectOverviewController {
@@ -163,12 +209,20 @@ export class ProjectOverviewController {
     this.patch({ expanded: false });
   }
 
-  /** 选择实例；只接受已登记且可读的行。切换时清旧卡片并读取新卡片。 */
+  /** 选择实例；只接受已登记且可读的行。切换时清旧卡片与接续编辑状态并读取新卡片。 */
   select(instanceId: string): boolean {
     const row = this.state.instances.find((item) => item.instanceId === instanceId);
     if (row === undefined || !row.readable) return false;
     if (this.state.selectedId === instanceId) return true;
-    this.patch({ selectedId: instanceId, resumeCard: null, resumeDraft: null, resumeSave: { status: 'idle', code: null, message: null } });
+    this.patch({
+      selectedId: instanceId,
+      resumeCard: null,
+      resumeDraft: null,
+      resumeSave: { status: 'idle', code: null, message: null },
+      resumeChats: { phase: 'idle', chats: [], reason: null },
+      resumePartial: null,
+      chatNotice: null,
+    });
     void this.loadResumeCard(instanceId);
     return true;
   }
@@ -186,10 +240,36 @@ export class ProjectOverviewController {
     }
   }
 
-  /** 开始写接续：清空草稿（不预填旧卡片，新停点应新写）。 */
+  /** 开始写接续：清空草稿（不预填旧卡片，新停点应新写）并读取聊天选项。 */
   editResume(): void {
     if (this.state.selectedId === null) return;
-    this.patch({ resumeDraft: { ...EMPTY_DRAFT }, resumeSave: { status: 'idle', code: null, message: null } });
+    this.patch({
+      resumeDraft: { ...EMPTY_DRAFT },
+      resumeSave: { status: 'idle', code: null, message: null },
+      resumePartial: null,
+      chatNotice: null,
+      resumeChats: { phase: 'loading', chats: [], reason: null },
+    });
+    void this.loadResumeChats(this.state.selectedId);
+  }
+
+  /** 读取当前实例的本机聊天链接（保存表单选项）；本机状态不可读给 unavailable。 */
+  async loadResumeChats(instanceId: string): Promise<void> {
+    try {
+      const result = await this.deps.listResumeChats(instanceId);
+      if (this.state.selectedId !== instanceId) return;
+      if (result.status === 'listed') {
+        this.patch({ resumeChats: { phase: 'ready', chats: result.chats, reason: null } });
+        return;
+      }
+      const reason = result.status === 'unavailable'
+        ? result.reason
+        : `${result.code}: ${result.message}`;
+      this.patch({ resumeChats: { phase: 'unavailable', chats: [], reason } });
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ resumeChats: { phase: 'unavailable', chats: [], reason: `transport-failed: ${(error as Error).message}` } });
+    }
   }
 
   /** 修改草稿字段。 */
@@ -287,8 +367,23 @@ export class ProjectOverviewController {
       return 'failed';
     }
     if (result.status === 'committed') {
+      // 公开记录已提交：清草稿；聊天指针失败降级为部分保存，可就现有记录重试。
+      const recordId = result.recordId;
+      const chatLinkId = draft.chatLinkId;
       this.patch({ resumeDraft: null, resumeSave: { status: 'saved', code: null, message: null } });
       void this.loadResumeCard(instanceId);
+      if (chatLinkId !== null && typeof recordId === 'string' && recordId !== '') {
+        const link = await this.tryLinkResume(instanceId, recordId, chatLinkId);
+        if (this.state.selectedId !== instanceId) return 'saved';
+        if (link.ok) {
+          this.patch({ resumePartial: null, resumeSave: { status: 'saved', code: null, message: null } });
+        } else {
+          this.patch({
+            resumePartial: { recordId, linkId: chatLinkId },
+            resumeSave: { status: 'partial', code: link.code, message: link.message },
+          });
+        }
+      }
       return 'saved';
     }
     if (result.status === 'pending-reconciliation') {
@@ -300,6 +395,63 @@ export class ProjectOverviewController {
       resumeSave: { status: conflict ? 'conflict' : 'failed', code: result.code, message: result.message },
     });
     return conflict ? 'conflict' : 'failed';
+  }
+
+  /** 保存聊天指针；传输异常与宿主拒绝统一为 {ok:false, code, message}，不改公开记录。 */
+  private async tryLinkResume(instanceId: string, recordId: string, linkId: string): Promise<
+    { ok: true } | { ok: false; code: string; message: string | null }
+  > {
+    try {
+      const result = await this.deps.linkResume(instanceId, recordId, linkId);
+      if (result.status === 'linked') return { ok: true };
+      return { ok: false, code: result.code, message: result.message };
+    } catch (error) {
+      return { ok: false, code: 'transport-failed', message: (error as Error).message };
+    }
+  }
+
+  /** 部分保存重试：就现有公开记录重试保存聊天指针（幂等，公开记录数不变）。 */
+  async retryResumeChatLink(): Promise<'saved' | 'partial' | 'idle'> {
+    const partial = this.state.resumePartial;
+    const instanceId = this.state.selectedId;
+    if (partial === null || instanceId === null) return 'idle';
+    this.patch({ resumeSave: { status: 'saving', code: null, message: null } });
+    const link = await this.tryLinkResume(instanceId, partial.recordId, partial.linkId);
+    if (this.state.selectedId !== instanceId) return 'saved';
+    if (link.ok) {
+      this.patch({ resumePartial: null, resumeSave: { status: 'saved', code: null, message: null } });
+      void this.loadResumeCard(instanceId);
+      return 'saved';
+    }
+    this.patch({ resumeSave: { status: 'partial', code: link.code, message: link.message } });
+    return 'partial';
+  }
+
+  /**
+   * 打开原聊天：点击时复查记录版本、指针、链接与宿主实际 Session（Host resumeChatTarget），
+   * 通过后仅用 DSH 导航打开会话；不携带、不恢复任何执行绑定。
+   * 选择代际检查：请求返回时实例已切换则丢弃（与卡片迟到响应同口径）。
+   */
+  async openResumeChat(): Promise<void> {
+    const card = this.state.resumeCard;
+    const instanceId = this.state.selectedId;
+    if (card === null || card.status !== 'card' || card.chat.status !== 'linked' || instanceId === null) return;
+    this.patch({ chatNotice: null });
+    let result: ResumeChatTargetView;
+    try {
+      result = await this.deps.resolveChatTarget(instanceId, card.recordId, card.contentHash, card.chat.linkId);
+    } catch (error) {
+      if (this.state.selectedId === instanceId) {
+        this.patch({ chatNotice: { code: 'transport-failed', message: (error as Error).message } });
+      }
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status === 'ok') {
+      this.deps.openSession(result.sessionId);
+      return;
+    }
+    this.patch({ chatNotice: { code: result.code, message: result.message } });
   }
 
   /** 取（或建）某实例的面板控制器；同实例复用，草稿/选择/代际保持。 */

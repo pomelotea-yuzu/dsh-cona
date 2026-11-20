@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
 import type { PanelState } from './panel-controller.js';
 import type { LocaleKey } from './locales.js';
+import type { ResumeChatPointerView } from '../application/resume-chat.js';
 import { ProjectOverviewController, type OverviewRow, type OverviewState, type ResumeCardView as ResumeCardState } from './project-overview-controller.js';
 
 export interface ProjectTopBarInjected {
@@ -124,7 +125,7 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
               </li>
             ))}
           </ul>
-          <ResumeCardView state={state.resumeCard} t={t} />
+          <ResumeCardView state={state.resumeCard} chatNotice={state.chatNotice} controller={controller} t={t} />
           <ResumeSaveSection controller={controller} state={state} t={t} />
         </div>
       ) : null}
@@ -168,13 +169,15 @@ function ResumeSaveSection(props: { controller: ProjectOverviewController; state
     ? t('resumeSaving')
     : save.status === 'saved'
       ? t('resumeSaved')
-      : save.status === 'conflict'
-        ? t('resumeSaveConflict')
-        : save.status === 'pending'
-          ? t('resumeSavePending')
-          : save.status === 'failed'
-            ? `${t('resumeSaveFailed')}${save.code === 'missing-required' ? `：${t('resumeMissingRequired')}` : save.code !== null ? `：${save.code}` : ''}`
-            : null;
+      : save.status === 'partial'
+        ? t('resumePartialSaved') + (save.code !== null ? `：${save.code}` : '')
+        : save.status === 'conflict'
+          ? t('resumeSaveConflict')
+          : save.status === 'pending'
+            ? t('resumeSavePending')
+            : save.status === 'failed'
+              ? `${t('resumeSaveFailed')}${save.code === 'missing-required' ? `：${t('resumeMissingRequired')}` : save.code !== null ? `：${save.code}` : ''}`
+              : null;
   return (
     <section data-cona-resume-form="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
       <div style={rowStyle}>
@@ -230,6 +233,30 @@ function ResumeSaveSection(props: { controller: ProjectOverviewController; state
         <textarea value={draft.openIssues} style={fieldStyle} rows={2}
           onChange={(e) => { controller.patchResumeDraft({ openIssues: e.target.value }); force((n) => n + 1); }} />
       </div>
+      {state.resumeChats.phase === 'ready' && state.resumeChats.chats.length > 0 ? (
+        <div style={rowStyle}>
+          <label>{t('resumeChatLabel')}</label>
+          <select
+            data-cona-resume-chat="1"
+            value={draft.chatLinkId ?? ''}
+            style={fieldStyle}
+            onChange={(e) => {
+              controller.patchResumeDraft({ chatLinkId: e.target.value === '' ? null : e.target.value });
+              force((n) => n + 1);
+            }}
+          >
+            <option value="">{t('resumeChatNone')}</option>
+            {state.resumeChats.chats.map((chat) => (
+              <option key={chat.linkId} value={chat.linkId} disabled={chat.visible === false}>
+                {chat.purpose} · {chat.sessionId.slice(0, 8)}{chat.visible === false ? `（${t('resumeChatUnavailable')}）` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      {state.resumeChats.phase === 'unavailable' ? (
+        <p style={{ ...rowStyle, color: '#8a6d3b' }}>{t('resumeChatsUnavailable')}</p>
+      ) : null}
       <div style={{ ...rowStyle, whiteSpace: 'pre-wrap', background: 'var(--dsh-surface, #f7f7f7)', padding: 6 }}>
         <strong>{t('resumePreviewTitle')}</strong>
         {preview.ok ? (
@@ -238,7 +265,18 @@ function ResumeSaveSection(props: { controller: ProjectOverviewController; state
           <span style={{ color: '#b3261e' }}> {preview.code}</span>
         )}
       </div>
-      {statusLine !== null ? <p style={{ ...rowStyle, color: save.status === 'saved' ? '#1b5e20' : '#b3261e' }}>{statusLine}</p> : null}
+      {statusLine !== null ? <p style={{ ...rowStyle, color: save.status === 'saved' || save.status === 'partial' ? '#8a6d3b' : '#b3261e' }}>{statusLine}</p> : null}
+      {save.status === 'partial' && state.resumePartial !== null ? (
+        <p style={{ margin: '8px 0 0', display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            data-cona-resume-retry-link="1"
+            onClick={() => { void controller.retryResumeChatLink().then(() => force((n) => n + 1)); }}
+          >
+            {t('resumeChatRetry')}
+          </button>
+        </p>
+      ) : null}
       <p style={{ margin: '8px 0 0', display: 'flex', gap: 8 }}>
         <button
           type="button"
@@ -257,8 +295,13 @@ function ResumeSaveSection(props: { controller: ProjectOverviewController; state
 }
 
 /** 接续卡片：从已核对的公开正文投影，区分历史验证状态并保留空态/诊断。 */
-function ResumeCardView(props: { state: ResumeCardState | null; t: TopTranslate }): JSX.Element | null {
-  const { state, t } = props;
+function ResumeCardView(props: {
+  state: ResumeCardState | null;
+  chatNotice: { code: string; message: string } | null;
+  controller: ProjectOverviewController;
+  t: TopTranslate;
+}): JSX.Element | null {
+  const { state, chatNotice, controller, t } = props;
   if (state === null) return <p style={{ margin: '8px 0 0', fontSize: 12 }}>{t('resumeLoading')}</p>;
   if (state.status === 'empty') return <p style={{ margin: '8px 0 0', fontSize: 12 }}>{t('noResume')}</p>;
   if (state.status === 'unread') {
@@ -271,6 +314,7 @@ function ResumeCardView(props: { state: ResumeCardState | null; t: TopTranslate 
   }
   const p = state.payload;
   const obs = state.codeObservation;
+  const chat = state.chat;
   const worktree = obs.status === 'observed'
     ? (obs.dirtyCount === 0 ? t('worktreeClean') : t('worktreeDirty', { count: String(obs.dirtyCount) }))
     : '';
@@ -295,6 +339,37 @@ function ResumeCardView(props: { state: ResumeCardState | null; t: TopTranslate 
         </p>
       ))}
       <p style={{ margin: '2px 0', fontSize: 12, color: obs.status === 'observed' ? undefined : '#8a6d3b' }}>{obsLine}</p>
+      <ResumeChatLine chat={chat} chatNotice={chatNotice} controller={controller} t={t} />
     </section>
   );
+}
+
+/** 卡片的聊天行：指针三态呈现；linked 且未确认失效时提供打开（点击前 Host 再复查）。 */
+function ResumeChatLine(props: {
+  chat: ResumeChatPointerView;
+  chatNotice: { code: string; message: string } | null;
+  controller: ProjectOverviewController;
+  t: TopTranslate;
+}): JSX.Element | null {
+  const { chat, chatNotice, controller, t } = props;
+  const lineStyle = { margin: '2px 0', fontSize: 12 } as const;
+  if (chat.status === 'linked') {
+    if (chat.visible === false) {
+      return <p style={{ ...lineStyle, color: '#8a6d3b' }}>{t('resumeChatUnavailable')}</p>;
+    }
+    return (
+      <p style={lineStyle}>
+        <button type="button" data-cona-resume-open-chat="1" onClick={() => { void controller.openResumeChat(); }}>
+          {t('resumeChatOpen')}
+        </button>
+        {chatNotice !== null ? (
+          <span style={{ color: '#b3261e' }}> {chatNotice.code}{chatNotice.message ? `: ${chatNotice.message}` : ''}</span>
+        ) : null}
+      </p>
+    );
+  }
+  if (chat.status === 'unlinked') {
+    return <p style={{ ...lineStyle, color: '#8a6d3b' }}>{t('resumeChatUnlinked')}</p>;
+  }
+  return <p style={{ ...lineStyle, color: '#8a6d3b' }}>{t('resumeChatUnavailable')}：{chat.reason}</p>;
 }

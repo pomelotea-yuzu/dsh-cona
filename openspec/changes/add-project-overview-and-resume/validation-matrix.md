@@ -38,6 +38,10 @@
 
 任务 3.2 三段完成，见实施记录（[3.2a 卡片投影](implementation/2026-11-19-3.2-resume-card.md)／[3.2b 保存 UI](implementation/2026-11-19-3.2-resume-save.md)／[3.2c 代码观察](implementation/2026-11-19-3.2-work-copy.md)）。真实浏览器实测通过的可观察项：A 卡片齐全/B 空态与诊断（O04 部分分句）、表单保存→回执→卡片刷新→幂等重试（O05 部分分句：必填缺失保留草稿、预览带前缀、修订只推进状态）、`workCopyRoots` 映射下 HEAD+脏计数显示与资料目录排除、纯映射缺失实例显示"代码未核对：未配置"（O08 部分分句）、坏 marker/坏 JSON/版本未知/超限的领域级诊断单测与哈希不符集成测试（O09 部分分句）。**但** O04 的无配置/默认配置失败分支、O05 的 B 双条保存与重启返回、O08 的分别改变规划/HEAD/工件字节的核对矩阵、O09 的浏览器级损坏正文注入均未跑；O10（引用查阅/越界）未实现。故 O04–O09 产品场景仍保持 `untested`，不因部分可观察项通过改标 pass。
 
+## 3.3 聊天指针与导航注记（2026-11-20）
+
+任务 3.3 的代码与单测完成，见 [实施记录](implementation/2026-11-20-3.3-chat-pointer-navigation.md)：本机指针 `ResumeChatPointer`（recordId+contentHash↔linkId，幂等、版本限定、隔离同口径）16 项文件后端单测；`conaOverview` 的 `resumeChats`/`linkResume`/`resumeChatTarget` 入口与卡片指针三态；client 保存表单聊天选择、部分保存（O07 的 F 层分项：指针失败→partial→重试只调 linkResume、公开记录数不变）5 项控制器单测；打开前 Host 复查（版本变化/链接缺失/会话不可见稳定码）后仅用 `uiWorkspace.openSession` 导航；中英 8 键 + `check:locale`。这支撑 **O07 的 F 层、O11/O12 的后端与复查能力**。但真实宿主 H 层（打开确切 Session、多聊天选择、A 有 WorkRun 时保存 B 的隔离核对、解绑/干净 profile 回读、运行中语言切换）未跑，O07/O11/O12/O13 产品场景仍保持 `untested`，不因代码与单测完成改标 pass。
+
 ## 编写交接
 
 2026-11-18 在本机使用 Node `26.13.0` 与独立安装的 OpenSpec `1.17.0`。`openspec validate add-project-overview-and-resume --type change --strict --no-interactive --json` 返回 `valid: true`，1 项通过，0 问题。`node scripts/check-repo.mjs --all` 在包含新增文件和索引改动的临时 Git 快照中通过，洁净度 0 失败、0 警告，文档链接与双语检查均为 0 问题。13 个增量场景与 O01–O13 逐项对应。

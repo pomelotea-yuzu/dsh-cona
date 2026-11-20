@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { conversationStateOf, type InstanceAggregate, type QuarantineInfo, type Registry } from '../../application/local-state.js';
+import { conversationStateOf, resumePointersOf, type InstanceAggregate, type QuarantineInfo, type Registry } from '../../application/local-state.js';
 import type { LocalIssue, LocalLockInfo, LocalStateStorePort } from '../../application/ports.js';
 import { replaceAtomicallyChecked, type AtomicHooks, type AtomicStage } from './atomic-write.js';
 
@@ -117,6 +117,8 @@ export class LocalStateStore implements LocalStateStorePort {
     const result = aggregate as InstanceAggregate;
     // 旧版聚合（3.2–5.x）的 conversations 是空数组（6.1 前未定形）；读取时归一化，不静默改写磁盘。
     result.conversations = conversationStateOf(result.conversations);
+    // 旧聚合（3.3 前）没有 resumePointers；读取时归一化。
+    result.resumePointers = resumePointersOf(result.resumePointers);
     return result;
   }
 

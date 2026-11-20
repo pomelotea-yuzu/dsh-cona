@@ -22,6 +22,7 @@
   - 进度（2026-11-19）：**保存预览与接续编辑 UI 完成**（第二段），见 [3.2 实施记录](implementation/2026-11-19-3.2-resume-save.md)。表单 + 共享内容预览 + 必填校验 + 经 `conaOverview/execute` 提交 append-record；失败/冲突/未知保留草稿与原 operationId 幂等重试；实测 8/8（必填拦截、预览前缀、保存成功、卡片刷新、取消丢弃）。
   - 进度（2026-11-19）：**工作副本配置与只读代码观察完成**（第三段），见 [3.2 实施记录](implementation/2026-11-19-3.2-work-copy.md)。`workCopyRoots`（instanceId→绝对路径）配置校验透传；`observeWorkCopy` 只读观察（HEAD + 脏计数，排除资料目录，失败给稳定原因）；卡片附 `codeObservation` 三态并呈现"代码未核对：原因"；5 项真实 git 子进程单测 + 真实宿主实测 4/4（HEAD 显示、脏计数 1、RPC 字段、无页面错误）。普通记录跳过与不可读诊断由领域/集成单测覆盖。三段合验收口勾选；O05/O08 场景注记见矩阵。
 - [ ] 3.3 核对当前实例的聊天指针和 Session，通过宿主导航打开所选会话；会话解绑或换 profile 时保留摘要。实现中英资源与英文回退，包括预览、部分保存和其他错误提示。对应 O11–O13。
+  - 进度（2026-11-20）：**指针存储、导航入口与 i18n 代码完成**，见 [3.3 实施记录](implementation/2026-11-20-3.3-chat-pointer-navigation.md)。已交付：本机聚合 `resumePointers`（版本限定、幂等、隔离同口径）与 `ResumeChatService`；`conaOverview` 新增 `resumeChats`/`linkResume`/`resumeChatTarget`，`resumeCandidate` 卡片附指针三态；保存表单聊天选择 + 部分保存（摘要已保存/聊天未关联）+ 幂等重试；`linked` 时经 Host 复查记录版本/链接/Session 可见后仅用 `uiWorkspace.openSession` 导航；解绑/删除会话/干净 profile 卡片仍显摘要并提示不可用；中英 8 键 + `check:locale`。21 项新单测；`check:ci` 303/303 全绿。仍待：真实宿主 H 层实测（确切 Session、多聊天、干净 profile、语言切换）属 O11–O13 与 4.1；故本任务保持未勾选。
 
 ## 4. 宿主闭环
 

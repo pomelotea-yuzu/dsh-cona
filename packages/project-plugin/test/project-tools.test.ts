@@ -127,7 +127,7 @@ async function setup(name: string): Promise<Fixture> {
     created: false,
     baselineEstablished: true,
   };
-  const runtime = { ok: true as const, value: { instance, snapshot, command, chats: {} as never, work } };
+  const runtime = { ok: true as const, value: { instance, snapshot, command, chats: {} as never, resumeChats: {} as never, work } };
   const adapter = new ProjectToolAdapter({ runtime: async () => runtime });
 
   const sessionId = `session-${randomUUID().slice(0, 8)}`;

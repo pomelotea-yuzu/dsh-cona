@@ -71,5 +71,13 @@
   "codeNotConfigured": "代码未核对：未配置本实例工作副本",
   "codeUnavailable": "代码未核对：{reason}",
   "worktreeClean": "工作区干净",
-  "worktreeDirty": "工作区有 {count} 处未提交"
+  "worktreeDirty": "工作区有 {count} 处未提交",
+  "resumeChatLabel": "关联聊天（本机，不写入共享内容）",
+  "resumeChatNone": "不关联聊天",
+  "resumeChatsUnavailable": "聊天列表不可读；本次保存将不关联聊天",
+  "resumeChatOpen": "打开原聊天",
+  "resumeChatUnavailable": "原聊天在此不可用",
+  "resumeChatUnlinked": "聊天未关联",
+  "resumePartialSaved": "摘要已保存；聊天未关联",
+  "resumeChatRetry": "重试关联"
 }

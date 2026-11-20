@@ -157,6 +157,8 @@ export interface InstanceAggregate {
   workRuns: WorkRunRecord[];
   /** 绑定外变更建议（6.4）；旧聚合归一化为空数组。 */
   workSuggestions: WorkSuggestion[];
+  /** 接续记录的本机聊天指针（3.3）；旧聚合归一化为空数组。 */
+  resumePointers?: ResumeChatPointer[];
   operations: OperationRecord[];
   lastObservation: ObservationBaseline | null;
 }
@@ -321,6 +323,34 @@ export function conversationStateOf(value: unknown): ConversationState {
     };
   }
   return { links: [], intents: [] };
+}
+
+/**
+ * 接续记录的本机聊天指针（R2 3.3，design §3）：
+ * 公开记录（recordId + contentHash 定位具体版本）与本机聊天链接（linkId）的私有关联。
+ * 只存本机聚合，绝不写入公开资料；同一记录保留一条指针（重新关联即替换）。
+ */
+export interface ResumeChatPointer {
+  /** 接续记录 id（公开索引）。 */
+  recordId: string;
+  /** 指针建立时该记录在已接纳索引中的正文哈希（版本语义）。 */
+  contentHash: string;
+  /** 本机聊天链接 id（ConversationState.links）。 */
+  linkId: string;
+  createdAt: string;
+}
+
+/** 旧聚合没有 resumePointers（3.3 前未定形）；读取时归一化，不静默改写磁盘。 */
+export function resumePointersOf(value: unknown): ResumeChatPointer[] {
+  return Array.isArray(value)
+    ? (value as ResumeChatPointer[]).filter(
+        (item) =>
+          item !== null && typeof item === 'object'
+          && typeof (item as ResumeChatPointer).recordId === 'string'
+          && typeof (item as ResumeChatPointer).contentHash === 'string'
+          && typeof (item as ResumeChatPointer).linkId === 'string',
+      )
+    : [];
 }
 
 /**

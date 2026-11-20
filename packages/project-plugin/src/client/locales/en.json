@@ -71,5 +71,13 @@
   "codeNotConfigured": "Code not verified: no work copy configured for this instance",
   "codeUnavailable": "Code not verified: {reason}",
   "worktreeClean": "worktree clean",
-  "worktreeDirty": "worktree has {count} uncommitted"
+  "worktreeDirty": "worktree has {count} uncommitted",
+  "resumeChatLabel": "Linked chat (local, never shared)",
+  "resumeChatNone": "No chat",
+  "resumeChatsUnavailable": "Chat list unavailable; saving without a linked chat",
+  "resumeChatOpen": "Open original chat",
+  "resumeChatUnavailable": "Original chat unavailable here",
+  "resumeChatUnlinked": "Chat not linked",
+  "resumePartialSaved": "Summary saved; chat not linked",
+  "resumeChatRetry": "Retry linking"
 }

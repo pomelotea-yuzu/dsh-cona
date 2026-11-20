@@ -147,6 +147,8 @@ export interface ConaProjectRuntime {
   snapshot: ProjectSnapshotService;
   command: ProjectCommandService;
   chats: ConversationService;
+  /** 接续聊天指针（3.3）：公开记录与本地聊天链接的私有结构。 */
+  resumeChats: import('../application/resume-chat.js').ResumeChatService;
   work: WorkService;
   /** 接续卡片用；未装配读取器时 resumeCard 给明确拒绝码。 */
   recordReader?: RecordBodyReader;
