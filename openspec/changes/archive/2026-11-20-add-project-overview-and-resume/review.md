@@ -7,7 +7,7 @@
 ### 范围与方法
 
 - 通读 [proposal](proposal.md)、[design](design.md)、[增量 spec](specs/project-overview-resume/spec.md)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md) 及 `openspec/changes/README.md` 的状态改动。
-- 对照 R1 六份 specs、插件源码（`packages/project-plugin/src/`）、[产品设计草案](../../../docs/product/2026-11-11-project-management-design.md)、[开发路线图](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md) 与 [R1 验证矩阵](../archive/2026-11-19-establish-r1-project-plugin/validation-matrix.md) 逐项核对术语、机制与需求来源。
+- 对照 R1 六份 specs、插件源码（`packages/project-plugin/src/`）、[产品设计草案](../../../../docs/product/2026-11-11-project-management-design.md)、[开发路线图](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md) 与 [R1 验证矩阵](../../archive/2026-11-19-establish-r1-project-plugin/validation-matrix.md) 逐项核对术语、机制与需求来源。
 - 独立复跑校验（非转述作者结果）：
   - `npx --yes @fission-ai/openspec@1.17.0 validate add-project-overview-and-resume --type change --strict --no-interactive --json`：`valid: true`，1 项通过／0 失败，`issues: []`。与编写交接同版本。
   - `node scripts/check-repo.mjs --all` 在包含全部已跟踪文件、README 改动与新 change 目录的临时 Git 快照（242 个待查文件）中运行：洁净度 0 失败／0 警告，32 项自测通过，链接门禁 99 篇 0 问题，双语门禁 5 对 0 问题。快照用后已删除。
@@ -99,7 +99,7 @@ A3 列表策略（禁用行＋诊断，spec Req2／design §2／O04 三处同词
 ### 审阅范围与方法
 
 - 通读 [proposal](proposal.md)、[design](design.md)、[增量 spec](specs/project-overview-resume/spec.md)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md) 及 `openspec/changes/README.md` 的状态改动。
-- 对照 R1 六份 specs、R1 源码（`packages/project-plugin/src/`）、[R1 验证矩阵](../archive/2026-11-19-establish-r1-project-plugin/validation-matrix.md)、[产品设计草案](../../../docs/product/2026-11-11-project-management-design.md#项目入口与面板)、[开发路线图 R2](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#r2项目树协作与工作接续) 与 [工作流](../../../docs/development/workflow.md)。
+- 对照 R1 六份 specs、R1 源码（`packages/project-plugin/src/`）、[R1 验证矩阵](../../archive/2026-11-19-establish-r1-project-plugin/validation-matrix.md)、[产品设计草案](../../../../docs/product/2026-11-11-project-management-design.md#项目入口与面板)、[开发路线图 R2](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#r2项目树协作与工作接续) 与 [工作流](../../../../docs/development/workflow.md)。
 - 对照本机固定 DSH `0.2.2-rc.2` 源码快照 `Developer/tools/deepseek-harness/`，只做静态事实核对，不当作运行证据。
 - 独立复跑校验；未启动真实宿主，矩阵 13 项仍全部 `untested`。
 
