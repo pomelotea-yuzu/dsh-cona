@@ -14,7 +14,7 @@
 
 R1（`openspec/changes/archive/2026-11-19-establish-r1-project-plugin/`）已于 2026-11-19 归档：六份能力 specs 并入主 `openspec/specs/`，核心闭环 V37／V32／V04 pass；tasks 34/35（2.4b 按 R1 边界 blocked 例外）、1 项 blocked、28 项 untested 如实随归档保留，逐条状态以归档内 tasks、validation-matrix 与 [7.3 收尾核对](openspec/changes/archive/2026-11-19-establish-r1-project-plugin/implementation/2026-11-17-7.3-final-audit.md) 为准。第 1–7 段实施记录见该归档目录 `implementation/`。
 
-R2 首切片 `openspec/changes/archive/2026-11-20-add-project-overview-and-resume/` 已于 2026-11-20 归档：增量 spec `project-overview-resume`（6 Req／13 Scenario）并入主 `openspec/specs/`、纯新增未改 R1 规范；13 个验证场景状态保持 `untested`、实测证据入矩阵注记，tasks 1.1/2.1/2.2/3.1 主体完成但留有未实测子项如实保持未勾选。4.1 H 层闭环 50/50、4.2 R1 回归 21/21，V37 真实 Agent 分句无凭证 `blocked`；逐条见该归档的 validation-matrix 与 [收尾核对](openspec/changes/archive/2026-11-20-add-project-overview-and-resume/implementation/2026-11-20-archive-final-audit.md)。当前无活动 change。
+R2 首切片 `openspec/changes/archive/2026-11-20-add-project-overview-and-resume/` 已于 2026-11-20 归档：增量 spec `project-overview-resume`（6 Req／13 Scenario）并入主 `openspec/specs/`、纯新增未改 R1 规范；13 个验证场景状态保持 `untested`、实测证据入矩阵注记，8 项 tasks 全部勾选（1.1/2.1/2.2/3.1 的仍待子项经复核已由后续覆盖；2.2 的草稿切回/跨页 UI 实测仍缺，在矩阵 O02 保持 `untested`、不放宽）。4.1 H 层闭环 50/50、4.2 R1 回归 21/21，V37 真实 Agent 分句无凭证 `blocked`；逐条见该归档的 validation-matrix 与 [收尾核对](openspec/changes/archive/2026-11-20-add-project-overview-and-resume/implementation/2026-11-20-archive-final-audit.md)。当前无活动 change。
 
 ## 权威性
 
