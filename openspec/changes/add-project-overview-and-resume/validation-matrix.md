@@ -42,6 +42,10 @@
 
 任务 3.3 的代码与单测完成，见 [实施记录](implementation/2026-11-20-3.3-chat-pointer-navigation.md)：本机指针 `ResumeChatPointer`（recordId+contentHash↔linkId，幂等、版本限定、隔离同口径）16 项文件后端单测；`conaOverview` 的 `resumeChats`/`linkResume`/`resumeChatTarget` 入口与卡片指针三态；client 保存表单聊天选择、部分保存（O07 的 F 层分项：指针失败→partial→重试只调 linkResume、公开记录数不变）5 项控制器单测；打开前 Host 复查（版本变化/链接缺失/会话不可见稳定码）后仅用 `uiWorkspace.openSession` 导航；中英 8 键 + `check:locale`。这支撑 **O07 的 F 层、O11/O12 的后端与复查能力**。但真实宿主 H 层（打开确切 Session、多聊天选择、A 有 WorkRun 时保存 B 的隔离核对、解绑/干净 profile 回读、运行中语言切换）未跑，O07/O11/O12/O13 产品场景仍保持 `untested`，不因代码与单测完成改标 pass。
 
+## 3.3 真机探针注记（2026-11-20）
+
+任务 3.3 H 层实测完成并勾选，见 [真机探针记录](implementation/2026-11-20-3.3-host-probe.md)。probe-36 16/16：保存时从多条本机链接明确选一（宿主空白会话复用语义下用 linkChat 构造两个真实会话）→ 指针 `linked` 精确匹配 → 点击「打开原聊天」经 `resumeChatTarget` 复查（确切 sessionId）→ 会话界面真实出现（O11 核心分句）；解绑回读摘要保留 +「原聊天在此不可用」（O12 前半）。probe-37 7/7：干净 profile 摘要可读 + 无打开动作 + 原会话不在 + 公开 records 无 session-/linkId/workRunId/resumePointer 字样 + 旧实例 `forbidden` + 当前实例 `pointer-not-here`（O12 后半；探针发现干净 profile 语义缺口并以「savedAt 早于登记时刻」判据修复）。probe-38 7/7：en 渲染 + ja 英文回退 + zh 对照 + 无原始 key 泄漏（O13 回退分句）。探针另修复卡片刷新早于指针写的时序 bug。**O07/O11/O12/O13 产品场景仍保持 `untested`**（不改标 pass）：O07 的故障注入由单测覆盖（F 层分项）；O11 的 A 有 WorkRun 保存 B/开始动作禁用/工具拒绝与 O13 的运行中切换 UI 属 4.1 闭环。
+
 ## 编写交接
 
 2026-11-18 在本机使用 Node `26.13.0` 与独立安装的 OpenSpec `1.17.0`。`openspec validate add-project-overview-and-resume --type change --strict --no-interactive --json` 返回 `valid: true`，1 项通过，0 问题。`node scripts/check-repo.mjs --all` 在包含新增文件和索引改动的临时 Git 快照中通过，洁净度 0 失败、0 警告，文档链接与双语检查均为 0 问题。13 个增量场景与 O01–O13 逐项对应。

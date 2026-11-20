@@ -371,7 +371,6 @@ export class ProjectOverviewController {
       const recordId = result.recordId;
       const chatLinkId = draft.chatLinkId;
       this.patch({ resumeDraft: null, resumeSave: { status: 'saved', code: null, message: null } });
-      void this.loadResumeCard(instanceId);
       if (chatLinkId !== null && typeof recordId === 'string' && recordId !== '') {
         const link = await this.tryLinkResume(instanceId, recordId, chatLinkId);
         if (this.state.selectedId !== instanceId) return 'saved';
@@ -384,6 +383,8 @@ export class ProjectOverviewController {
           });
         }
       }
+      // 卡片刷新放在指针写之后：否则卡片会短暂显示「聊天未关联」。
+      void this.loadResumeCard(instanceId);
       return 'saved';
     }
     if (result.status === 'pending-reconciliation') {

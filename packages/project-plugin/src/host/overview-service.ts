@@ -263,7 +263,8 @@ export class ConaOverviewService extends TypertRemoteService {
           ? { status: 'observed', head: observed.head, dirtyCount: observed.dirtyCount }
           : { status: 'unavailable', reason: observed.reason }
     // 本机聊天指针投影（3.3）：聚合不可读/隔离时不阻塞卡片，给 unavailable 原因。
-    const chat = await runtime.value.resumeChats.view(candidate.id, candidate.contentHash)
+    // savedAt 传入用于区分「记录来自其他环境（指针不在本机）」与「本机保存未关联」。
+    const chat = await runtime.value.resumeChats.view(candidate.id, candidate.contentHash, parsed.payload.savedAt)
     return {
       status: 'card',
       recordId: candidate.id,

@@ -273,3 +273,52 @@ test('link：旧聚合无 resumePointers 字段归一化为空', async () => {
   const pointers = readPointers(localRoot);
   assert.equal(pointers.length, 1);
 });
+
+test('view：干净 profile（记录 savedAt 早于本机登记时刻）→ unavailable pointer-not-here', async () => {
+  const { service, localRoot } = makeService({ noAggregate: true });
+  // 干净 home 启动会自动登记新实例：registry.json 里有晚于记录保存时刻的 createdAt。
+  mkdirSync(localRoot, { recursive: true });
+  const createdAt = new Date(Date.now() + 60_000).toISOString();
+  writeFileSync(path.join(localRoot, 'registry.json'), JSON.stringify({
+    schemaVersion: 1,
+    instances: [{ instanceId: INSTANCE_ID, projectId: 'p', sourceRoot: '/tmp/unused', sourceKind: 'custom', sourceGeneration: 1, createdAt, updatedAt: createdAt }],
+  }, null, 2) + '\n');
+  // 聚合缺失 → binding-expired 优先于 savedAt 判据（指针态无从谈起）。
+  const view1 = await service.view(RECORD_ID, RECORD_HASH, '2026-11-20T00:00:00Z');
+  assert.equal(view1.status, 'unavailable');
+  // 有聚合但无指针、登记晚于保存 → 记录来自其他环境。
+  const localRoot2 = mkdtempSync(path.join(artifacts, 'resume-chat-clean-'));
+  mkdirSync(localRoot2, { recursive: true });
+  const dir2 = path.join(localRoot2, 'instances', INSTANCE_ID);
+  mkdirSync(dir2, { recursive: true });
+  writeFileSync(path.join(dir2, 'state.json'), JSON.stringify({
+    schemaVersion: 1, instanceId: INSTANCE_ID, projectId: 'p',
+    source: { root: '/tmp/unused', kind: 'custom', generation: 1 },
+    revisions: { plan: 0, state: 0 },
+    conversations: { links: [], intents: [] },
+    workIntents: [], workSuggestions: [], workRuns: [], operations: [], lastObservation: null,
+  }, null, 2) + '\n');
+  writeFileSync(path.join(localRoot2, 'registry.json'), JSON.stringify({
+    schemaVersion: 1,
+    instances: [{ instanceId: INSTANCE_ID, projectId: 'p', sourceRoot: '/tmp/unused', sourceKind: 'custom', sourceGeneration: 1, createdAt, updatedAt: createdAt }],
+  }, null, 2) + '\n');
+  const store2 = new LocalStateStore({ clock });
+  const service2 = new ResumeChatService({
+    localRoot: localRoot2, instanceId: INSTANCE_ID, store: store2,
+    queue: new InstanceCommandQueue(), clock, directory: new FakeDirectory(),
+    findRecord: async () => ({ contentHash: RECORD_HASH }),
+  });
+  const view2 = await service2.view(RECORD_ID, RECORD_HASH, '2026-11-20T00:00:00Z');
+  assert.deepEqual(view2, { status: 'unavailable', reason: 'pointer-not-here' });
+});
+
+test('view：本机保存的记录（savedAt 晚于登记时刻）未选聊天 → unlinked', async () => {
+  const { service, localRoot } = makeService();
+  const createdAt = new Date(Date.now() - 600_000).toISOString();
+  writeFileSync(path.join(localRoot, 'registry.json'), JSON.stringify({
+    schemaVersion: 1,
+    instances: [{ instanceId: INSTANCE_ID, projectId: 'p', sourceRoot: '/tmp/unused', sourceKind: 'custom', sourceGeneration: 1, createdAt, updatedAt: createdAt }],
+  }, null, 2) + '\n');
+  const view = await service.view(RECORD_ID, RECORD_HASH, new Date().toISOString());
+  assert.equal(view.status, 'unlinked');
+});

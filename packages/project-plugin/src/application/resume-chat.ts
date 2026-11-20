@@ -129,8 +129,11 @@ export class ResumeChatService {
   /**
    * 卡片投影：当前候选记录的指针三态。聚合不可读（干净 profile／隔离）→ unavailable，
    * 卡片本身来自公开记录，仍显示摘要；不回退、不冒充。
+   * 指针缺失时用「记录 savedAt 早于本机实例登记时刻」区分两种诚实语义：
+   * 记录来自其他环境（指针必不在此）→ unavailable(pointer-not-here)；
+   * 本机保存时未选聊天 → unlinked。
    */
-  async view(recordId: string, contentHash: string): Promise<ResumeChatPointerView> {
+  async view(recordId: string, contentHash: string, savedAt?: string): Promise<ResumeChatPointerView> {
     if (typeof recordId !== 'string' || recordId === '' || typeof contentHash !== 'string' || contentHash === '') {
       return { status: 'unavailable', reason: 'operation-mismatch' };
     }
@@ -140,7 +143,21 @@ export class ResumeChatService {
     const pointer = resumePointersOf(aggregate.resumePointers).find(
       (p) => p.recordId === recordId && p.contentHash === contentHash,
     );
-    if (pointer === undefined) return { status: 'unlinked' };
+    if (pointer === undefined) {
+      if (typeof savedAt === 'string' && savedAt !== '' && Number.isFinite(Date.parse(savedAt))) {
+        try {
+          const registry = await this.deps.store.readRegistry(this.deps.localRoot);
+          const entry = registry.instances.find((item) => item.instanceId === this.deps.instanceId);
+          if (entry !== undefined && Number.isFinite(Date.parse(entry.createdAt))
+            && Date.parse(savedAt) < Date.parse(entry.createdAt)) {
+            return { status: 'unavailable', reason: 'pointer-not-here' };
+          }
+        } catch {
+          // 注册表不可读：回退 unlinked（诚实缺省，不猜）。
+        }
+      }
+      return { status: 'unlinked' };
+    }
     const link = conversationStateOf(aggregate.conversations).links.find((l) => l.linkId === pointer.linkId);
     if (link === undefined) return { status: 'unavailable', reason: 'resume-link-missing' };
     let visible: boolean | null;
