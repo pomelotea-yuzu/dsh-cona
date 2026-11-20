@@ -46,6 +46,17 @@
 
 任务 3.3 H 层实测完成并勾选，见 [真机探针记录](implementation/2026-11-20-3.3-host-probe.md)。probe-36 16/16：保存时从多条本机链接明确选一（宿主空白会话复用语义下用 linkChat 构造两个真实会话）→ 指针 `linked` 精确匹配 → 点击「打开原聊天」经 `resumeChatTarget` 复查（确切 sessionId）→ 会话界面真实出现（O11 核心分句）；解绑回读摘要保留 +「原聊天在此不可用」（O12 前半）。probe-37 7/7：干净 profile 摘要可读 + 无打开动作 + 原会话不在 + 公开 records 无 session-/linkId/workRunId/resumePointer 字样 + 旧实例 `forbidden` + 当前实例 `pointer-not-here`（O12 后半；探针发现干净 profile 语义缺口并以「savedAt 早于登记时刻」判据修复）。probe-38 7/7：en 渲染 + ja 英文回退 + zh 对照 + 无原始 key 泄漏（O13 回退分句）。探针另修复卡片刷新早于指针写的时序 bug。**O07/O11/O12/O13 产品场景仍保持 `untested`**（不改标 pass）：O07 的故障注入由单测覆盖（F 层分项）；O11 的 A 有 WorkRun 保存 B/开始动作禁用/工具拒绝与 O13 的运行中切换 UI 属 4.1 闭环。
 
+## 4.1 宿主闭环注记（2026-11-20）
+
+任务 4.1 的 H 层闭环完成，见 [实施记录](implementation/2026-11-20-4.1-host-closed-loop.md)；六段真实宿主探针合计 50/50（baseline 7、work 8、main 14、restart 7、clean 8、locale 6）。固定 DSH `0.2.2-rc.2`、预构建 tarball（sha256 `038f4c75…475338`）、独立 profile、Playwright Chromium，宿主 Node `v24.21.0`。
+
+- **O11 可验分句（H pass）**：A 的生效 WorkRun（`workPrepare→start→consumed`，targets/version/effective 正确）在浏览 B、`conaOverview/execute` 保存 B 接续后逐项不变；A 的两条 Client `follow` 订阅前后存活；A 公开记录未被 B 停点污染；重启后旧 WorkRun `effective=false`、无运行复活、A 资料树与记录保留、A/B 接续卡片回读成功。
+- **O12（H pass）**：新建干净 home 自动登记 `89c33dd3…`@proj-b（空聚合），接续摘要可读 +「原聊天在此不可用」+ 无打开动作；旧实例 `forbidden`、`pointer-not-here`、宿主会话列表无原 Session；proj-b 全部 10 个公开记录文件无 `session-`/`linkId`/`workRunId`/`resumePointer` 私有字段。
+- **O13（H pass）**：账号菜单→设置→语言 English 运行中切换，`<html lang>` zh-CN→en、概览文案英文化、无原始 key、面板仍交互、无页面错误；切换持久化到 `cordis.patch.yml.preference=en`。
+- **O11 未测分句（保持 untested）**：B 会话无 A 绑定时工具拒绝、B 的插件开始动作禁用、B 节点关联两个真实会话并打开确切 Session——design §2 明确「切换运行实例与 B 自动 WorkRun 留后续 change」，`conaOverview` 无 `createChat/linkChat`，B 无本机聊天链接，H 层无法构造；工具准入由 R1 6.2/6.3 覆盖，多聊天打开由 3.3 probe-36 在 A 上覆盖。不冒充通过。
+- 观测到的约束（非产品失败）：`overview-service.ts:245` 卡片投影硬编码 `connectionGeneration:0`，配置实例 A 被 `conaProject/follow` 推进代际后其概览卡片短暂 `stale-connection`；B 实例独立状态不受影响。留给 R6 试用确认。
+- O01–O10 状态不因 4.1 改变；O10（引用查阅/越界）不在 4.1 场景内，维持 `untested`。
+
 ## 编写交接
 
 2026-11-18 在本机使用 Node `26.13.0` 与独立安装的 OpenSpec `1.17.0`。`openspec validate add-project-overview-and-resume --type change --strict --no-interactive --json` 返回 `valid: true`，1 项通过，0 问题。`node scripts/check-repo.mjs --all` 在包含新增文件和索引改动的临时 Git 快照中通过，洁净度 0 失败、0 警告，文档链接与双语检查均为 0 问题。13 个增量场景与 O01–O13 逐项对应。
