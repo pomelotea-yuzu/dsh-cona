@@ -57,6 +57,12 @@
 - 观测到的约束（非产品失败）：`overview-service.ts:245` 卡片投影硬编码 `connectionGeneration:0`，配置实例 A 被 `conaProject/follow` 推进代际后其概览卡片短暂 `stale-connection`；B 实例独立状态不受影响。留给 R6 试用确认。
 - O01–O10 状态不因 4.1 改变；O10（引用查阅/越界）不在 4.1 场景内，维持 `untested`。
 
+## 4.2 R1 回归注记（2026-11-20）
+
+任务 4.2 完成，见 [实施记录](implementation/2026-11-20-4.2-r1-regression.md)。R1 三项回归在 R2 预构建包（sha256 `038f4c75…475338`）上复跑合计 **21/21**：V15 实例不符 6/6（overview 未登记实例、follow 实例不符、execute 项目不符均 `forbidden`，同 operationId 换参数 `operation-mismatch`）、V32 重连 8/8（follow 订阅、断线、重订阅、代际推进、草稿保留、树回读、落盘；R2 面板路由由 `conaProject/*` 变为 `conaOverview/*`，语义不变）、V37 卸载重装 7/7（同实例、11 节点/10 记录/planVersion/草稿/聊天链接保留、旧 WorkRun `effective=false`）。这些回归支撑 O03（未登记/非 owner 拒绝）、O11 隔离结论在 R2 下不退化；不改变本 change 各场景状态。
+
+门禁按 CI 固定版本核对：OpenSpec 1.17.0 严格校验 1/1、pnpm 12.18.0 相符；宿主自带 Node `24.21.0` 二进制下 check-repo（118 篇 0 问题）与 305/305 测试通过；shell 默认 Node 22.22.2 与 CI 差异已用宿主 Node 补跑消除。诚实边界：V37 真实 Agent split+record 分句因本机隔离 home 无 LLM 凭证受阻（`blocked`），R1 历史 pass 为当时临时凭证证据，本轮不伪造；可重复步骤与宿主限制写入实施记录留 R6。
+
 ## 编写交接
 
 2026-11-18 在本机使用 Node `26.13.0` 与独立安装的 OpenSpec `1.17.0`。`openspec validate add-project-overview-and-resume --type change --strict --no-interactive --json` 返回 `valid: true`，1 项通过，0 问题。`node scripts/check-repo.mjs --all` 在包含新增文件和索引改动的临时 Git 快照中通过，洁净度 0 失败、0 警告，文档链接与双语检查均为 0 问题。13 个增量场景与 O01–O13 逐项对应。
