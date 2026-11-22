@@ -2,7 +2,7 @@
 // 规则：
 // - 顶层固定为 schemaVersion / project / plan / planVersion / records，未知字段先拒绝；
 // - id 为小写 RFC-4122 v4 形态 UUID（crypto.randomUUID 输出形态）；
-// - 根节点 parentId 为 null，同级 order 从 0 连续；单根树；父子无环；
+// - 根节点 parentId 为 null，同级 order 从 0 连续；允许多个根（森林）；父子无环；
 // - dependencies 为有向关系集合：两端存在、不自依赖、无重复、无环；
 // - planVersion 形态 sha256:<lowercase-hex>；传入 sha256 时与重算指纹比对；
 // - 节点 status === 'done' 必须有非空 completionCriteria，且存在指向该节点的
@@ -165,7 +165,7 @@ export function validatePlanStructure(plan: { nodes: WorkNode[]; dependencies: D
     }
   });
 
-  // 父节点存在 + 单根 + 父链无环（从每个节点向上走，重访即环）。
+  // 父节点存在 + 至少一个根（允许多根）+ 父链无环（从每个节点向上走，重访即环）。
   const parentIdOf = new Map<string, string | null>();
   for (const node of nodes) {
     if (typeof node.id === 'string' && UUID_RE.test(node.id)) {

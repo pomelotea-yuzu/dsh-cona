@@ -8,7 +8,22 @@ export {
   validatePlanStructure,
   TOP_LEVEL_KEYS,
 } from './validate.js';
-export { addNodes, splitNode, setDependencies } from './transforms.js';
+export { addNodes, splitNode, setDependencies, moveNode, instantiateTemplate } from './transforms.js';
+export {
+  validatePreset,
+  FEATURE_DEVELOPMENT_PRESET,
+  PRESET_SOURCE,
+  PRESET_CONTENT_LOCALES,
+} from './presets.js';
+export type {
+  PresetDescriptor,
+  PresetContentLocale,
+  PresetSource,
+  PresetNodeRef,
+  PresetNodeText,
+  PresetContent,
+  PresetDependencyRef,
+} from './presets.js';
 export {
   referencedBodyPaths,
   findOrphanBodies,

@@ -4,6 +4,8 @@
 import type { DependencyEdge, Plan, TransformResult, WorkNode } from './types.js';
 import { validatePlanStructure } from './validate.js';
 import { UUID_RE } from './validate-constants.js';
+import type { PresetContentLocale, PresetDescriptor } from './presets.js';
+import { validatePreset } from './presets.js';
 
 function fail(...codes: { code: string; path: string; message?: string }[]): TransformResult<never> {
   return { ok: false, issues: codes };
@@ -73,6 +75,224 @@ export function splitNode(plan: Plan, parentId: string, newChildren: readonly Wo
   }
   const normalized = newChildren.map((child) => ({ ...child, parentId }));
   return addNodes(plan, normalized);
+}
+
+/**
+ * 移动节点：以目标父节点 `parentId`（null 表示根组）和同级锚点 `beforeNodeId`
+ * （null 表示追加到同级末尾）定位。先从原同级组取出节点，再插入目标组并重编号
+ * 两个受影响的同级组。
+ *
+ * v1 允许多根森林：根节点只在根组内重排，非根节点以现有节点为目标父节点。
+ * 根降为子节点、非根升为根、移到自身或后代之下、锚定自身、缺失节点或锚点
+ * 不属于目标同级组均整体拒绝。节点 id、子树内部关系、目标、完成条件、状态、
+ * 显式依赖与记录引用保持原值；不产生新的依赖边。
+ */
+export function moveNode(
+  plan: Plan,
+  nodeId: string,
+  parentId: string | null,
+  beforeNodeId: string | null,
+): TransformResult<Plan> {
+  const node = plan.nodes.find((item) => item.id === nodeId);
+  if (node === undefined) {
+    return fail({ code: 'node-not-found', path: '/plan/nodes', message: `节点 ${nodeId} 不存在` });
+  }
+
+  const isRoot = node.parentId === null;
+  const targetIsRoot = parentId === null;
+  if (isRoot && !targetIsRoot) {
+    return fail({ code: 'root-to-child', path: '/plan/nodes', message: '根节点不能降为子节点' });
+  }
+  if (!isRoot && targetIsRoot) {
+    return fail({ code: 'child-to-root', path: '/plan/nodes', message: '非根节点不能升为根' });
+  }
+
+  if (!targetIsRoot) {
+    const targetParent = plan.nodes.find((item) => item.id === parentId);
+    if (targetParent === undefined) {
+      return fail({ code: 'parent-not-found', path: '/plan/nodes', message: `目标父节点 ${parentId} 不存在` });
+    }
+    // 目标父节点不能是被移动节点本身或其后代，否则会形成父链环。
+    const seen = new Set<string>();
+    let cursor: string | null = parentId;
+    while (cursor !== null) {
+      if (cursor === nodeId) {
+        return fail({ code: 'invalid-parent', path: '/plan/nodes', message: '不能把节点移到自身或其后代之下' });
+      }
+      if (seen.has(cursor)) break;
+      seen.add(cursor);
+      cursor = plan.nodes.find((item) => item.id === cursor)?.parentId ?? null;
+    }
+  }
+
+  if (beforeNodeId !== null) {
+    if (beforeNodeId === nodeId) {
+      return fail({ code: 'invalid-anchor', path: '/plan/nodes', message: '不能把节点锚定到自身' });
+    }
+    const anchor = plan.nodes.find((item) => item.id === beforeNodeId);
+    if (anchor === undefined) {
+      return fail({ code: 'invalid-anchor', path: '/plan/nodes', message: `锚点节点 ${beforeNodeId} 不存在` });
+    }
+    if (anchor.parentId !== parentId) {
+      return fail({ code: 'invalid-anchor', path: '/plan/nodes', message: '锚点不属于目标同级组' });
+    }
+  }
+
+  const sourceParentId = node.parentId;
+  const byParent = new Map<string | null, WorkNode[]>();
+  for (const item of plan.nodes) {
+    const key = item.parentId;
+    const list = byParent.get(key) ?? [];
+    list.push({ ...item, completionCriteria: [...item.completionCriteria] });
+    byParent.set(key, list);
+  }
+  for (const list of byParent.values()) {
+    list.sort((a, b) => a.order - b.order);
+  }
+
+  const sourceList = byParent.get(sourceParentId) as WorkNode[];
+  sourceList.splice(sourceList.findIndex((item) => item.id === nodeId), 1);
+
+  let targetList = byParent.get(parentId);
+  if (targetList === undefined) {
+    targetList = [];
+    byParent.set(parentId, targetList);
+  }
+  const insertAt = beforeNodeId === null ? targetList.length : targetList.findIndex((item) => item.id === beforeNodeId);
+  targetList.splice(insertAt, 0, { ...node, parentId, completionCriteria: [...node.completionCriteria] });
+
+  const nodes: WorkNode[] = [];
+  for (const list of byParent.values()) {
+    list.forEach((item, index) => {
+      item.order = index;
+      nodes.push(item);
+    });
+  }
+  const candidate: Plan = {
+    nodes,
+    dependencies: plan.dependencies.map((edge) => ({ ...edge })),
+  };
+  const issues = validatePlanStructure(candidate);
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+  return { ok: true, value: candidate };
+}
+
+/**
+ * 实例化内置流程预设：由应用层为每个模板节点分配一个新项目节点 ID（顺序与预设
+ * nodes 一致），模板根的 parentId 用 `parentId`（须为现有节点，null 表示根组 —
+ * 但插入要求现有父节点，故 null 以 parent-not-found 拒绝），`beforeNodeId` 定位同级
+ * 插入点。模板本地键只映射本次父子与内部依赖；新节点从 todo 开始，既有节点与依赖
+ * 原样保留。预设描述、语言、ID、位置任一非法时整体拒绝。
+ */
+export function instantiateTemplate(
+  plan: Plan,
+  preset: PresetDescriptor,
+  contentLocale: PresetContentLocale,
+  newIds: readonly string[],
+  parentId: string | null,
+  beforeNodeId: string | null,
+): TransformResult<Plan> {
+  const presetIssues = validatePreset(preset);
+  if (presetIssues.length > 0) {
+    return fail({ code: 'template-invalid', path: '/template', message: '预设描述无效' });
+  }
+  if (!preset.contentLocales.includes(contentLocale)) {
+    return fail({ code: 'template-locale-unsupported', path: '/contentLocale', message: `不支持的正文语言 ${String(contentLocale)}` });
+  }
+  if (newIds.length !== preset.nodes.length) {
+    return fail({ code: 'template-id-count-mismatch', path: '/newIds', message: '分配 ID 数量与模板节点数不一致' });
+  }
+  const existingIds = new Set(plan.nodes.map((node) => node.id));
+  const batchIds = new Set<string>();
+  for (const [index, id] of newIds.entries()) {
+    if (!UUID_RE.test(id)) {
+      return fail({ code: 'invalid-uuid', path: `/newIds/${index}`, message: '新节点 ID 必须是 v4 UUID' });
+    }
+    if (existingIds.has(id)) {
+      return fail({ code: 'duplicate-node-id', path: `/newIds/${index}`, message: '新节点 ID 与现有节点冲突' });
+    }
+    if (batchIds.has(id)) {
+      return fail({ code: 'duplicate-node-id', path: `/newIds/${index}`, message: '批内 ID 重复' });
+    }
+    batchIds.add(id);
+  }
+
+  if (parentId === null || !existingIds.has(parentId)) {
+    return fail({ code: 'parent-not-found', path: '/plan/nodes', message: `目标父节点 ${String(parentId)} 不存在` });
+  }
+  if (beforeNodeId !== null) {
+    const anchor = plan.nodes.find((node) => node.id === beforeNodeId);
+    if (anchor === undefined || anchor.parentId !== parentId) {
+      return fail({ code: 'invalid-anchor', path: '/plan/nodes', message: '锚点不属于目标同级组' });
+    }
+  }
+
+  const keyToId = new Map<string, string>();
+  preset.nodes.forEach((templateNode, index) => {
+    keyToId.set(templateNode.key, newIds[index] as string);
+  });
+
+  const text = preset.text[contentLocale];
+  const created: WorkNode[] = preset.nodes.map((templateNode, index) => {
+    const localText = text[templateNode.key]!;
+    const parentKey = templateNode.parentKey;
+    return {
+      id: newIds[index] as string,
+      parentId: parentKey === null ? parentId : keyToId.get(parentKey)!,
+      order: templateNode.order,
+      title: localText.title,
+      goal: localText.goal,
+      completionCriteria: [...localText.completionCriteria],
+      status: 'todo',
+    };
+  });
+  const templateRoot = created.find((node) => node.id === keyToId.get(preset.nodes.find((n) => n.parentKey === null)!.key))!;
+
+  const injectedDeps: DependencyEdge[] = preset.dependencies.map((edge) => ({
+    nodeId: keyToId.get(edge.nodeKey)!,
+    requiresNodeId: keyToId.get(edge.requiresKey)!,
+  }));
+
+  // 目标同级组：既有节点 + 模板根，按锚点插入并重编号。
+  const byParent = new Map<string | null, WorkNode[]>();
+  for (const item of plan.nodes) {
+    const list = byParent.get(item.parentId) ?? [];
+    list.push({ ...item, completionCriteria: [...item.completionCriteria] });
+    byParent.set(item.parentId, list);
+  }
+  for (const list of byParent.values()) list.sort((a, b) => a.order - b.order);
+  const targetList = byParent.get(parentId) ?? [];
+  const insertAt = beforeNodeId === null ? targetList.length : targetList.findIndex((item) => item.id === beforeNodeId);
+  targetList.splice(insertAt, 0, templateRoot);
+  if (!byParent.has(parentId)) byParent.set(parentId, targetList);
+
+  // 模板根以外的节点按各自 parentId 挂到对应组；created 顺序即模板同级顺序，保持相对次序。
+  for (const desc of created) {
+    if (desc.id === templateRoot.id) continue;
+    const list = byParent.get(desc.parentId) ?? [];
+    list.push(desc);
+    byParent.set(desc.parentId, list);
+  }
+
+  const nodes: WorkNode[] = [];
+  for (const list of byParent.values()) {
+    list.forEach((item, index) => {
+      item.order = index;
+      nodes.push(item);
+    });
+  }
+
+  const candidate: Plan = {
+    nodes,
+    dependencies: [...plan.dependencies.map((edge) => ({ ...edge })), ...injectedDeps],
+  };
+  const issues = validatePlanStructure(candidate);
+  if (issues.length > 0) {
+    return { ok: false, issues: [{ code: 'template-invalid', path: '/template', message: '实例化结果未通过 v1 结构校验' }, ...issues] };
+  }
+  return { ok: true, value: candidate };
 }
 
 /**

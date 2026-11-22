@@ -2,7 +2,7 @@
 // 新节点身份由应用层生成后传入；命令不接受模型指定的新节点 id 来覆盖旧节点。
 
 import { computePlanVersion } from './canonical/plan-fingerprint.js';
-import { addNodes, setDependencies, splitNode } from './transforms.js';
+import { addNodes, moveNode, setDependencies, splitNode } from './transforms.js';
 import type {
   DependencyEdge,
   NodeStatus,
@@ -84,13 +84,14 @@ export function appendRecordIndex(
   return { ok: true, value: [...records, entry] };
 }
 
-/** 规划命令：add-nodes / update-node / split-node / set-dependencies / set-node-status。 */
+/** 规划命令：add-nodes / update-node / split-node / set-dependencies / set-node-status / move-node。 */
 export type PlanCommand =
   | { type: 'add-nodes'; nodes: WorkNode[] }
   | { type: 'update-node'; nodeId: string; patch: NodePatch }
   | { type: 'split-node'; parentId: string; children: WorkNode[] }
   | { type: 'set-dependencies'; dependencies: DependencyEdge[] }
-  | { type: 'set-node-status'; nodeId: string; status: NodeStatus };
+  | { type: 'set-node-status'; nodeId: string; status: NodeStatus }
+  | { type: 'move-node'; nodeId: string; parentId: string | null; beforeNodeId: string | null };
 
 /**
  * 应用规划命令并重算指纹；最后用完整文档校验兜底（含 done 完成条件、引用完整性）。
@@ -117,6 +118,9 @@ export function applyPlanCommand(
       break;
     case 'set-node-status':
       result = setNodeStatus(doc.plan, command.nodeId, command.status);
+      break;
+    case 'move-node':
+      result = moveNode(doc.plan, command.nodeId, command.parentId, command.beforeNodeId);
       break;
     default: {
       const exhaustive: never = command;
