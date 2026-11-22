@@ -16,7 +16,7 @@ R1（`openspec/changes/archive/2026-11-19-establish-r1-project-plugin/`）已于
 
 R2 首切片 `openspec/changes/archive/2026-11-20-add-project-overview-and-resume/` 已于 2026-11-20 归档：增量 spec `project-overview-resume`（6 Req／13 Scenario）并入主 `openspec/specs/`、纯新增未改 R1 规范；13 个验证场景状态保持 `untested`、实测证据入矩阵注记，8 项 tasks 全部勾选（1.1/2.1/2.2/3.1 的仍待子项经复核已由后续覆盖；2.2 的草稿切回/跨页 UI 实测仍缺，在矩阵 O02 保持 `untested`、不放宽）。4.1 H 层闭环 50/50、4.2 R1 回归 21/21，V37 真实 Agent 分句无凭证 `blocked`；逐条见该归档的 validation-matrix 与 [收尾核对](openspec/changes/archive/2026-11-20-add-project-overview-and-resume/implementation/2026-11-20-archive-final-audit.md)。
 
-活动 change [add-project-tree-editing-and-composition](openspec/changes/add-project-tree-editing-and-composition/proposal.md) 为 R2 第二切片，覆盖同级重排、子树移动与内置流程插入，DSH 与 QoderCN 已确认放行，待用户安排实施。
+R2 第二切片 `openspec/changes/archive/2026-11-22-add-project-tree-editing-and-composition/` 已于 2026-11-22 归档：增量 spec `project-tree-editing`（6 Req／14 Scenario）并入主 `openspec/specs/`、纯新增未改既有规范；17 项 tasks 全部勾选，矩阵 T01/T02/T03/T05/T06/T07/T08/T09/T10/T14 为 `pass`，T04（B 无建聊天入口，Session 分句）、T11（H 层中断/迟到响应）、T13（无 verification 记录可核）保持 `untested`，T12 真实 Agent 分句因 profile 未登录 `blocked`（owner 侧 7/7 有 H 证据）。固定 DSH `0.2.2-rc.2` 宿主实测包 sha256 `8c4f26ce…08ff17ddd`，焦点恢复缺陷于 4.x 修复；逐条见该归档的 validation-matrix 与 [收尾核对](openspec/changes/archive/2026-11-22-add-project-tree-editing-and-composition/implementation/2026-11-22-archive-final-audit.md)。
 
 ## 权威性
 

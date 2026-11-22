@@ -2,7 +2,7 @@
 
 [R2 第二切片提案](proposal.md)及其[设计](design.md)、[增量规范](specs/project-tree-editing/spec.md)、[任务](tasks.md)和[验证矩阵](validation-matrix.md)已齐备，作者为 Codex 会话。DSH 与 QoderCN 已在第三轮分别确认放行。 [审阅处理](review-response.md)
 
-产品实施由用户按[仓库工作流](../../../docs/development/workflow.md)另行安排。
+产品实施由用户按[仓库工作流](../../../../docs/development/workflow.md)另行安排。
 
 ## 范围选择
 

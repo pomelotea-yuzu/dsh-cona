@@ -9,9 +9,9 @@
 ### 范围与方法
 
 - 通读 [proposal](proposal.md)、[design](design.md)、[增量 spec](specs/project-tree-editing/spec.md)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md)、[author-handoff](2026-11-20-author-handoff.md)，以及 `AGENTS.md`／`openspec/changes/README.md` 的索引改动。
-- 对照主 specs：[project-command-commit](../../specs/project-command-commit/spec.md)、[project-panel-sync](../../specs/project-panel-sync/spec.md)、[project-overview-resume](../../specs/project-overview-resume/spec.md)、[project-conversation-context](../../specs/project-conversation-context/spec.md)、[plugin-localization](../../specs/plugin-localization/spec.md)、[portable-project-data](../../specs/portable-project-data/spec.md)。
-- 对照源码：`packages/project-plugin/src/domain/`（types／validate／transforms／commands）、`application/`（command-service／work／snapshot／baseline／local-state）、`host/`（overview-service／project-service／project-tools／owner-admission）、`client/`（panel-controller／project-overview-controller），以及 [v1 schema](../../../packages/project-plugin/formats/v1/project-v1.schema.json)、[plan-vectors.json](../../../packages/project-plugin/formats/v1/plan-vectors.json)、[plan-canonicalization.md](../../../packages/project-plugin/formats/v1/plan-canonicalization.md)、[resume.ts](../../../packages/project-plugin/src/domain/resume.ts#L37)。
-- 对照文档：[工作流](../../../docs/development/workflow.md)、[决策](../../../docs/knowledge/decisions.md)、[产品设计](../../../docs/product/2026-11-11-project-management-design.md#动态项目树)、[架构](../../../docs/architecture/2026-11-11-project-development-architecture.md#用户搭建与拼接)、[路线图](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md)、[i18n 设计](../../../docs/architecture/2026-11-12-plugin-i18n-design.md)。
+- 对照主 specs：[project-command-commit](../../../specs/project-command-commit/spec.md)、[project-panel-sync](../../../specs/project-panel-sync/spec.md)、[project-overview-resume](../../../specs/project-overview-resume/spec.md)、[project-conversation-context](../../../specs/project-conversation-context/spec.md)、[plugin-localization](../../../specs/plugin-localization/spec.md)、[portable-project-data](../../../specs/portable-project-data/spec.md)。
+- 对照源码：`packages/project-plugin/src/domain/`（types／validate／transforms／commands）、`application/`（command-service／work／snapshot／baseline／local-state）、`host/`（overview-service／project-service／project-tools／owner-admission）、`client/`（panel-controller／project-overview-controller），以及 [v1 schema](../../../../packages/project-plugin/formats/v1/project-v1.schema.json)、[plan-vectors.json](../../../../packages/project-plugin/formats/v1/plan-vectors.json)、[plan-canonicalization.md](../../../../packages/project-plugin/formats/v1/plan-canonicalization.md)、[resume.ts](../../../../packages/project-plugin/src/domain/resume.ts#L37)。
+- 对照文档：[工作流](../../../../docs/development/workflow.md)、[决策](../../../../docs/knowledge/decisions.md)、[产品设计](../../../../docs/product/2026-11-11-project-management-design.md#动态项目树)、[架构](../../../../docs/architecture/2026-11-11-project-development-architecture.md#用户搭建与拼接)、[路线图](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md)、[i18n 设计](../../../../docs/architecture/2026-11-12-plugin-i18n-design.md)。
 - 只做静态与自动测试核对，未启动真实 DSH 宿主；14 个产品场景仍全部 `untested`。不把 CI 通过当作产品通过。
 
 ### 复跑校验
@@ -28,9 +28,9 @@
 
 1. **工件与映射齐备，状态诚实。** proposal／design／一份增量 spec／tasks／validation-matrix／author-handoff 齐全；6 项需求、14 个场景与 T01–T14 逐一对应；17 项 tasks 均未勾选，14 项矩阵均为 `untested`；审阅开始前无 `review.md`，无预填 review、无预勾选。计数与交接一致。
 2. **范围与产品路线图一致。** 同级重排、子树移动、内置流程插入落在 R2 第二切片；用户模板、分组、合并、复制、撤销／重做、文件骨架与项目提炼明确留给后续，产品设计中的“像搭积木一样搭建与拼接”没有被扩大解释为一次交付全部交互。
-3. **数据结构与 R1 协议复用合理。** 继续使用 v1 的 `parentId`／`order`／节点与依赖字段，不新增公开字段；移动只改父子与同级顺序，节点 ID、记录和聊天引用不变；插入生成新 ID、`todo` 起始、内部依赖映射，发布结果可由旧 v1 读者读取。这与 [架构的搭建与拼接](../../../docs/architecture/2026-11-11-project-development-architecture.md#用户搭建与拼接) 的方向一致。
+3. **数据结构与 R1 协议复用合理。** 继续使用 v1 的 `parentId`／`order`／节点与依赖字段，不新增公开字段；移动只改父子与同级顺序，节点 ID、记录和聊天引用不变；插入生成新 ID、`todo` 起始、内部依赖映射，发布结果可由旧 v1 读者读取。这与 [架构的搭建与拼接](../../../../docs/architecture/2026-11-11-project-development-architecture.md#用户搭建与拼接) 的方向一致。
 4. **提交与恢复基础成立。** 现有 `ProjectCommandService` 已有每实例串行队列、提交前重读、持久意图、回执、三态发布、双修订和恢复核对；`requestDigest` 覆盖命令与基线，`allocateIds`／`replay` 支持原 `operationId` 返回原结果，新操作号生成独立子树。新增命令可以复用这些机制，`tasks` 2.2／2.3 的验证点也落在这些机制上。
-5. **owner／实例准入方向成立。** `conaOverview` 已有 owner 准入、实例登记核对与 `projectId` 校验；`conaProject` 为配置实例的 owner 入口；新增命令只由 `remote-owner` 发起，符合“现有 Agent 不因新入口扩权”的意图。`project_apply` 的 `PLANNING_TYPES` 白名单仍只允许原有五类命令（[project-tools.ts](../../../packages/project-plugin/src/host/project-tools.ts#L164)），新增命令不会自动成为 Agent 工具。
+5. **owner／实例准入方向成立。** `conaOverview` 已有 owner 准入、实例登记核对与 `projectId` 校验；`conaProject` 为配置实例的 owner 入口；新增命令只由 `remote-owner` 发起，符合“现有 Agent 不因新入口扩权”的意图。`project_apply` 的 `PLANNING_TYPES` 白名单仍只允许原有五类命令（[project-tools.ts](../../../../packages/project-plugin/src/host/project-tools.ts#L164)），新增命令不会自动成为 Agent 工具。
 6. **界面与 i18n 方向成立。** 拖放与键盘菜单共用位置模型、预览与已保存可辨、取消恢复焦点、按实例隔离草稿、连接／源代际／修订守卫，均能挂到现有 `PanelController` 与 `project-overview-controller` 上；中英字典与英文回退沿现有 locale 方案。
 7. **验收设计分层清楚。** A／F／H 分层、T01–T14 的观察点、矩阵 `pass` 门槛与运行记录要求，延续 R1／R2 首切片的做法；未把静态校验、替身或 CI 当作宿主实测。
 8. **索引改动正确。** `AGENTS.md` 的活动 change 指向本目录，`openspec/changes/README.md` 新增一行且状态为“待独立双审”，旧的“当前无活动 change”已删除；仓库门禁与链接检查通过。
@@ -52,8 +52,8 @@
 
 #### A1 · v1 根规则写错（须处理）
 
-- **事实。** [design](design.md#L5) 写“v1 要求单根”，[spec](specs/project-tree-editing/spec.md#L24) 写“发布结果 MUST 符合 v1 单根、连续同级顺序和父子无环规则”。但当前实现只拒绝“零个根”，不拒绝多根：[validate.ts](../../../packages/project-plugin/src/domain/validate.ts#L182-L186) 在 `rootIds.length === 0` 时报 `root-count`，注释明确写“协议向量（plan-zh-base）确认 v1 允许多根森林”；[transforms.ts](../../../packages/project-plugin/src/domain/transforms.ts#L14) 也写“v1 允许多根森林”。[plan-vectors.json](../../../packages/project-plugin/formats/v1/plan-vectors.json) 的 `plan-zh-base` 是正向向量，含三个 `parentId: null`、`order` 0／1／2 的根节点；[v1 schema](../../../packages/project-plugin/formats/v1/project-v1.schema.json) 没有“恰好一个根”的约束。源码与协议向量都比 design 的概括更权威（[AGENTS.md 权威性](../../../AGENTS.md#权威性)）。
-- **影响。** 这条错误的验收规则会让实现者或验证者把合法的多根 v1 资料判为不合规，或者为了“单根”做不必要的迁移；T01／T05 也不会覆盖多根文件。现有 [validate.ts](../../../packages/project-plugin/src/domain/validate.ts#L5) 顶部注释也写“单根树”，与同文件 183 行冲突，说明该错误容易在实现时被继承。
+- **事实。** [design](design.md#L5) 写“v1 要求单根”，[spec](specs/project-tree-editing/spec.md#L24) 写“发布结果 MUST 符合 v1 单根、连续同级顺序和父子无环规则”。但当前实现只拒绝“零个根”，不拒绝多根：[validate.ts](../../../../packages/project-plugin/src/domain/validate.ts#L182-L186) 在 `rootIds.length === 0` 时报 `root-count`，注释明确写“协议向量（plan-zh-base）确认 v1 允许多根森林”；[transforms.ts](../../../../packages/project-plugin/src/domain/transforms.ts#L14) 也写“v1 允许多根森林”。[plan-vectors.json](../../../../packages/project-plugin/formats/v1/plan-vectors.json) 的 `plan-zh-base` 是正向向量，含三个 `parentId: null`、`order` 0／1／2 的根节点；[v1 schema](../../../../packages/project-plugin/formats/v1/project-v1.schema.json) 没有“恰好一个根”的约束。源码与协议向量都比 design 的概括更权威（[AGENTS.md 权威性](../../../../AGENTS.md#权威性)）。
+- **影响。** 这条错误的验收规则会让实现者或验证者把合法的多根 v1 资料判为不合规，或者为了“单根”做不必要的迁移；T01／T05 也不会覆盖多根文件。现有 [validate.ts](../../../../packages/project-plugin/src/domain/validate.ts#L5) 顶部注释也写“单根树”，与同文件 183 行冲突，说明该错误容易在实现时被继承。
 - **要求。** 把规则改成 v1 实际规则：至少一个根、每个父节点下的同级 `order` 从 0 连续（含 `null` 根组）、父子无环、依赖两端存在且无环。若产品确实要“单项目根”，把它写成独立的产品约束，并说明多根 v1 文件如何进入本切片（拒绝、要求先人工归并、还是保留森林并限制操作）；不要把它冒充为 v1 的格式要求。T01／T05 至少增加一个多根夹具，或明确声明多根输入不在本切片验收范围。
 
 #### A2 · “项目根”与根级同级重排未定义（须处理）
@@ -67,8 +67,8 @@
 
 #### A3 · 活动 WorkRun 的“接受当前基线”没有实现路径（须处理）
 
-- **事实。** [design](design.md#L30) 写“规划变化后的旧写请求按现有基线规则处理，重新取得写资格仍走已有准入”，[spec](specs/project-tree-editing/spec.md#L61-L62) 写“继续写入须按已有规则取得接受当前基线的绑定”。但当前代码的准入是严格相等：[work.ts](../../../packages/project-plugin/src/application/work.ts#L635-L643) 要求命令的 `expectedPlanVersion`／`expectedPlanRevision`／`sourceEpoch` 与 `run.acceptedBaseline` 完全一致，否则 `binding-expired`。`acceptedBaseline` 只在**该运行自己的**规划提交成功后由 `afterPlanCommit` 推进（[work.ts](../../../packages/project-plugin/src/application/work.ts#L652-L671)）；`captureBinding` 只读取旧值（[work.ts](../../../packages/project-plugin/src/application/work.ts#L529-L574)）；`continueScope` 只增加目标、推进绑定版本，不更新 `acceptedBaseline`（[work.ts](../../../packages/project-plugin/src/application/work.ts#L727)）。同一会话存在活动运行时，新消息消费会被 `deferred`，不能并行开新运行。  
-  因此，owner 通过树编辑器移动或插入后，Agent 即使 `project_read` 拿到新的 `planVersion`／`planRevision`，`project_apply` 仍会因绑定已接受基线过旧而 `binding-expired`。现有测试“6.4 提交后新基线绑定”只覆盖该运行自己提交后的推进，没有覆盖 owner 外部提交。`project_read` 文档称其用于“取得后续写入所需的明确最新基线”（[tool-protocol.md](../../../packages/project-plugin/docs/tool-protocol.md#L21)），在 owner 改变规划后与准入实际行为冲突。
+- **事实。** [design](design.md#L30) 写“规划变化后的旧写请求按现有基线规则处理，重新取得写资格仍走已有准入”，[spec](specs/project-tree-editing/spec.md#L61-L62) 写“继续写入须按已有规则取得接受当前基线的绑定”。但当前代码的准入是严格相等：[work.ts](../../../../packages/project-plugin/src/application/work.ts#L635-L643) 要求命令的 `expectedPlanVersion`／`expectedPlanRevision`／`sourceEpoch` 与 `run.acceptedBaseline` 完全一致，否则 `binding-expired`。`acceptedBaseline` 只在**该运行自己的**规划提交成功后由 `afterPlanCommit` 推进（[work.ts](../../../../packages/project-plugin/src/application/work.ts#L652-L671)）；`captureBinding` 只读取旧值（[work.ts](../../../../packages/project-plugin/src/application/work.ts#L529-L574)）；`continueScope` 只增加目标、推进绑定版本，不更新 `acceptedBaseline`（[work.ts](../../../../packages/project-plugin/src/application/work.ts#L727)）。同一会话存在活动运行时，新消息消费会被 `deferred`，不能并行开新运行。  
+  因此，owner 通过树编辑器移动或插入后，Agent 即使 `project_read` 拿到新的 `planVersion`／`planRevision`，`project_apply` 仍会因绑定已接受基线过旧而 `binding-expired`。现有测试“6.4 提交后新基线绑定”只覆盖该运行自己提交后的推进，没有覆盖 owner 外部提交。`project_read` 文档称其用于“取得后续写入所需的明确最新基线”（[tool-protocol.md](../../../../packages/project-plugin/docs/tool-protocol.md#L21)），在 owner 改变规划后与准入实际行为冲突。
 - **影响。** T12 的“继续写入须按已有规则取得接受当前基线的绑定”、tasks 2.4 的“显式取得当前写资格仍走既有准入”、tasks 4.4 的“显式续权”都无法按字面执行：当前唯一可行的“新绑定”是结束当前运行后，由新的 owner 工作意图／运行在真实边界重建；活动运行内没有“接受当前基线”的入口。若作者想表达“运行内可继续”，则需要新增机制；若想表达“只能等新运行”，则 T12／2.4／4.4 的措辞必须改成这个可执行步骤，不能写成“已有规则”。
 - **要求。** 二选一并落到 design／spec／tasks：  
   (a) 增加 owner 专用的“接受当前基线”或新绑定版本机制，保持 targets／allowedActions 不变，只更新 acceptedBaseline 与绑定版本，并补任务和测试；或  
@@ -77,7 +77,7 @@
 
 #### A4 · T13 的“接续卡片提示规划基线已变”缺少数据与实现（须处理）
 
-- **事实。** [spec](specs/project-tree-editing/spec.md#L86) 要求“接续卡片按既有规则保留历史结果并提示规划基线已变”，[matrix](validation-matrix.md#L19) T13 要求“卡片显示原有验证状态及规划待核对原因”。但现有接续载荷 [ResumePayload](../../../packages/project-plugin/src/domain/resume.ts#L37-L58) 只有停点、下一步、成果、决定、未解决问题与历史验证引用，没有保存 `planVersion`／规划基线；`resumeCandidate` 返回 `payload + codeObservation + chat`（[overview-service.ts](../../../packages/project-plugin/src/host/overview-service.ts#L229-L277)），没有规划基线对比；保存路径把接续写成 `execution-note`，没有写入规划基线或 verification（[project-overview-controller.ts](../../../packages/project-plugin/src/client/project-overview-controller.ts#L308-L390)）。R2 首切片的 [O08 矩阵](../archive/2026-11-20-add-project-overview-and-resume/validation-matrix.md#L14) 仍是 `untested`，[收尾核对](../archive/2026-11-20-add-project-overview-and-resume/implementation/2026-11-20-archive-final-audit.md#L20) 明确“规划/HEAD/工件变化矩阵未全跑”，3.2c 实施记录也只交付代码观察（[3.2c](../archive/2026-11-20-add-project-overview-and-resume/implementation/2026-11-19-3.2-work-copy.md)）。R2 design 虽写“对照保存时的 planVersion”，但当前代码没有该字段。
+- **事实。** [spec](specs/project-tree-editing/spec.md#L86) 要求“接续卡片按既有规则保留历史结果并提示规划基线已变”，[matrix](validation-matrix.md#L19) T13 要求“卡片显示原有验证状态及规划待核对原因”。但现有接续载荷 [ResumePayload](../../../../packages/project-plugin/src/domain/resume.ts#L37-L58) 只有停点、下一步、成果、决定、未解决问题与历史验证引用，没有保存 `planVersion`／规划基线；`resumeCandidate` 返回 `payload + codeObservation + chat`（[overview-service.ts](../../../../packages/project-plugin/src/host/overview-service.ts#L229-L277)），没有规划基线对比；保存路径把接续写成 `execution-note`，没有写入规划基线或 verification（[project-overview-controller.ts](../../../../packages/project-plugin/src/client/project-overview-controller.ts#L308-L390)）。R2 首切片的 [O08 矩阵](../../archive/2026-11-20-add-project-overview-and-resume/validation-matrix.md#L14) 仍是 `untested`，[收尾核对](../../archive/2026-11-20-add-project-overview-and-resume/implementation/2026-11-20-archive-final-audit.md#L20) 明确“规划/HEAD/工件变化矩阵未全跑”，3.2c 实施记录也只交付代码观察（[3.2c](../../archive/2026-11-20-add-project-overview-and-resume/implementation/2026-11-19-3.2-work-copy.md)）。R2 design 虽写“对照保存时的 planVersion”，但当前代码没有该字段。
 - **影响。** T13 的“提示规划基线已变”无法由现有数据产生；如果按现状执行，只能验证“历史验证状态 + 代码观察”，不能验证规划基线。把它写成“既有规则”会让执行者误以为该能力已存在，或用一个无法复现的观察点交差。
 - **要求。** 二选一：  
   (a) 在本 change 增加任务：在接续记录中保存可移植的规划基线（例如 `ResumePayload` 的可选字段，或既有 verification 的 `subjectVersion`），读取时与当前快照比较并给出“规划已变”的待核对状态；同时补格式兼容、旧记录无基线、解析失败与 T13 的验证。  
@@ -86,19 +86,19 @@
 
 #### B1 · Agent 结构能力被收窄但未写明延期（建议处理）
 
-- **事实。** 产品设计写“Agent 可提出或执行新增、拆分、重排、合并、替换、取消与重新打开节点”（[产品设计](../../../docs/product/2026-11-11-project-management-design.md#动态项目树)），架构也把“拖动／缩进／移出”和“插入流程块”放在用户与 Agent 共用的提交协议中（[架构](../../../docs/architecture/2026-11-11-project-development-architecture.md#用户搭建与拼接)）。本 change 明确“移动和插入由 owner 发起”（[proposal](proposal.md#L14)），spec 也要求“由受信 owner 发起”（[spec](specs/project-tree-editing/spec.md#L52)）；Agent 工具白名单仍只有原五类命令（[project-tools.ts](../../../packages/project-plugin/src/host/project-tools.ts#L164)）。
+- **事实。** 产品设计写“Agent 可提出或执行新增、拆分、重排、合并、替换、取消与重新打开节点”（[产品设计](../../../../docs/product/2026-11-11-project-management-design.md#动态项目树)），架构也把“拖动／缩进／移出”和“插入流程块”放在用户与 Agent 共用的提交协议中（[架构](../../../../docs/architecture/2026-11-11-project-development-architecture.md#用户搭建与拼接)）。本 change 明确“移动和插入由 owner 发起”（[proposal](proposal.md#L14)），spec 也要求“由受信 owner 发起”（[spec](specs/project-tree-editing/spec.md#L52)）；Agent 工具白名单仍只有原五类命令（[project-tools.ts](../../../../packages/project-plugin/src/host/project-tools.ts#L164)）。
 - **影响。** 如果这是有意的 R2 安全取舍，读者会从“现有 Agent 在原有动作和目标授权内继续使用既有工具”读出一半信息：Agent 不能用新命令，但原因与后续计划没有写。若这是无意收窄，则与产品基线冲突。
 - **要求。** 在 proposal 的“后续范围”或 design 的 Non-Goals 中明确写“本切片先只开放 owner 入口；Agent 发起的移动／插入留待后续（原因：…）”，并说明 Agent 现有新增／拆分／改状态不受影响。若决定本切片就支持 Agent，则补动作映射、目标范围、根级新增拒绝、绑定与测试；不要只留一句“既有工具”。
 
 #### B2 · 一份草稿与“切换语言后新开预览”的交互未对齐（建议处理）
 
-- **事实。** [design](design.md#L32) 写“结构草稿与既有节点编辑共享面板的待保存编辑。开始另一编辑时显式保留原草稿或先由用户处理原草稿”，[spec](specs/project-tree-editing/spec.md#L20) 写“应用提示用户处理已有节点内容草稿后再开始另一编辑”。现有 `PanelDraft` 注释明确“同一时间只保留一份，避免合并冲突”（[panel-controller.ts](../../../packages/project-plugin/src/client/panel-controller.ts#L24)）。[design](design.md#L39) 又写“切换宿主语言时保留待保存正文……用当前语言重新选择模板即可创建新的预览”，[spec](specs/project-tree-editing/spec.md#L94-L95)／T14 则写“再保存原预览并新开一个预设预览”。
+- **事实。** [design](design.md#L32) 写“结构草稿与既有节点编辑共享面板的待保存编辑。开始另一编辑时显式保留原草稿或先由用户处理原草稿”，[spec](specs/project-tree-editing/spec.md#L20) 写“应用提示用户处理已有节点内容草稿后再开始另一编辑”。现有 `PanelDraft` 注释明确“同一时间只保留一份，避免合并冲突”（[panel-controller.ts](../../../../packages/project-plugin/src/client/panel-controller.ts#L24)）。[design](design.md#L39) 又写“切换宿主语言时保留待保存正文……用当前语言重新选择模板即可创建新的预览”，[spec](specs/project-tree-editing/spec.md#L94-L95)／T14 则写“再保存原预览并新开一个预设预览”。
 - **影响。** “显式保留原草稿”可以被读成“同时保留内容草稿和结构草稿”，与一份草稿模型冲突；切换语言后“即可创建新预览”也可能被读成在旧预览未保存时直接替换。T03／T14 的步骤因此有两种执行方式，结论会不同。
 - **要求。** 统一为“同一时间一份草稿；已有内容草稿时先保存或放弃，再开始结构编辑”，并把 T14 的步骤写成“先保存（或明确放弃）中文预览，再切换语言、重新选择模板创建新预览”；或者明确允许每实例多份结构预览，并补面板模型与 T03／T14 的对照测试。不要只用“保留原草稿”这一句覆盖两种语义。
 
 #### B3 · “成功展示以有效回读为依据”与现有 `save()` 行为不一致（建议处理）
 
-- **事实。** [spec](specs/project-tree-editing/spec.md#L66) 要求“成功展示 MUST 以已确认回执及有效回读为依据”；[design](design.md#L37) 写“提交成功后从权威快照显示新结构”。现有 `save()` 在提交后调用 `reloadQuietly`，无论回读成功与否都把状态标为 `saved`；`reloadQuietly` 只捕获异常并 `markOffline`（[panel-controller.ts](../../../packages/project-plugin/src/client/panel-controller.ts#L304-L356)、[同文件](../../../packages/project-plugin/src/client/panel-controller.ts#L463-L470)）。tasks 3.3 已写“成功状态依赖有效回读”，但 design／spec 没有定义回读失败时的可见状态。
+- **事实。** [spec](specs/project-tree-editing/spec.md#L66) 要求“成功展示 MUST 以已确认回执及有效回读为依据”；[design](design.md#L37) 写“提交成功后从权威快照显示新结构”。现有 `save()` 在提交后调用 `reloadQuietly`，无论回读成功与否都把状态标为 `saved`；`reloadQuietly` 只捕获异常并 `markOffline`（[panel-controller.ts](../../../../packages/project-plugin/src/client/panel-controller.ts#L304-L356)、[同文件](../../../../packages/project-plugin/src/client/panel-controller.ts#L463-L470)）。tasks 3.3 已写“成功状态依赖有效回读”，但 design／spec 没有定义回读失败时的可见状态。
 - **影响。** 结构保存可能显示“已保存”而界面仍是旧树，违反本 spec 的成功条件；如果实现只改结构保存，节点编辑仍保留旧行为，验收口径会分叉。
 - **要求。** 定义“回执已提交、回读失败／未同步”时的状态（例如 `pending-read`／`saved-unverified`，提供重试，不显示普通 `saved`），并说明本 change 只改结构保存还是同时修正既有保存路径；把该状态加入 T09／T10 或 tasks 3.3 的观察点。若无法在本次修正，应把 spec 的成功条件收窄到“回执已确认且至少一次有效快照”，并如实标注剩余风险。
 
@@ -110,7 +110,7 @@
 
 #### C1 · 结构操作的变更原因与“受影响节点”未说明（建议）
 
-- **事实。** 架构要求“用户与 Agent 操作共用第 9 节的提交协议，记录来源、原因和受影响节点”（[架构](../../../docs/architecture/2026-11-11-project-development-architecture.md#用户搭建与拼接)）。现有面板的变更原因记录以 `draft.nodeId` 作为 `subjectNodeIds`（[panel-controller.ts](../../../packages/project-plugin/src/client/panel-controller.ts#L341-L363)）；移动的受影响节点可能包括移动子树根、原父级、目标父级与两侧兄弟，插入的新节点 ID 又由 Host 分配、回执不返回。本 change 没有说明结构操作是否沿用变更原因，以及 `subjectNodeIds` 取哪些节点。
+- **事实。** 架构要求“用户与 Agent 操作共用第 9 节的提交协议，记录来源、原因和受影响节点”（[架构](../../../../docs/architecture/2026-11-11-project-development-architecture.md#用户搭建与拼接)）。现有面板的变更原因记录以 `draft.nodeId` 作为 `subjectNodeIds`（[panel-controller.ts](../../../../packages/project-plugin/src/client/panel-controller.ts#L341-L363)）；移动的受影响节点可能包括移动子树根、原父级、目标父级与两侧兄弟，插入的新节点 ID 又由 Host 分配、回执不返回。本 change 没有说明结构操作是否沿用变更原因，以及 `subjectNodeIds` 取哪些节点。
 - **建议。** 明确“沿用现有变更原因；移动以移动根（必要时加目标父级）为主体，插入以目标父级为主体；新节点 ID 不在客户端回执中，故不写入 subject”，或明确“结构操作不写变更原因，留待后续”。后者需要与架构的“记录原因”说明差异。
 
 #### C2 · 措辞与覆盖建议（建议）
@@ -135,9 +135,9 @@
 ### 范围与方法
 
 - 通读 [proposal](proposal.md)、[design](design.md)、[增量 spec](specs/project-tree-editing/spec.md)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md)、[author-handoff](2026-11-20-author-handoff.md)，以及 `AGENTS.md`／`openspec/changes/README.md` 的索引改动（git diff 核对）。
-- 对照主 specs：[project-command-commit](../../specs/project-command-commit/spec.md)、[project-panel-sync](../../specs/project-panel-sync/spec.md)、[project-overview-resume](../../specs/project-overview-resume/spec.md)。
-- 对照源码（均本会话逐行读取）：[validate.ts](../../../packages/project-plugin/src/domain/validate.ts#L168-L216)、[transforms.ts](../../../packages/project-plugin/src/domain/transforms.ts#L14)、[resume.ts](../../../packages/project-plugin/src/domain/resume.ts#L10-L55)、[work.ts](../../../packages/project-plugin/src/application/work.ts#L529-L816)（captureBinding／authorizeAgentCommand／afterPlanCommit／continueScope／commandAction）、[command-service.ts](../../../packages/project-plugin/src/application/command-service.ts#L255-L287)（requestDigest／execute 准入／noBusinessChange／allocateIds／replay／afterPlanCommit 调用点）、[local-state.ts](../../../packages/project-plugin/src/application/local-state.ts#L84-L92)、[overview-service.ts](../../../packages/project-plugin/src/host/overview-service.ts#L229-L277)、[project-tools.ts](../../../packages/project-plugin/src/host/project-tools.ts#L164)、[panel-controller.ts](../../../packages/project-plugin/src/client/panel-controller.ts#L24-L37)（PanelDraft／save／reloadQuietly／appendReason）、[v1 schema](../../../packages/project-plugin/formats/v1/project-v1.schema.json)、[plan-vectors.json](../../../packages/project-plugin/formats/v1/plan-vectors.json)（脚本解析 plan-zh-base）、[tool-protocol.md](../../../packages/project-plugin/docs/tool-protocol.md#L21)。
-- 对照文档：[工作流](../../../docs/development/workflow.md)、[产品设计](../../../docs/product/2026-11-11-project-management-design.md#动态项目树)、[架构](../../../docs/architecture/2026-11-11-project-development-architecture.md#用户搭建与拼接)、[路线图](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md)。
+- 对照主 specs：[project-command-commit](../../../specs/project-command-commit/spec.md)、[project-panel-sync](../../../specs/project-panel-sync/spec.md)、[project-overview-resume](../../../specs/project-overview-resume/spec.md)。
+- 对照源码（均本会话逐行读取）：[validate.ts](../../../../packages/project-plugin/src/domain/validate.ts#L168-L216)、[transforms.ts](../../../../packages/project-plugin/src/domain/transforms.ts#L14)、[resume.ts](../../../../packages/project-plugin/src/domain/resume.ts#L10-L55)、[work.ts](../../../../packages/project-plugin/src/application/work.ts#L529-L816)（captureBinding／authorizeAgentCommand／afterPlanCommit／continueScope／commandAction）、[command-service.ts](../../../../packages/project-plugin/src/application/command-service.ts#L255-L287)（requestDigest／execute 准入／noBusinessChange／allocateIds／replay／afterPlanCommit 调用点）、[local-state.ts](../../../../packages/project-plugin/src/application/local-state.ts#L84-L92)、[overview-service.ts](../../../../packages/project-plugin/src/host/overview-service.ts#L229-L277)、[project-tools.ts](../../../../packages/project-plugin/src/host/project-tools.ts#L164)、[panel-controller.ts](../../../../packages/project-plugin/src/client/panel-controller.ts#L24-L37)（PanelDraft／save／reloadQuietly／appendReason）、[v1 schema](../../../../packages/project-plugin/formats/v1/project-v1.schema.json)、[plan-vectors.json](../../../../packages/project-plugin/formats/v1/plan-vectors.json)（脚本解析 plan-zh-base）、[tool-protocol.md](../../../../packages/project-plugin/docs/tool-protocol.md#L21)。
+- 对照文档：[工作流](../../../../docs/development/workflow.md)、[产品设计](../../../../docs/product/2026-11-11-project-management-design.md#动态项目树)、[架构](../../../../docs/architecture/2026-11-11-project-development-architecture.md#用户搭建与拼接)、[路线图](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md)。
 - 只做静态与自动测试核对，未启动真实 DSH 宿主；14 个产品场景仍全部 `untested`，不把 CI 通过当作产品通过。
 
 ### 复跑校验
@@ -154,9 +154,9 @@
 
 1. **工件齐备、状态诚实。** 6 项需求、14 个场景与 T01–T14 逐一对应；17 项 tasks 均未勾选，14 项矩阵均为 `untested`；无作者预填 review（审 1 节为外部审阅记录）、无预勾选；计数与交接一致。索引改动正确：AGENTS.md 活动 change 指向本目录，README 新增行状态“待独立双审”。
 2. **范围切分与 R2 路线图一致。** 同级重排、子树移动、内置流程插入为本切片；用户模板、分组、合并、复制、撤销／重做、文件骨架明确留后续，未把产品设计的“搭积木”扩大为一次交付全部交互。
-3. **v1 字段复用与无变化回执语义成立。** 移动只改 `parentId`／`order`，节点 ID、记录与聊天引用不变；现有 [noBusinessChange 判定](../../../packages/project-plugin/src/application/command-service.ts#L727-L729)（候选指纹等于基线 → impact `state`、规划修订不推进）支持 design 的“原位动作保持原值”；同级 order 从 0 连续按父分组（含 `null` 根组）校验（[validate.ts](../../../packages/project-plugin/src/domain/validate.ts#L200-L216)）。
-4. **提交与恢复机制复用成立。** [requestDigest](../../../packages/project-plugin/src/application/command-service.ts#L255-L265) 覆盖命令与输入基线、不含 operationId；[replay](../../../packages/project-plugin/src/application/command-service.ts#L593-L608) 同号换参数拒绝、原号返回原结果；[allocateIds](../../../packages/project-plugin/src/application/command-service.ts#L1023-L1028) 在意图中固定新 ID，支持插入重试同一批节点。tasks 2.2／2.3 的验证点落在这些机制上。
-5. **owner／实例准入与 Agent 不扩权方向成立。** `conaOverview` 的 deny／requireId／resolveInstance 保护读取与写入；[remote-owner 路径不走工作绑定](../../../packages/project-plugin/src/application/command-service.ts#L276-L283)，两条入口判据独立；[PLANNING_TYPES](../../../packages/project-plugin/src/host/project-tools.ts#L164) 仍只允许原五类命令，[commandAction](../../../packages/project-plugin/src/application/work.ts#L187-L202) 无新命令动作映射，新增命令不会自动成为 Agent 工具。
+3. **v1 字段复用与无变化回执语义成立。** 移动只改 `parentId`／`order`，节点 ID、记录与聊天引用不变；现有 [noBusinessChange 判定](../../../../packages/project-plugin/src/application/command-service.ts#L727-L729)（候选指纹等于基线 → impact `state`、规划修订不推进）支持 design 的“原位动作保持原值”；同级 order 从 0 连续按父分组（含 `null` 根组）校验（[validate.ts](../../../../packages/project-plugin/src/domain/validate.ts#L200-L216)）。
+4. **提交与恢复机制复用成立。** [requestDigest](../../../../packages/project-plugin/src/application/command-service.ts#L255-L265) 覆盖命令与输入基线、不含 operationId；[replay](../../../../packages/project-plugin/src/application/command-service.ts#L593-L608) 同号换参数拒绝、原号返回原结果；[allocateIds](../../../../packages/project-plugin/src/application/command-service.ts#L1023-L1028) 在意图中固定新 ID，支持插入重试同一批节点。tasks 2.2／2.3 的验证点落在这些机制上。
+5. **owner／实例准入与 Agent 不扩权方向成立。** `conaOverview` 的 deny／requireId／resolveInstance 保护读取与写入；[remote-owner 路径不走工作绑定](../../../../packages/project-plugin/src/application/command-service.ts#L276-L283)，两条入口判据独立；[PLANNING_TYPES](../../../../packages/project-plugin/src/host/project-tools.ts#L164) 仍只允许原五类命令，[commandAction](../../../../packages/project-plugin/src/application/work.ts#L187-L202) 无新命令动作映射，新增命令不会自动成为 Agent 工具。
 6. **验收分层清楚。** A／F／H 分层、矩阵 `pass` 门槛与运行记录要求延续 R1／R2 做法；未把静态校验或替身当宿主实测。
 
 ### 问题
@@ -176,7 +176,7 @@
 
 #### 2-A1 · v1 根规则写错（须处理）
 
-- **事实。** [design](design.md#L5) 写“v1 要求单根”，[spec](specs/project-tree-editing/spec.md#L24) 写“发布结果 MUST 符合 v1 单根……”。本会话核对：[validate.ts](../../../packages/project-plugin/src/domain/validate.ts#L182-L186) 仅在 `rootIds.length === 0` 时报 `root-count`，183 行注释明确“协议向量（plan-zh-base）确认 v1 允许多根森林”；[transforms.ts](../../../packages/project-plugin/src/domain/transforms.ts#L14) 同；脚本解析 [plan-vectors.json](../../../packages/project-plugin/formats/v1/plan-vectors.json) 的 `plan-zh-base` 正向向量含三个 `parentId: null`、`order` 0／1／2 的根（阶段1／2／3）；[v1 schema](../../../packages/project-plugin/formats/v1/project-v1.schema.json) 的 `plan.nodes` 仅为数组，无任何根数约束。另 [validate.ts](../../../packages/project-plugin/src/domain/validate.ts#L168) 行注释仍写“单根”，与 183 行自相矛盾，实现时易被继承。
+- **事实。** [design](design.md#L5) 写“v1 要求单根”，[spec](specs/project-tree-editing/spec.md#L24) 写“发布结果 MUST 符合 v1 单根……”。本会话核对：[validate.ts](../../../../packages/project-plugin/src/domain/validate.ts#L182-L186) 仅在 `rootIds.length === 0` 时报 `root-count`，183 行注释明确“协议向量（plan-zh-base）确认 v1 允许多根森林”；[transforms.ts](../../../../packages/project-plugin/src/domain/transforms.ts#L14) 同；脚本解析 [plan-vectors.json](../../../../packages/project-plugin/formats/v1/plan-vectors.json) 的 `plan-zh-base` 正向向量含三个 `parentId: null`、`order` 0／1／2 的根（阶段1／2／3）；[v1 schema](../../../../packages/project-plugin/formats/v1/project-v1.schema.json) 的 `plan.nodes` 仅为数组，无任何根数约束。另 [validate.ts](../../../../packages/project-plugin/src/domain/validate.ts#L168) 行注释仍写“单根”，与 183 行自相矛盾，实现时易被继承。
 - **影响。** 按此验收会把合法多根 v1 资料判为不合规，或引发不必要的“单根化”迁移；T01／T04／T05 夹具（“根的空阶段”等）全部默认单根，多根输入无覆盖。
 - **要求。** 改写为 v1 实际规则：至少一个根、每个父节点（含 `null` 根组）下同级 `order` 从 0 连续、父子无环、依赖两端存在且无环。若产品要“单项目根”，写成独立产品约束并说明多根 v1 文件的进入方式（拒绝／先归并／保留森林并限制操作）；T01／T05 增加多根夹具，或明确声明多根输入不在本切片验收范围。顺手修正 validate.ts:168 的过时注释可列为实施任务。
 
@@ -188,31 +188,31 @@
 
 #### 2-A3 · 活动 WorkRun 在 owner 结构提交后无续权路径（须处理）
 
-- **事实。** [spec](specs/project-tree-editing/spec.md#L62) 写“继续写入须按已有规则取得接受当前基线的绑定”，[design](design.md#L33)、[tasks 2.4](tasks.md#L16)／[4.4](tasks.md#L30)、T12 同。本会话核对：[authorizeAgentCommand](../../../packages/project-plugin/src/application/work.ts#L634-L644) 要求命令基线与 `run.acceptedBaseline` 严格相等，否则 `binding-expired`；[afterPlanCommit](../../../packages/project-plugin/src/application/work.ts#L652-L672) 只推进**该运行自己**提交后的基线，且[调用点仅在 `ctx.kind === 'agent-work'`](../../../packages/project-plugin/src/application/command-service.ts#L913-L923)——owner（remote-owner）提交不触发任何运行的基线推进；[captureBinding](../../../packages/project-plugin/src/application/work.ts#L561-L574) 只读旧值；[continueScope](../../../packages/project-plugin/src/application/work.ts#L790-L798) 只增目标、bump 绑定版本，不更新 `acceptedBaseline`；现有测试“同会话已有活动绑定时另一消息消费：意图保留待执行（deferred）”确认不能并行开新运行。因此 owner 移动／插入后，活动运行内 Agent 即使 `project_read` 拿到新基线，写入仍被拒，运行内不存在“接受当前基线”的入口。[tool-protocol.md](../../../packages/project-plugin/docs/tool-protocol.md#L21) 称 `project_read` 用于“取得后续写入所需的明确最新基线”，在 owner 外部提交后误导。另 [架构](../../../docs/architecture/2026-11-11-project-development-architecture.md#L167) 明确“单纯重排不停止工作”，[产品设计](../../../docs/product/2026-11-11-project-management-design.md#L185) 要求按影响选择“继续／追加说明／等待边界／停止重派”；严格基线相等使 owner 重排事实上停止活动运行的写入，与该意图存在张力。
+- **事实。** [spec](specs/project-tree-editing/spec.md#L62) 写“继续写入须按已有规则取得接受当前基线的绑定”，[design](design.md#L33)、[tasks 2.4](tasks.md#L16)／[4.4](tasks.md#L30)、T12 同。本会话核对：[authorizeAgentCommand](../../../../packages/project-plugin/src/application/work.ts#L634-L644) 要求命令基线与 `run.acceptedBaseline` 严格相等，否则 `binding-expired`；[afterPlanCommit](../../../../packages/project-plugin/src/application/work.ts#L652-L672) 只推进**该运行自己**提交后的基线，且[调用点仅在 `ctx.kind === 'agent-work'`](../../../../packages/project-plugin/src/application/command-service.ts#L913-L923)——owner（remote-owner）提交不触发任何运行的基线推进；[captureBinding](../../../../packages/project-plugin/src/application/work.ts#L561-L574) 只读旧值；[continueScope](../../../../packages/project-plugin/src/application/work.ts#L790-L798) 只增目标、bump 绑定版本，不更新 `acceptedBaseline`；现有测试“同会话已有活动绑定时另一消息消费：意图保留待执行（deferred）”确认不能并行开新运行。因此 owner 移动／插入后，活动运行内 Agent 即使 `project_read` 拿到新基线，写入仍被拒，运行内不存在“接受当前基线”的入口。[tool-protocol.md](../../../../packages/project-plugin/docs/tool-protocol.md#L21) 称 `project_read` 用于“取得后续写入所需的明确最新基线”，在 owner 外部提交后误导。另 [架构](../../../../docs/architecture/2026-11-11-project-development-architecture.md#L167) 明确“单纯重排不停止工作”，[产品设计](../../../../docs/product/2026-11-11-project-management-design.md#L185) 要求按影响选择“继续／追加说明／等待边界／停止重派”；严格基线相等使 owner 重排事实上停止活动运行的写入，与该意图存在张力。
 - **影响。** T12“按原准入显式取得适用资格”、tasks 2.4“显式取得当前写资格仍走既有准入”、4.4“显式续权”均无法按字面执行；现有唯一可行路径是运行结束后由新的可信边界重建绑定。
 - **要求。** 二选一并落到 design／spec／tasks：(a) 新增 owner 专用“接受当前基线”机制（targets／allowedActions 不变，仅更新 acceptedBaseline 与绑定版本），补任务与测试；(b) 明确 owner 规划变化后活动运行写入资格停止、运行内不续权，继续写入须等新运行重建绑定，把 T12／2.4／4.4 改成该可验收步骤。若选 (b)，须说明与架构“单纯重排不停止工作”的差异处理（如按变更影响调用既有工作接续规则、提示用户），不能只写“按现有基线规则”。同时修正 tool-protocol 的“最新基线即可写入”表述。
 
 #### 2-A4 · T13 的“规划基线已变”缺少数据与实现（须处理）
 
-- **事实。** [spec](specs/project-tree-editing/spec.md#L86) 要求“接续卡片按既有规则保留历史结果并提示规划基线已变”，T13 要求“卡片显示原有验证状态及规划待核对原因”。本会话核对：[ResumePayload](../../../packages/project-plugin/src/domain/resume.ts#L37-L55) 只有停点、下一步、成果、决定、未解决问题与历史验证引用，无 `planVersion`／规划基线字段；[模块头注释](../../../packages/project-plugin/src/domain/resume.ts#L10) 明确“严格校验拒绝未知字段”，新增字段涉及正文版本与旧记录兼容；[resumeCandidate](../../../packages/project-plugin/src/host/overview-service.ts#L268-L276) 返回 `payload + codeObservation + chat`，无规划基线对比。主 spec [project-overview-resume](../../specs/project-overview-resume/spec.md#L57) 已 MUST“规划……基线变化……提示待核对”，但 R2 首切片归档时 O08 仍 `untested`、实际只交付代码观察——该能力是**规范已要求、代码未实现**，不是“既有规则”。
+- **事实。** [spec](specs/project-tree-editing/spec.md#L86) 要求“接续卡片按既有规则保留历史结果并提示规划基线已变”，T13 要求“卡片显示原有验证状态及规划待核对原因”。本会话核对：[ResumePayload](../../../../packages/project-plugin/src/domain/resume.ts#L37-L55) 只有停点、下一步、成果、决定、未解决问题与历史验证引用，无 `planVersion`／规划基线字段；[模块头注释](../../../../packages/project-plugin/src/domain/resume.ts#L10) 明确“严格校验拒绝未知字段”，新增字段涉及正文版本与旧记录兼容；[resumeCandidate](../../../../packages/project-plugin/src/host/overview-service.ts#L268-L276) 返回 `payload + codeObservation + chat`，无规划基线对比。主 spec [project-overview-resume](../../../specs/project-overview-resume/spec.md#L57) 已 MUST“规划……基线变化……提示待核对”，但 R2 首切片归档时 O08 仍 `untested`、实际只交付代码观察——该能力是**规范已要求、代码未实现**，不是“既有规则”。
 - **影响。** T13 的规划基线观察点无法由现有数据产生；写成“既有规则”会让执行者误以为能力已存在，或用不可复现的观察点交差。
 - **要求。** 二选一：(a) 本 change 增加任务：在接续记录保存可移植规划基线（处理正文版本兼容、旧记录无基线、解析失败），读取时与当前快照比较给出“规划已变”待核对，并补 T13 验证；(b) 从 spec／T13 删除规划基线提示，把 T13 限定为“历史验证状态 + 当前代码观察／未核对”，明确规划基线核对仍属 R2 O08 未测项、本切片不宣称覆盖——注意 (b) 不消除主 spec 的 MUST，只是不在本切片验收。无论哪种，tasks 4.5 与 spec／T13 同步修改。
 
 #### 2-B1 · Agent 结构能力收窄未写明延期（建议处理）
 
-- **事实。** [产品设计](../../../docs/product/2026-11-11-project-management-design.md#L179) 写“Agent 可提出或执行新增、拆分、重排、合并、替换、取消与重新打开节点”，[架构](../../../docs/architecture/2026-11-11-project-development-architecture.md#L165) 把拖放／插入放在用户与 Agent 共用提交协议中。本 change [proposal](proposal.md#L14)／[spec](specs/project-tree-editing/spec.md#L52) 限定 owner 发起；[PLANNING_TYPES](../../../packages/project-plugin/src/host/project-tools.ts#L164) 仍五类、[commandAction](../../../packages/project-plugin/src/application/work.ts#L187-L202) 无新命令映射。
+- **事实。** [产品设计](../../../../docs/product/2026-11-11-project-management-design.md#L179) 写“Agent 可提出或执行新增、拆分、重排、合并、替换、取消与重新打开节点”，[架构](../../../../docs/architecture/2026-11-11-project-development-architecture.md#L165) 把拖放／插入放在用户与 Agent 共用提交协议中。本 change [proposal](proposal.md#L14)／[spec](specs/project-tree-editing/spec.md#L52) 限定 owner 发起；[PLANNING_TYPES](../../../../packages/project-plugin/src/host/project-tools.ts#L164) 仍五类、[commandAction](../../../../packages/project-plugin/src/application/work.ts#L187-L202) 无新命令映射。
 - **影响。** “现有 Agent 在原有动作和目标授权内继续使用既有工具”只传达了一半信息：Agent 不能用新命令，但这是有意安全取舍还是无意收窄、后续何时开放，读者无法判断。
 - **要求。** 在 proposal“后续范围”或 design Non-Goals 明确“本切片仅开放 owner 入口；Agent 发起的移动／插入留待后续（原因：……）”，并说明 Agent 现有新增／拆分／改状态不受影响。若本切片即支持 Agent，则补动作映射、目标范围、根级限制、绑定与测试。
 
 #### 2-B2 · 一份草稿与语言切换预览未对齐（建议处理）
 
-- **事实。** [PanelDraft](../../../packages/project-plugin/src/client/panel-controller.ts#L24) 注释“同一时间只保留一份，避免合并冲突”，kind 仅 `update-goal`／`add-node`。[design](design.md#L32) 写“开始另一编辑时显式保留原草稿或先由用户处理原草稿”——“显式保留”可被读成同时保留内容与结构两份草稿；[spec](specs/project-tree-editing/spec.md#L20) 则写“提示用户处理已有节点内容草稿后再开始另一编辑”。[design](design.md#L39) 写“用当前语言重新选择模板即可创建新的预览”，[spec](specs/project-tree-editing/spec.md#L94-L95) 写“再保存原预览并新开一个预设预览”“新预览可使用当前可用语言”；预设正文仅中英（[design](design.md#L24)），第三种宿主语言下“当前语言”不可用。
+- **事实。** [PanelDraft](../../../../packages/project-plugin/src/client/panel-controller.ts#L24) 注释“同一时间只保留一份，避免合并冲突”，kind 仅 `update-goal`／`add-node`。[design](design.md#L32) 写“开始另一编辑时显式保留原草稿或先由用户处理原草稿”——“显式保留”可被读成同时保留内容与结构两份草稿；[spec](specs/project-tree-editing/spec.md#L20) 则写“提示用户处理已有节点内容草稿后再开始另一编辑”。[design](design.md#L39) 写“用当前语言重新选择模板即可创建新的预览”，[spec](specs/project-tree-editing/spec.md#L94-L95) 写“再保存原预览并新开一个预设预览”“新预览可使用当前可用语言”；预设正文仅中英（[design](design.md#L24)），第三种宿主语言下“当前语言”不可用。
 - **影响。** T03／T14 存在两种执行方式，结论不同；结构草稿需要新的 draft kind，与一份草稿模型的关系必须写明。
 - **要求。** 统一为“同一时间一份草稿；已有内容草稿时先保存或放弃，再开始结构编辑”；T14 步骤写成“先保存（或明确放弃）中文预览，再切换语言、以当前可用语言重新选择模板创建新预览”；design 的“当前语言”改为“当前可用语言”。若允许多份结构预览，则补面板模型与对照测试。
 
 #### 2-B3 · 成功展示与回读失败态（建议处理）
 
-- **事实。** [spec](specs/project-tree-editing/spec.md#L66) 要求“成功展示 MUST 以已确认回执及有效回读为依据”。现有 [save()](../../../packages/project-plugin/src/client/panel-controller.ts#L354-L356) 在提交后调用 `reloadQuietly`，无论回读成功与否都标 `saved`；[reloadQuietly](../../../packages/project-plugin/src/client/panel-controller.ts#L463-L470) 失败只 `markOffline`，界面可能仍是旧树。tasks 3.3 已写“成功状态依赖有效回读”，但 design／spec 未定义回读失败时的可见状态。
+- **事实。** [spec](specs/project-tree-editing/spec.md#L66) 要求“成功展示 MUST 以已确认回执及有效回读为依据”。现有 [save()](../../../../packages/project-plugin/src/client/panel-controller.ts#L354-L356) 在提交后调用 `reloadQuietly`，无论回读成功与否都标 `saved`；[reloadQuietly](../../../../packages/project-plugin/src/client/panel-controller.ts#L463-L470) 失败只 `markOffline`，界面可能仍是旧树。tasks 3.3 已写“成功状态依赖有效回读”，但 design／spec 未定义回读失败时的可见状态。
 - **影响。** 结构保存可能显示“已保存”而树未更新，违反本 spec 成功条件；只改结构保存会使节点编辑与结构保存验收口径分叉。
 - **要求。** 定义“回执已确认、回读失败／未同步”的状态（如 `saved-unverified`／`pending-read`，提供重试，不显示普通 `saved`），说明本 change 是否同时修正既有保存路径，并把该状态加入 T09／T10 或 tasks 3.3 观察点；若本次不修正，收窄 spec 成功条件并如实标注剩余风险。
 
@@ -224,7 +224,7 @@
 
 #### 2-C1 · 结构操作的变更原因主体（建议）
 
-- **事实。** [架构](../../../docs/architecture/2026-11-11-project-development-architecture.md#L165) 要求共用提交协议“记录来源、原因和受影响节点”。现有面板以 `[draft.nodeId]` 作为 `subjectNodeIds`（[panel-controller.ts](../../../packages/project-plugin/src/client/panel-controller.ts#L341-L342)）；移动的受影响节点含移动根、原／目标父级及两侧兄弟；插入的新节点 ID 由 Host 分配，且 [OperationResultSnapshot](../../../packages/project-plugin/src/application/local-state.ts#L84-L92) 不返回 nodeIds，客户端无法从回执取得插入主体。
+- **事实。** [架构](../../../../docs/architecture/2026-11-11-project-development-architecture.md#L165) 要求共用提交协议“记录来源、原因和受影响节点”。现有面板以 `[draft.nodeId]` 作为 `subjectNodeIds`（[panel-controller.ts](../../../../packages/project-plugin/src/client/panel-controller.ts#L341-L342)）；移动的受影响节点含移动根、原／目标父级及两侧兄弟；插入的新节点 ID 由 Host 分配，且 [OperationResultSnapshot](../../../../packages/project-plugin/src/application/local-state.ts#L84-L92) 不返回 nodeIds，客户端无法从回执取得插入主体。
 - **建议。** 明确“沿用变更原因；移动以移动根（必要时加目标父级）为主体，插入以目标父级为主体；新节点 ID 不在回执中，不写入 subject”，或明确结构操作暂不写原因并说明与架构的差异。
 
 #### 2-C2 · 措辞与覆盖（建议）
@@ -248,7 +248,7 @@
 ### 复审范围
 
 - 作者身份以 [审阅处理](review-response.md#L3) 与更新后的[交接](2026-11-20-author-handoff.md#L3) 为准：**Codex 会话**；本会话为 DSH 独立模型，未参与编写。首轮“同模型独立上下文”的保守标注已在上一节更正。
-- 通读修订后的 [proposal](proposal.md)、[design](design.md)、[增量 spec](specs/project-tree-editing/spec.md)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md)、[author-handoff](2026-11-20-author-handoff.md)、[review-response](review-response.md) 及 [tool-protocol](../../../packages/project-plugin/docs/tool-protocol.md#L21) 的 diff；逐条核对审 1 的 A1–A4／B1–B4／C1–C2 与审 2 的 2-A1–2-A4／2-B1–2-B4／2-C1–2-C2 是否按同一口径收敛。
+- 通读修订后的 [proposal](proposal.md)、[design](design.md)、[增量 spec](specs/project-tree-editing/spec.md)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md)、[author-handoff](2026-11-20-author-handoff.md)、[review-response](review-response.md) 及 [tool-protocol](../../../../packages/project-plugin/docs/tool-protocol.md#L21) 的 diff；逐条核对审 1 的 A1–A4／B1–B4／C1–C2 与审 2 的 2-A1–2-A4／2-B1–2-B4／2-C1–2-C2 是否按同一口径收敛。
 - 只做静态与自动测试核对，未启动真实 DSH 宿主；14 个产品场景仍全部 `untested`，不把 CI 当产品验证。
 
 ### 复跑校验
@@ -265,9 +265,9 @@
 
 | ID | 状态 | 复核依据 |
 |---|---|---|
-| A1／2-A1 | 已处理 | [design](design.md#L5) 改为“v1 支持一个或多个根”，[spec](specs/project-tree-editing/spec.md#L24) 改为“至少一个根、各同级组 order 连续、父子无环、依赖端点有效且无环”；[tasks 1.1](tasks.md#L7) 明确多根夹具并校正 v1 校验注释；[T01](validation-matrix.md#L7)／[T04](validation-matrix.md#L10)／[T05](validation-matrix.md#L11) 使用多根资料。与 `plan-zh-base` 及 [validate.ts](../../../packages/project-plugin/src/domain/validate.ts#L182-L186) 的实际行为一致。 |
+| A1／2-A1 | 已处理 | [design](design.md#L5) 改为“v1 支持一个或多个根”，[spec](specs/project-tree-editing/spec.md#L24) 改为“至少一个根、各同级组 order 连续、父子无环、依赖端点有效且无环”；[tasks 1.1](tasks.md#L7) 明确多根夹具并校正 v1 校验注释；[T01](validation-matrix.md#L7)／[T04](validation-matrix.md#L10)／[T05](validation-matrix.md#L11) 使用多根资料。与 `plan-zh-base` 及 [validate.ts](../../../../packages/project-plugin/src/domain/validate.ts#L182-L186) 的实际行为一致。 |
 | A2／2-A2 | 已处理 | [design](design.md#L17-L19) 定义根组（`parentId: null`）可在组内重排；根降子、非根升根、缺失节点、错误组锚点、自身锚点均拒绝；[spec](specs/project-tree-editing/spec.md#L24) 与 [T01](validation-matrix.md#L7)／[T05](validation-matrix.md#L11) 同口径；非根目标父节点为现有节点，插入不新建根。 |
-| A3／2-A3 | 已处理 | [design](design.md#L38-L40) 选择“运行继续、写入等旧运行结束后的新运行”；[spec](specs/project-tree-editing/spec.md#L52) 与 [T12](validation-matrix.md#L18) 分别核对旧运行两条拒绝路径（旧基线冲突、最新快照基线仍被绑定拒绝）和新运行按当前规划重新绑定；[tasks 2.4](tasks.md#L16)／[4.4](tasks.md#L30) 与 [tool-protocol](../../../packages/project-plugin/docs/tool-protocol.md#L21) 同步。原“已有规则接受当前基线”的不可执行表述已删除。 |
+| A3／2-A3 | 已处理 | [design](design.md#L38-L40) 选择“运行继续、写入等旧运行结束后的新运行”；[spec](specs/project-tree-editing/spec.md#L52) 与 [T12](validation-matrix.md#L18) 分别核对旧运行两条拒绝路径（旧基线冲突、最新快照基线仍被绑定拒绝）和新运行按当前规划重新绑定；[tasks 2.4](tasks.md#L16)／[4.4](tasks.md#L30) 与 [tool-protocol](../../../../packages/project-plugin/docs/tool-protocol.md#L21) 同步。原“已有规则接受当前基线”的不可执行表述已删除。 |
 | A4／2-A4 | 已处理 | [spec](specs/project-tree-editing/spec.md#L86) 与 [T13](validation-matrix.md#L19) 改为历史验证状态 + 当前代码观察／未核对原因；[design](design.md#L60) 明确规划基线保存／对比仍属 R2 首切片 O08 未完成部分、主规范要求保留；不再宣称本切片覆盖规划基线提示。 |
 | B1／2-B1 | 已处理 | [proposal 后续范围](proposal.md#L33) 明确 Agent 发起的移动／插入延期并说明后续授权范围；[design](design.md#L11) 同；Agent 现有新增、拆分、状态工具不变。 |
 | B2／2-B2 | 已处理 | [design](design.md#L34) 明确每实例一份草稿、先保存核对或放弃再开始另一份；[design](design.md#L50) 明确原预览保存／放弃后用当前可用语言新建、第三种语言用 `en`；[spec](specs/project-tree-editing/spec.md#L20) 与 [T03](validation-matrix.md#L9)／[T14](validation-matrix.md#L20)、[tasks 3.4](tasks.md#L23)／[4.2](tasks.md#L28) 对齐。 |
@@ -286,15 +286,15 @@
 
 **R4（建议）· 提案 Impact 补一句既有节点编辑回读对齐。** [spec](specs/project-tree-editing/spec.md#L66) 与 [design](design.md#L35) 把回读判据扩到既有节点编辑；[review-response](review-response.md#L13) 也说明两种保存路径。提案 [What Changes](proposal.md#L12)／[Impact](proposal.md#L28) 目前只泛写回读未同步，建议补“同时把既有节点编辑的已保存判据对齐为同源有效回读”，避免读者以为只影响树操作。属范围透明，不改变能力。
 
-**R5（建议）· 活动工作提示是通用文案还是条件显示。** [design](design.md#L40) 说“若有活动工作”；面板快照只有历史 `workRunCount`，没有活动运行状态；`workList` 是既有 owner Remote，但不在 [PanelTransport](../../../packages/project-plugin/src/client/api.ts#L41-L54) 的现有接口里。若提示是固定文案，建议写明“通用提示”；若要条件显示，在 3.1／3.3 补活动运行查询（`workList`／等价字段）与观察点。否则 R1 的提示在 H 层可能只验证到静态文案。
+**R5（建议）· 活动工作提示是通用文案还是条件显示。** [design](design.md#L40) 说“若有活动工作”；面板快照只有历史 `workRunCount`，没有活动运行状态；`workList` 是既有 owner Remote，但不在 [PanelTransport](../../../../packages/project-plugin/src/client/api.ts#L41-L54) 的现有接口里。若提示是固定文案，建议写明“通用提示”；若要条件显示，在 3.1／3.3 补活动运行查询（`workList`／等价字段）与观察点。否则 R1 的提示在 H 层可能只验证到静态文案。
 
 **R6（建议）· 无效目标位置的错误码。** [design](design.md#L26) 只列 `template-not-found`／`template-version-unavailable`／`template-locale-unsupported`／`template-invalid`；[spec](specs/project-tree-editing/spec.md#L47) 与 [T07](validation-matrix.md#L13) 还要核对“无效目标位置”的错误码。建议补一句“位置错误沿用既有结构校验错误码（如 parent-not-found／invalid-anchor）”，或在 design 列出新码；否则 T07 的“错误码”观察点不完整。
 
 **R7（建议）· 交接的 check-repo 范围漏了工具协议改动。** [handoff](2026-11-20-author-handoff.md#L17-L18) 写“包含新增文件及两个索引改动”，未提 `packages/project-plugin/docs/tool-protocol.md`；[review-response](review-response.md#L25) 已写“工具协议改动”。建议交接同步，避免复审按旧范围误判。
 
-**R8（建议）· 任务 1.1 的“根规则注释”指两处。** [validate.ts](../../../packages/project-plugin/src/domain/validate.ts#L5) 与[同文件](../../../packages/project-plugin/src/domain/validate.ts#L168) 都写“单根”，[tasks 1.1](tasks.md#L7) 只说“根规则注释”。建议写“校正两处（文件头与结构校验）注释”，避免只改一处。
+**R8（建议）· 任务 1.1 的“根规则注释”指两处。** [validate.ts](../../../../packages/project-plugin/src/domain/validate.ts#L5) 与[同文件](../../../../packages/project-plugin/src/domain/validate.ts#L168) 都写“单根”，[tasks 1.1](tasks.md#L7) 只说“根规则注释”。建议写“校正两处（文件头与结构校验）注释”，避免只改一处。
 
-**R9（可选）· `project_read` 的 binding 输出没有已接受基线。** [tool-protocol](../../../packages/project-plugin/docs/tool-protocol.md#L21) 已正确说明写入需与运行已接受基线一致，但 `ProjectReadOutput.binding` 只含 workRunId／bindingVersion／turn／targets／allowedActions；Agent 在 owner 改变规划后只能凭记忆知道旧基线。建议后续把 `acceptedBaseline` 加入 read 输出或 `binding-expired` 详情；不影响本切片验收，但能减少重复拒绝。
+**R9（可选）· `project_read` 的 binding 输出没有已接受基线。** [tool-protocol](../../../../packages/project-plugin/docs/tool-protocol.md#L21) 已正确说明写入需与运行已接受基线一致，但 `ProjectReadOutput.binding` 只含 workRunId／bindingVersion／turn／targets／allowedActions；Agent 在 owner 改变规划后只能凭记忆知道旧基线。建议后续把 `acceptedBaseline` 加入 read 输出或 `binding-expired` 详情；不影响本切片验收，但能减少重复拒绝。
 
 **R10（可选）· 插入不新建根的口径。** [design](design.md#L17) 要求插入目标为现有父节点；[spec](specs/project-tree-editing/spec.md#L38) 同。提案 [What Changes](proposal.md#L11) 的“插入所选位置”容易被读成可在根组插入。建议在 proposal／design 明写“插入不新建根；根组插入留后续”，或说明根节点作为父节点即顶层插入。
 
@@ -309,7 +309,7 @@
 ### 复审范围
 
 - 作者身份以 [review-response](review-response.md#L3) 与更新后的[交接](2026-11-20-author-handoff.md#L3) 为准：**Codex 会话**；首轮据交接推断为 DSH 编写，据此更正。本会话未参与编写与修订。
-- 通读修订后的 [proposal](proposal.md)、[design](design.md)、[增量 spec](specs/project-tree-editing/spec.md)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md)、[author-handoff](2026-11-20-author-handoff.md)、[review-response](review-response.md) 与 [tool-protocol](../../../packages/project-plugin/docs/tool-protocol.md#L21) 的 git diff；逐条独立核对 2-A1–2-C2 的修订是否落到可执行口径，并对新设计声明补充源码取证。
+- 通读修订后的 [proposal](proposal.md)、[design](design.md)、[增量 spec](specs/project-tree-editing/spec.md)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md)、[author-handoff](2026-11-20-author-handoff.md)、[review-response](review-response.md) 与 [tool-protocol](../../../../packages/project-plugin/docs/tool-protocol.md#L21) 的 git diff；逐条独立核对 2-A1–2-C2 的修订是否落到可执行口径，并对新设计声明补充源码取证。
 - 开始时本文件已存在审 1 复审节；本节结论由本会话独立取证给出，与审 1 复审的收敛或分歧均如实标注，不代审 1 确认。
 - 只做静态与自动测试核对，未启动真实 DSH 宿主；14 个产品场景仍全部 `untested`，17 项 tasks 均未勾选，不把 CI 当产品验证。
 
@@ -327,9 +327,9 @@
 
 | ID | 状态 | 复核依据 |
 |---|---|---|
-| 2-A1 | 已处理 | [design](design.md#L5) 改为“v1 支持一个或多个根”，[spec](specs/project-tree-editing/spec.md#L24) 改为至少一个根、各同级组（含根组）order 从 0 连续、父子无环、依赖端点有效且无环，与 [validate.ts](../../../packages/project-plugin/src/domain/validate.ts#L182-L216) 及 `plan-zh-base` 三根正向向量一致；[tasks 1.1](tasks.md#L7) 多根夹具并校正旧注释，T01／T04／T05 均用多根资料。 |
+| 2-A1 | 已处理 | [design](design.md#L5) 改为“v1 支持一个或多个根”，[spec](specs/project-tree-editing/spec.md#L24) 改为至少一个根、各同级组（含根组）order 从 0 连续、父子无环、依赖端点有效且无环，与 [validate.ts](../../../../packages/project-plugin/src/domain/validate.ts#L182-L216) 及 `plan-zh-base` 三根正向向量一致；[tasks 1.1](tasks.md#L7) 多根夹具并校正旧注释，T01／T04／T05 均用多根资料。 |
 | 2-A2 | 已处理 | [design](design.md#L17-L19) 定义根组＝`parentId: null`，根只在根组内重排；根降子、非根升根、缺失节点、跨组锚点、自身锚点均拒绝；非根移动与插入的目标父节点为现有节点（插入不新建根）。[spec](specs/project-tree-editing/spec.md#L24)／[反例](specs/project-tree-editing/spec.md#L33)、T01／T05 同口径；首轮补充的“非根→新根”已明确拒绝。 |
-| 2-A3 | 已处理 | [design 新节](design.md#L38-L40) 采用“运行继续执行和读取、写入等旧运行结束后从当前规划显式发起新运行”。本会话补充取证：[effectiveRun](../../../packages/project-plugin/src/application/work.ts#L1119-L1121) 只看 status＋bootGeneration，owner 提交不失效运行，读取路径（captureBinding／buildContext）不受影响；旧基线＝已接受基线时准入通过、在[提交重读](../../../packages/project-plugin/src/application/command-service.ts#L708-L718)处 `plan-conflict`，最新基线则在[准入](../../../packages/project-plugin/src/application/work.ts#L634-L644)处 `binding-expired`——两条拒绝路径的描述与代码顺序一致；`continueScope` 不更新基线。“单纯重排不发送停止指令”回应了架构“单纯重排不停止工作”的张力（运行不停、写入走新运行）。[spec](specs/project-tree-editing/spec.md#L52)／[场景](specs/project-tree-editing/spec.md#L61-L62)、T12（含真实 Agent 分句与缺凭证 blocked）、tasks 2.4／4.4、[tool-protocol](../../../packages/project-plugin/docs/tool-protocol.md#L21) 同步。 |
+| 2-A3 | 已处理 | [design 新节](design.md#L38-L40) 采用“运行继续执行和读取、写入等旧运行结束后从当前规划显式发起新运行”。本会话补充取证：[effectiveRun](../../../../packages/project-plugin/src/application/work.ts#L1119-L1121) 只看 status＋bootGeneration，owner 提交不失效运行，读取路径（captureBinding／buildContext）不受影响；旧基线＝已接受基线时准入通过、在[提交重读](../../../../packages/project-plugin/src/application/command-service.ts#L708-L718)处 `plan-conflict`，最新基线则在[准入](../../../../packages/project-plugin/src/application/work.ts#L634-L644)处 `binding-expired`——两条拒绝路径的描述与代码顺序一致；`continueScope` 不更新基线。“单纯重排不发送停止指令”回应了架构“单纯重排不停止工作”的张力（运行不停、写入走新运行）。[spec](specs/project-tree-editing/spec.md#L52)／[场景](specs/project-tree-editing/spec.md#L61-L62)、T12（含真实 Agent 分句与缺凭证 blocked）、tasks 2.4／4.4、[tool-protocol](../../../../packages/project-plugin/docs/tool-protocol.md#L21) 同步。 |
 | 2-A4 | 已处理 | [spec](specs/project-tree-editing/spec.md#L86)／T13 改为历史验证状态＋当前代码观察或未核对原因；[design](design.md#L60) 明确规划基线保存／对比仍属 R2 首切片 O08 未完成部分、主规范 MUST 保留；tasks 4.5 同步。不再宣称“既有规则”已覆盖规划基线。 |
 | 2-B1 | 已处理 | [proposal 后续范围](proposal.md#L33) 明确 Agent 移动／插入延期及后续授权需覆盖原位置、目标位置与新节点；[design](design.md#L11) 同；既有新增／拆分／状态工具准入不变。 |
 | 2-B2 | 已处理 | [design](design.md#L34) 每实例一份草稿、先保存并完成核对或明确放弃再开始另一份；[design](design.md#L50) 原预览保存／放弃后以当前可用语言新建、第三种语言用 `en`；[spec](specs/project-tree-editing/spec.md#L20)／[T14 场景](specs/project-tree-editing/spec.md#L94-L95)、T03／T14、tasks 3.4／4.2 对齐。 |
@@ -348,13 +348,13 @@
 
 **2-R3（须改，微小修）· 提案第 3 行语序。** [proposal](proposal.md#L3)“……待两位审阅者复审。 [审阅处理](review-response.md)属于 R2 的第二个产品切片。”读成“审阅处理属于 R2 第二切片”。把链接移到句末或重组句子。（＝审 1 R3）
 
-**2-R4（建议）· 活动工作提示的数据路径未定义。** [PanelTransport](../../../packages/project-plugin/src/client/api.ts#L44-L54) 只有 status／snapshot／execute／follow，无活动运行查询；快照的 [workRunCount](../../../packages/project-plugin/src/application/snapshot.ts#L549) 计全部运行（含历史），不能判定“有活动工作”。若提示为通用静态文案，请在 design 写明；若要条件显示，在 3.1／3.3 补活动运行查询（`workList` 或快照等价字段）与观察点，否则 2-R1 的 H 层只能验到静态文案。（＝审 1 R5）
+**2-R4（建议）· 活动工作提示的数据路径未定义。** [PanelTransport](../../../../packages/project-plugin/src/client/api.ts#L44-L54) 只有 status／snapshot／execute／follow，无活动运行查询；快照的 [workRunCount](../../../../packages/project-plugin/src/application/snapshot.ts#L549) 计全部运行（含历史），不能判定“有活动工作”。若提示为通用静态文案，请在 design 写明；若要条件显示，在 3.1／3.3 补活动运行查询（`workList` 或快照等价字段）与观察点，否则 2-R1 的 H 层只能验到静态文案。（＝审 1 R5）
 
 **2-R5（建议）· 无效目标位置的错误码。** [design](design.md#L26) 只列四个模板错误码；T07 还要核对“无效目标位置”的错误码。补一句“位置错误沿用既有结构校验错误码”或列出新码。（＝审 1 R6）
 
 **2-R6（建议）· 交接的 check-repo 范围漏工具协议改动。** [handoff](2026-11-20-author-handoff.md#L18) 写“新增文件及两个索引改动”，未提 `tool-protocol.md`；review-response 已写。建议交接同步。（＝审 1 R7）
 
-**2-R7（建议）· 旧注释有两处。** [validate.ts:5](../../../packages/project-plugin/src/domain/validate.ts#L5) 与 [validate.ts:168](../../../packages/project-plugin/src/domain/validate.ts#L168) 都写“单根”；[tasks 1.1](tasks.md#L7) 的“根规则注释”建议写明两处，避免只改一处。（＝审 1 R8）
+**2-R7（建议）· 旧注释有两处。** [validate.ts:5](../../../../packages/project-plugin/src/domain/validate.ts#L5) 与 [validate.ts:168](../../../../packages/project-plugin/src/domain/validate.ts#L168) 都写“单根”；[tasks 1.1](tasks.md#L7) 的“根规则注释”建议写明两处，避免只改一处。（＝审 1 R8）
 
 **2-R8（建议）· 提案 Impact 补回读判据对齐的范围透明。** 2-B3 的修订把「已提交，待同步」判据扩到既有节点编辑保存路径，属行为变更；建议在 [proposal Impact](proposal.md#L28) 补一句，避免读者以为只影响树操作。（＝审 1 R4）
 
@@ -372,7 +372,7 @@
 
 ### 复核范围
 
-- 只核对第 2 轮审 1 的 R1–R10 与审 2 的 2-R1–2-R8 是否在最新稿中逐项落地；通读 [proposal](proposal.md)、[design](design.md)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md)、[author-handoff](2026-11-20-author-handoff.md)、[review-response](review-response.md) 的“第 2 轮复核回应”，并对照 [spec](specs/project-tree-editing/spec.md)、[tool-protocol](../../../packages/project-plugin/docs/tool-protocol.md#L21) 与现有源码。
+- 只核对第 2 轮审 1 的 R1–R10 与审 2 的 2-R1–2-R8 是否在最新稿中逐项落地；通读 [proposal](proposal.md)、[design](design.md)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md)、[author-handoff](2026-11-20-author-handoff.md)、[review-response](review-response.md) 的“第 2 轮复核回应”，并对照 [spec](specs/project-tree-editing/spec.md)、[tool-protocol](../../../../packages/project-plugin/docs/tool-protocol.md#L21) 与现有源码。
 - 只做静态与自动测试核对，未启动真实 DSH 宿主；14 个产品场景仍全部 `untested`，17 项 tasks 均未勾选。
 
 ### 逐项确认
@@ -386,7 +386,7 @@
 | R5／2-R4 | 已补 | [design](design.md#L40) 把提示定义为固定条件句“如果有活动工作，后续规划写入需等原运行结束，再从当前规划显式发起新工作”，随会改变规划的预览及确认保存结果显示；不再依赖活动运行查询，R1 的 H 观察点与文案一致。 |
 | R6／2-R5 | 已补 | [design](design.md#L26) 明确位置错误沿用结构校验诊断：父节点为空/不存在 `parent-not-found`，锚点不存在/不属于目标组 `invalid-anchor`；[T07](validation-matrix.md#L13) 逐项核对。 |
 | R7／2-R6 | 已补 | [handoff](2026-11-20-author-handoff.md#L18) 的 check-repo 范围已含 `tool-protocol.md` 改动，与 [review-response](review-response.md#L49) 一致。 |
-| R8／2-R7 | 已补 | [tasks 1.1](tasks.md#L7) 明确校正 `domain/validate.ts` 文件头与结构校验前两处根规则注释，对应 [validate.ts:5](../../../packages/project-plugin/src/domain/validate.ts#L5) 与 [validate.ts:168](../../../packages/project-plugin/src/domain/validate.ts#L168)。 |
+| R8／2-R7 | 已补 | [tasks 1.1](tasks.md#L7) 明确校正 `domain/validate.ts` 文件头与结构校验前两处根规则注释，对应 [validate.ts:5](../../../../packages/project-plugin/src/domain/validate.ts#L5) 与 [validate.ts:168](../../../../packages/project-plugin/src/domain/validate.ts#L168)。 |
 | R9 | 延后，接受 | [review-response](review-response.md#L44) 说明 `acceptedBaseline` 属 Agent 工具输出契约，留待该契约变更评估；当前用 [T12](validation-matrix.md#L18) 核对旧基线与最新快照基线的两条拒绝路径。R9 原为可选建议，不阻塞本切片。 |
 | R10／复核可选 | 已补 | [proposal](proposal.md#L13) 改为“插入所选父节点下的同级位置”，与 [design](design.md#L17)、[spec](specs/project-tree-editing/spec.md#L38) 的现有父节点约束一致。 |
 
@@ -434,7 +434,7 @@
 | 2-R4 | 已补 | [design](design.md#L40) 明确提示为固定条件句文案（原文引出），随会改变规划的结构预览及已确认保存结果显示，不依赖活动运行查询；与 [spec](specs/project-tree-editing/spec.md#L52) 的 MUST 一致，原位操作不触发。PanelTransport 无需新增接口，首轮顾虑消除。 |
 | 2-R5 | 已补 | [design](design.md#L26) 位置错误沿用结构校验诊断：父节点为空或不存在 `parent-not-found`，锚点不存在或跨组 `invalid-anchor`；[T07](validation-matrix.md#L13) 逐项核对。 |
 | 2-R6 | 已补 | [handoff](2026-11-20-author-handoff.md#L18) check-repo 范围已含 change、两份审阅、作者回应、两个索引与 `tool-protocol.md` 改动，与本轮实际快照一致。 |
-| 2-R7 | 已补 | [tasks 1.1](tasks.md#L7) 明确校正 `domain/validate.ts` 文件头与结构校验前两处根规则注释（[validate.ts:5](../../../packages/project-plugin/src/domain/validate.ts#L5)、[validate.ts:168](../../../packages/project-plugin/src/domain/validate.ts#L168)）。 |
+| 2-R7 | 已补 | [tasks 1.1](tasks.md#L7) 明确校正 `domain/validate.ts` 文件头与结构校验前两处根规则注释（[validate.ts:5](../../../../packages/project-plugin/src/domain/validate.ts#L5)、[validate.ts:168](../../../../packages/project-plugin/src/domain/validate.ts#L168)）。 |
 | 2-R8 | 已补 | [proposal Impact](proposal.md#L28) 明示结构操作与既有节点编辑共用“回执确认后须有同源有效回读才显示普通已保存”的判据，范围透明。 |
 | R9（可选） | 延后，接受 | [回应](review-response.md#L44) 说明 `acceptedBaseline` 输出属 Agent 工具契约变更，留待该契约变更评估；T12 已覆盖旧基线与最新快照基线两条实际拒绝路径。原为可选建议，不阻塞本切片。 |
 | R10（可选） | 已补 | [proposal](proposal.md#L13) 改为“插入所选父节点下的同级位置”，与 design／spec 的现有父节点约束一致，插入不新建根。 |
