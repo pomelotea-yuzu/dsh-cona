@@ -116,6 +116,7 @@ function TreeNav(props: {
         <div key={node.id}>
           <button
             type="button"
+            data-cona-node={node.id}
             draggable
             aria-label={`${node.title} · ${t('treeDragHandle')}`}
             onClick={() => controller.select(node.id)}
@@ -224,7 +225,15 @@ function StructurePreviewView(props: {
       {preview.workNotice ? <p style={{ fontSize: 12, color: '#8a6d00' }}>{t('treeWorkNotice')}</p> : null}
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         <button type="button" onClick={() => void controller.save()} disabled={noChange}>{t('treeConfirm')}</button>
-        <button type="button" onClick={() => controller.discardDraft()}>{t('treeCancelPreview')}</button>
+        <button type="button" onClick={() => {
+          const focusId = state.draft?.nodeId;
+          controller.discardDraft();
+          if (focusId !== undefined) {
+            requestAnimationFrame(() => {
+              document.querySelector<HTMLButtonElement>(`button[data-cona-node="${CSS.escape(focusId)}"]`)?.focus();
+            });
+          }
+        }}>{t('treeCancelPreview')}</button>
         {state.save.status === 'committed-pending-sync' ? (
           <button type="button" onClick={() => void controller.retryRead()}>{t('refresh')}</button>
         ) : null}
