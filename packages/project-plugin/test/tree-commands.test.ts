@@ -26,8 +26,9 @@ import { createSourceFiles } from '../src/adapters/fs/source-files.js';
 import { resolveLocalRoot, rootRelation } from '../src/adapters/fs/local-root.js';
 import { inspectPrivateRoot } from '../src/adapters/fs/git-guard.js';
 import { validateProjectDocument } from '../src/domain/validate.js';
+import { computePlanVersion } from '../src/domain/index.js';
 import { FEATURE_DEVELOPMENT_PRESET } from '../src/domain/presets.js';
-import type { Sha256Fn } from '../src/domain/types.js';
+import type { ProjectDocument, Sha256Fn } from '../src/domain/types.js';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const sample = path.join(packageRoot, 'formats', 'v1', 'sample-project.json');
@@ -303,16 +304,21 @@ test('2.2 基线冲突（规划修订过期）与源代际变化拒绝，改动�
 test('2.2 外部改内容指纹（本机计数不变）：planVersion 变化被拒，原草稿基线可核对', async () => {
   const fx = await setup('cmd-extfingerprint-');
   const headBefore = readFileSync(path.join(fx.source, 'project.json'));
-  const doc = JSON.parse(headBefore.toString('utf8')) as { planVersion: string; project: { goal: string } };
-  // 直接改磁盘内容并同步 planVersion 指纹（模拟外部顺序编辑），本机 expectedPlanRevision 仍是 0。
+  const doc = JSON.parse(headBefore.toString('utf8')) as ProjectDocument;
+  const oldVersion = doc.planVersion;
+  // 改磁盘内容并用真实算法重算指纹（模拟外部顺序编辑），本机草稿仍捕获旧指纹、计数仍为 0。
   doc.project.goal = '外部修改的目标';
-  doc.planVersion = 'sha256:' + '1'.repeat(64);
+  const externalVersion = computePlanVersion(doc, sha256).planVersion;
+  doc.planVersion = externalVersion;
   writeFileSync(path.join(fx.source, 'project.json'), JSON.stringify(doc, null, 2) + '\n');
-  const result = await fx.service.execute(OWNER, fx.envelope({ ...MOVE_IN_PLACE }));
+  const result = await fx.service.execute(OWNER, fx.envelope({ ...MOVE_IN_PLACE }, {
+    expectedPlanVersion: oldVersion,
+    expectedPlanRevision: 0,
+  }));
   assert.equal(rejected(result).code, 'plan-conflict', JSON.stringify(result));
   // 用外部新指纹 + 原修订重发可成功，证明只是外部变化而非本机计数问题。
   const retry = await fx.service.execute(OWNER, fx.envelope({ ...INSERT }, {
-    expectedPlanVersion: 'sha256:' + '1'.repeat(64),
+    expectedPlanVersion: externalVersion,
     expectedPlanRevision: 0,
   }));
   assert.equal(retry.status, 'committed', JSON.stringify(retry));
