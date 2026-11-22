@@ -5,7 +5,7 @@
 ## 当前阅读入口
 
 - [Change 工作流](development/workflow.md)：提案编写后交外部 Agent 审阅，依据 change 内的 `review.md` 修订后再提交。
-- [R1 活动 change](../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/proposal.md)：插件贯通实验的 proposal、design、六组能力规范、任务和验证矩阵，第 1 轮外审已完成并按意见修订，尚未实施。
+- [R1 归档 change](../openspec/changes/archive/2026-11-19-establish-r1-project-plugin/proposal.md)：插件贯通实验的 proposal、design、六组能力规范、任务和验证矩阵。2026-11-19 已归档。
 - [决定索引](knowledge/decisions.md)：当前方向、沿用边界与被替代内容。
 - [DSH 插件与 Typert 踩坑契约](knowledge/2026-11-13-dsh-typert-plugin-gotchas.md)：0.2.2-rc.2 插件开发实测经验（源面登记、产物布局、manifest 契约等）。
 - [项目管理设计草案](product/2026-11-11-project-management-design.md)：用户明确需求与待讨论设计；当前方向已确认，使用流程和实现尚未定稿。

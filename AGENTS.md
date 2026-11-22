@@ -18,6 +18,8 @@ R2 首切片 `openspec/changes/archive/2026-11-20-add-project-overview-and-resum
 
 R2 第二切片 `openspec/changes/archive/2026-11-22-add-project-tree-editing-and-composition/` 已于 2026-11-22 归档：增量 spec `project-tree-editing`（6 Req／14 Scenario）并入主 `openspec/specs/`、纯新增未改既有规范；17 项 tasks 全部勾选，矩阵 T01/T02/T03/T05/T06/T07/T08/T09/T10/T14 为 `pass`，T04（B 无建聊天入口，Session 分句）、T11（H 层中断/迟到响应）、T13（无 verification 记录可核）保持 `untested`，T12 真实 Agent 分句因 profile 未登录 `blocked`（owner 侧 7/7 有 H 证据）。固定 DSH `0.2.2-rc.2` 宿主实测包 sha256 `8c4f26ce…08ff17ddd`，焦点恢复缺陷于 4.x 修复；逐条见该归档的 validation-matrix 与 [收尾核对](openspec/changes/archive/2026-11-22-add-project-tree-editing-and-composition/implementation/2026-11-22-archive-final-audit.md)。
 
+活动 change [R2 收尾 `complete-r2-project-workflow`](openspec/changes/complete-r2-project-workflow/proposal.md) 已于 2026-11-22 获 DSH 与 GLM（Trae）双审确认，实施待安排。范围、实施和验收以该 change 的规范、tasks 与矩阵为准。
+
 ## 权威性
 
 源码 > `openspec/changes/archive/` > `openspec/specs/` > `docs/` > 本文件。
