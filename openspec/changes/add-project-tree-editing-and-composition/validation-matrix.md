@@ -2,7 +2,9 @@
 
 编写于 2026-11-20。A 为自动测试，F 为真实文件后端，H 为固定 DSH `0.2.2-rc.2` 上加载预构建插件包实测。组合项按所列层级记录证据，全部验收条件满足后才标 `pass`。当前 14 项均为 `untested`。 [验证与证据工作流](../../../docs/development/workflow.md#状态与验证)
 
-> **2026-11-22 进度（1.x 领域层）**：tasks 1.1–1.3 已完成，A 层自动测试在 `test/tree-editing.test.ts` 覆盖 T01、T04–T07、T14 的领域变换与预设部分（315/315 测试、`pnpm check:ci` 全绿）。证据见 [1.x 实施记录](implementation/2026-11-22-1.x-domain-transforms.md)。上述组合项的 F／H 分句仍为 `untested`，因此状态列保持不变；A 分句通过不等于整项通过。
+> **2026-11-22 进度（1.x 领域层）**：tasks 1.1–1.3 已完成，A 层自动测试在 `test/tree-editing.test.ts` 覆盖 T01、T04–T07、T14 的领域变换与预设部分。证据见 [1.x 实施记录](implementation/2026-11-22-1.x-domain-transforms.md)。
+>
+> **2026-11-22 进度（2.x 服务与授权）**：tasks 2.1–2.4 已完成，`test/tree-commands.test.ts` 新增 16 个 A／F 用例，覆盖 owner-only 准入、预设目录、结构命令发布／单次修订／原位保留／冲突与源变化／外部指纹、回执与恢复／升级移除预设版本、活动 WorkRun 边界。证据见 [2.x 实施记录](implementation/2026-11-22-2.x-service-authorization.md)。验证矩阵各组合项的 H 分句仍为 `untested`，状态列保持不变。
 
 | ID | [增量场景](specs/project-tree-editing/spec.md) | 方法与观察点 | 状态 |
 |---|---|---|---|

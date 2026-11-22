@@ -2,7 +2,8 @@
 // 新节点身份由应用层生成后传入；命令不接受模型指定的新节点 id 来覆盖旧节点。
 
 import { computePlanVersion } from './canonical/plan-fingerprint.js';
-import { addNodes, moveNode, setDependencies, splitNode } from './transforms.js';
+import { addNodes, instantiateTemplate, moveNode, setDependencies, splitNode } from './transforms.js';
+import type { PresetContentLocale, PresetDescriptor } from './presets.js';
 import type {
   DependencyEdge,
   NodeStatus,
@@ -91,7 +92,15 @@ export type PlanCommand =
   | { type: 'split-node'; parentId: string; children: WorkNode[] }
   | { type: 'set-dependencies'; dependencies: DependencyEdge[] }
   | { type: 'set-node-status'; nodeId: string; status: NodeStatus }
-  | { type: 'move-node'; nodeId: string; parentId: string | null; beforeNodeId: string | null };
+  | { type: 'move-node'; nodeId: string; parentId: string | null; beforeNodeId: string | null }
+  | {
+      type: 'instantiate-template';
+      preset: PresetDescriptor;
+      contentLocale: PresetContentLocale;
+      newIds: string[];
+      parentId: string | null;
+      beforeNodeId: string | null;
+    };
 
 /**
  * 应用规划命令并重算指纹；最后用完整文档校验兜底（含 done 完成条件、引用完整性）。
@@ -121,6 +130,16 @@ export function applyPlanCommand(
       break;
     case 'move-node':
       result = moveNode(doc.plan, command.nodeId, command.parentId, command.beforeNodeId);
+      break;
+    case 'instantiate-template':
+      result = instantiateTemplate(
+        doc.plan,
+        command.preset,
+        command.contentLocale,
+        command.newIds,
+        command.parentId,
+        command.beforeNodeId,
+      );
       break;
     default: {
       const exhaustive: never = command;

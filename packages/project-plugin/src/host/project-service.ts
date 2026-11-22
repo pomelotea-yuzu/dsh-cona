@@ -19,6 +19,7 @@ import type {
   TrustedContext,
 } from '../application/command-service.js'
 import type { FollowResult } from '../application/snapshot.js'
+import type { PresetDescriptor } from '../domain/presets.js'
 import { FollowSessions, type FollowEventBatch, type FollowHandleView } from './follow-sessions.js'
 import type { ConversationOutcome, ChatsView } from '../application/conversations.js'
 import { ConversationService } from '../application/conversations.js'
@@ -275,6 +276,20 @@ export class ConaProjectService extends TypertRemoteService {
       return { status: 'rejected', code: 'operation-mismatch', message: '缺少 subscriptionId' }
     }
     return { closed: this.follows.dispose(request.subscriptionId) }
+  }
+
+  /** 读取随包流程预设：owner + 配置实例可读后返回当前安装包支持的版本。 */
+  @Remote('treePresets')
+  async treePresets(): Promise<
+    | { status: 'listed'; presets: PresetDescriptor[] }
+    | { status: 'rejected'; code: string; message: string }
+    | OwnerDenial
+  > {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const runtime = await this.deps.runtime()
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return { status: 'listed', presets: [...runtime.value.command.treePresets()] }
   }
 
   /** 统一命令入口：与 CLI 同一应用服务，面板不能绕过校验。 */

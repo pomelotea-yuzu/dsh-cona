@@ -15,7 +15,11 @@ export type {
   RejectedCommand,
   PendingCommand,
   CommittedCommand,
+  MoveNodeCommand,
+  InsertPresetCommand,
+  PresetCatalog,
 } from './application/command-service.js'
+export type { PresetDescriptor, PresetContentLocale, PresetNodeRef, PresetNodeText, PresetContent, PresetDependencyRef } from './domain/presets.js'
 export type { ProjectSnapshot, SnapshotResult, PlanSummary, SnapshotSync, StreamEventView, FollowResult } from './application/snapshot.js'
 // follow 订阅（V32）：Remote follow/followEvents/followClose 的边界类型。
 export type { FollowOutcome } from './host/project-service.js'
@@ -71,4 +75,5 @@ export type {
   ConaResumeChatsRequest,
   ConaLinkResumeRequest,
   ConaResumeChatTargetRequest,
+  TreePresetsResult,
 } from './host/overview-service.js'

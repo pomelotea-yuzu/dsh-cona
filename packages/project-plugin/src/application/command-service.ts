@@ -4,6 +4,12 @@
 // 4.5 增补：unknown-state／聚合不可读时写隔离标记，停止该实例读写，并提供只读诊断与显式解除。
 
 import { applyPlanCommand, appendRecordIndex, type NodePatch, type PlanCommand } from '../domain/commands.js';
+import {
+  FEATURE_DEVELOPMENT_PRESET,
+  validatePreset,
+  type PresetContentLocale,
+  type PresetDescriptor,
+} from '../domain/presets.js';
 import type {
   DependencyEdge,
   NodeStatus,
@@ -52,13 +58,69 @@ export interface AppendRecordCommand {
   verification?: VerificationBlock;
 }
 
+/** owner 移动节点：目标父节点（null=根组）+ 同级锚点（null=末尾）。 */
+export interface MoveNodeCommand {
+  type: 'move-node';
+  nodeId: string;
+  parentId: string | null;
+  beforeNodeId: string | null;
+}
+
+/**
+ * owner 插入内置流程：请求只带预设身份与正文语言，Host 按自身随包预设解析内容。
+ * 全部参数进入请求摘要；升级后旧请求按已持久化的候选／回执恢复，不再查预设。
+ */
+export interface InsertPresetCommand {
+  type: 'insert-preset';
+  templateId: string;
+  templateVersion: number;
+  contentLocale: PresetContentLocale;
+  parentId: string | null;
+  beforeNodeId: string | null;
+}
+
 export type Command =
   | { type: 'add-nodes'; nodes: NewNodeInput[] }
   | { type: 'update-node'; nodeId: string; patch: NodePatch }
   | { type: 'split-node'; parentId: string; children: Omit<NewNodeInput, 'parentId'>[] }
   | { type: 'set-dependencies'; dependencies: DependencyEdge[] }
   | { type: 'set-node-status'; nodeId: string; status: NodeStatus }
+  | MoveNodeCommand
+  | InsertPresetCommand
   | AppendRecordCommand;
+
+/** 只能由 owner 发起的结构命令；agent-work 上下文直达须在准入阶段拒绝。 */
+const OWNER_ONLY_COMMANDS = new Set<string>(['move-node', 'insert-preset']);
+
+/** 随包预设目录：按 ID 与版本精确匹配，未知 ID／不可用版本返回稳定诊断。 */
+export interface PresetCatalog {
+  list(): readonly PresetDescriptor[];
+  resolve(templateId: string, templateVersion: number):
+    | { ok: true; preset: PresetDescriptor }
+    | { ok: false; code: 'template-not-found' | 'template-version-unavailable' | 'template-invalid'; message: string };
+}
+
+/** 默认目录只含随包 feature-development v1；描述无效时按 template-invalid 拒绝。 */
+export function createBuiltinPresetCatalog(presets: readonly PresetDescriptor[] = [FEATURE_DEVELOPMENT_PRESET]): PresetCatalog {
+  return {
+    list: () => presets.map((preset) => JSON.parse(JSON.stringify(preset)) as PresetDescriptor),
+    resolve(templateId, templateVersion) {
+      const byId = presets.filter((item) => item.id === templateId);
+      if (byId.length === 0) {
+        return { ok: false, code: 'template-not-found', message: `未知预设 ${templateId}` };
+      }
+      const preset = byId.find((item) => item.version === templateVersion);
+      if (preset === undefined) {
+        return { ok: false, code: 'template-version-unavailable', message: `预设 ${templateId} 无版本 ${templateVersion}` };
+      }
+      const issues = validatePreset(preset);
+      if (issues.length > 0) {
+        return { ok: false, code: 'template-invalid', message: '预设描述无效' };
+      }
+      return { ok: true, preset };
+    },
+  };
+}
 
 export interface CommandEnvelope {
   operationId: string;
@@ -176,6 +238,8 @@ export interface ProjectCommandDeps {
   queue?: InstanceCommandQueue;
   /** 工作绑定准入（tasks 6.2）：agent-work 上下文的有限范围授权与绑定版本推进。 */
   work?: WorkAdmissionPort;
+  /** 随包预设目录（tasks 2.1）；缺省使用内置 feature-development v1。 */
+  presetCatalog?: PresetCatalog;
   /** 故障注入（仅测试）。 */
   hooks?: { publish?: PublishHooksPort; body?: PublishHooksPort; state?: PublishHooksPort };
   /** 提交后通知（第 5 段失效流）；失败不撤回提交。 */
@@ -212,6 +276,10 @@ export function checkTrustedContext(ctx: TrustedContext | undefined): AuthorizeR
 export function authorizeTrustedContext(ctx: TrustedContext | undefined, envelope: CommandEnvelope): AuthorizeResult {
   const base = checkTrustedContext(ctx);
   if (!base.ok) return base;
+  // 结构命令（移动／插入）覆盖原始命令的直达调用：只允许 owner，agent-work 一律拒绝。
+  if (ctx !== undefined && ctx.kind === 'agent-work' && OWNER_ONLY_COMMANDS.has(envelope.command?.type)) {
+    return { ok: false, code: 'forbidden', message: '结构命令只能由 owner 发起' };
+  }
   if (ctx !== undefined && ctx.kind === 'agent-work' && ctx.instanceId !== envelope.instanceId) {
     return { ok: false, code: 'forbidden', message: '绑定实例与命令实例不一致' };
   }
@@ -246,9 +314,16 @@ function stableValue(value: unknown): unknown {
 
 export class ProjectCommandService {
   private readonly queue: InstanceCommandQueue;
+  private readonly presetCatalog: PresetCatalog;
 
   constructor(private readonly deps: ProjectCommandDeps) {
     this.queue = deps.queue ?? new InstanceCommandQueue();
+    this.presetCatalog = deps.presetCatalog ?? createBuiltinPresetCatalog();
+  }
+
+  /** 当前随包预设目录（owner 树入口读取；实例可读性由 host 入口核对）。 */
+  treePresets(): readonly PresetDescriptor[] {
+    return this.presetCatalog.list();
   }
 
   /** 规范化请求摘要：命令、业务参数与输入基线；不含 operationId 或重连临时标识。 */
@@ -718,9 +793,28 @@ export class ProjectCommandService {
       };
     }
 
+    // 结构命令：按 ID 与版本精确解析随包预设并核对正文语言。解析失败返回稳定码，
+    // 不写文件也不推进修订。解析只在首次提交发生；重试／恢复用已持久化的候选与回执。
+    let resolvedPreset: PresetDescriptor | undefined;
+    if (envelope.command.type === 'insert-preset') {
+      const request = envelope.command;
+      const resolved = this.presetCatalog.resolve(request.templateId, request.templateVersion);
+      if (!resolved.ok) {
+        return { status: 'rejected', code: resolved.code, message: resolved.message };
+      }
+      if (!resolved.preset.contentLocales.includes(request.contentLocale)) {
+        return {
+          status: 'rejected',
+          code: 'template-locale-unsupported',
+          message: `预设 ${request.templateId} 不支持正文语言 ${String(request.contentLocale)}`,
+        };
+      }
+      resolvedPreset = resolved.preset;
+    }
+
     // 稳定生成 id：先落意图，重启或核对时复用同一批 id，不重复创建。
-    const generated = this.allocateIds(envelope.command);
-    const candidate = this.buildCandidate(envelope.command, baseline.doc, baseline.baseline.records, generated);
+    const generated = this.allocateIds(envelope.command, resolvedPreset);
+    const candidate = this.buildCandidate(envelope.command, baseline.doc, baseline.baseline.records, generated, resolvedPreset);
     if ('rejected' in candidate) return candidate.rejected;
 
     const planning = envelope.command.type !== 'append-record';
@@ -962,6 +1056,7 @@ export class ProjectCommandService {
     doc: ProjectDocument,
     baselineRecords: { path: string; contentHash: string; observedHash: string }[],
     generated: { recordId?: string; nodeIds?: string[] },
+    resolvedPreset?: PresetDescriptor,
   ):
     | {
         doc: ProjectDocument;
@@ -972,13 +1067,21 @@ export class ProjectCommandService {
       }
     | { rejected: RejectedCommand } {
     if (command.type !== 'append-record') {
-      const applied = applyPlanCommand(doc, this.materialize(command, generated.nodeIds ?? []), this.deps.sha256);
+      const applied = applyPlanCommand(doc, this.materialize(command, generated.nodeIds ?? [], resolvedPreset), this.deps.sha256);
       if (!applied.ok) {
+        // 结构命令把领域拒绝码原样上抛（parent-not-found / invalid-anchor 等），
+        // 便于界面逐项提示；其余命令维持既有 invalid-project 诊断。
+        const structural = command.type === 'move-node' || command.type === 'insert-preset';
+        const domainCode = structural ? applied.issues.find((issue) =>
+          ['parent-not-found', 'invalid-anchor', 'node-not-found', 'root-to-child', 'child-to-root',
+            'invalid-parent', 'template-invalid', 'template-locale-unsupported', 'duplicate-node-id',
+            'invalid-uuid', 'template-id-count-mismatch'].includes(issue.code),
+        ) : undefined;
         return {
           rejected: {
             status: 'rejected',
-            code: 'invalid-project',
-            message: '命令变换未通过领域校验',
+            code: domainCode?.code ?? 'invalid-project',
+            message: domainCode?.message ?? '命令变换未通过领域校验',
             issues: applied.issues,
           },
         };
@@ -1020,15 +1123,18 @@ export class ProjectCommandService {
     };
   }
 
-  private allocateIds(command: Command): { recordId?: string; nodeIds?: string[] } {
+  private allocateIds(command: Command, preset?: PresetDescriptor): { recordId?: string; nodeIds?: string[] } {
     if (command.type === 'append-record') return { recordId: this.deps.newRecordId() };
     if (command.type === 'add-nodes') return { nodeIds: command.nodes.map(() => this.deps.newNodeId()) };
     if (command.type === 'split-node') return { nodeIds: command.children.map(() => this.deps.newNodeId()) };
+    if (command.type === 'insert-preset' && preset !== undefined) {
+      return { nodeIds: preset.nodes.map(() => this.deps.newNodeId()) };
+    }
     return {};
   }
 
   /** 新节点 id 由应用层生成并已在意图中固定；命令不能指定 id 覆盖旧节点。 */
-  private materialize(command: PlanningCommand, allocated: string[]): PlanCommand {
+  private materialize(command: PlanningCommand, allocated: string[], preset?: PresetDescriptor): PlanCommand {
     let cursor = 0;
     const nextId = (): string => allocated[cursor++] ?? this.deps.newNodeId();
     const toNode = (input: NewNodeInput, parentOverride?: string | null): WorkNode => ({
@@ -1048,6 +1154,20 @@ export class ProjectCommandService {
           type: 'split-node',
           parentId: command.parentId,
           children: command.children.map((child) => toNode({ ...child, parentId: command.parentId }, command.parentId)),
+        };
+      case 'move-node':
+        return command;
+      case 'insert-preset':
+        if (preset === undefined) {
+          throw new Error('insert-preset 缺少已解析预设，不能在物化阶段重新查询');
+        }
+        return {
+          type: 'instantiate-template',
+          preset,
+          contentLocale: command.contentLocale,
+          newIds: [...allocated],
+          parentId: command.parentId,
+          beforeNodeId: command.beforeNodeId,
         };
       default:
         return command;

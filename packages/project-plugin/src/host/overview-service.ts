@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { CommandEnvelope, CommandResult } from '../application/command-service.js'
+import type { PresetDescriptor } from '../domain/presets.js'
 import type { SnapshotResult } from '../application/snapshot.js'
 import { denyNonOwner, OWNER_CONTEXT, type OwnerDenial } from './owner-admission.js'
 import { parseResumeBody, selectResumeCandidate, type ResumePayload } from '../domain/resume.js'
@@ -49,6 +50,12 @@ export interface ConaOverviewFollowRequest {
   instanceId: string;
   afterStateRevision?: number;
 }
+
+/** 随包预设读取结果：逐条含 ID／版本／builtin 来源／正文语言／各语言中英正文与结构。 */
+export type TreePresetsResult =
+  | { status: 'listed'; presets: PresetDescriptor[] }
+  | { status: 'rejected'; code: string; message: string }
+  | OwnerDenial;
 
 /** 代码观察（3.2）：观察成功带 HEAD 与脏计数；未配置/不可观察给稳定状态。 */
 export type CodeObservationView =
@@ -421,6 +428,20 @@ export class ConaOverviewService extends TypertRemoteService {
       return { status: 'rejected', code: 'operation-mismatch', message: '缺少 subscriptionId' }
     }
     return { closed: this.follows.dispose(request.subscriptionId) }
+  }
+
+  /** 读取随包流程预设：owner + 实例登记／可读性核对后，返回当前安装包支持的版本。 */
+  @Remote('treePresets')
+  async treePresets(request: { instanceId: string }): Promise<TreePresetsResult> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return badId
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return { status: 'listed', presets: [...runtime.value.command.treePresets()] }
   }
 
   /** 按实例执行命令（owner 保存接续用）；实例身份由 envelope 与路由双重核对。 */
