@@ -10,7 +10,7 @@
 // 换成宿主生成的 Remote 代理时，只需另写一个实现 `PanelTransport` 的模块。
 
 import type {
-  CommandResult, ConaProjectStatus, ExecuteRequest, FollowEventBatch, FollowHandle, PanelTransport, SnapshotResult,
+  CommandResult, ConaProjectStatus, ExecuteRequest, FollowEventBatch, FollowHandle, PanelTransport, SnapshotResult, TreePresetsResult,
 } from './api.js';
 
 interface ServerResponse<T> {
@@ -98,12 +98,14 @@ export function createHttpTransport(options: HttpTransportOptions = {}): PanelTr
     return body.result.value;
   }
 
-  // conaProject/status 无参（line 166 of project-service），conaOverview/status 带 request。
+  // conaProject/status、treePresets 无参（配置实例），conaOverview 的带 request。
   const statusArgs = options.namespace === 'conaOverview' ? { request: bound } : {};
+  const treePresetsArgs = options.namespace === 'conaOverview' ? { request: bound } : {};
   return {
     status: () => call<ConaProjectStatus>(method('status'), statusArgs),
     snapshot: (request) => call<SnapshotResult>(method('snapshot'), { request: { ...request, ...bound } }),
     execute: (request: ExecuteRequest) => call<CommandResult>(method('execute'), { request: { ...request, ...bound } }),
+    treePresets: () => call<TreePresetsResult>(method('treePresets'), treePresetsArgs),
     follow: (request) => call<{ status: 'following'; value: FollowHandle } | { status: 'rejected'; code: string; message: string }>(method('follow'), { request: { ...request, ...bound } }),
     followEvents: (request) => call<FollowEventBatch>(method('followEvents'), { request }),
     followClose: (request) => call<{ closed: boolean }>(method('followClose'), { request }),

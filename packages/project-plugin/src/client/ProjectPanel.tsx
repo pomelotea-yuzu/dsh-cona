@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
 import type { IPanelController, PanelState, SaveStatus } from './panel-controller.js';
-import type { PanelSnapshot } from './api.js';
+import type { PanelSnapshot, PresetView } from './api.js';
 import type { LocaleKey } from './locales.js';
 
 export type ProjectPanelInjected = { controller: IPanelController };
@@ -24,6 +24,7 @@ const SAVE_LABEL: Record<SaveStatus, LocaleKey> = {
   pending: 'saveStatusPending',
   failed: 'saveStatusFailed',
   partial: 'saveStatusPartial',
+  'committed-pending-sync': 'saveStatusCommittedPendingSync',
 };
 
 /** 面板根组件：订阅控制器状态。 */
@@ -73,32 +74,12 @@ export function ProjectPanel(props: ProjectPanelProps): JSX.Element {
         onReconnect={() => void controller.reconnect()}
       />
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <nav style={{ width: 260, borderRight: '1px solid var(--dsh-border, #e5e5e5)', overflowY: 'auto', padding: '8px 0' }}>
-          {snapshot.tree.map((node) => (
-            <button
-              key={node.id}
-              type="button"
-              onClick={() => controller.select(node.id)}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '6px 12px',
-                paddingLeft: 12 + (depths.get(node.id) ?? 0) * 14,
-                background: node.id === state.selectedNodeId ? 'var(--dsh-bg-selected, #eef2f7)' : 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 13,
-                color: 'inherit',
-              }}
-            >
-              <span style={{ color: 'var(--dsh-text-secondary, #777)', marginRight: 6 }}>{node.order}</span>
-              {node.title}
-              <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--dsh-text-secondary, #777)' }}>{node.status}</span>
-            </button>
-          ))}
-        </nav>
+        <TreeNav controller={controller} state={state} depths={depths} t={t} />
         <main style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          {state.structurePreview !== null ? (
+            <StructurePreviewView controller={controller} state={state} t={t} />
+          ) : null}
+          <PresetPanel controller={controller} state={state} t={t} />
           {selected === undefined ? (
             <p>{t('noNodes')}</p>
           ) : (
@@ -114,6 +95,211 @@ export function ProjectPanel(props: ProjectPanelProps): JSX.Element {
 }
 
 type Translate = ProjectPanelProps['t'];
+
+/**
+ * 树导航（3.1）：拖放和键盘菜单都以 beginMove 进入同一份草稿，产生等价预览。
+ * 拖放源节点记为 dataTransfer 文本；落点是目标节点，移动为「拖源 → 落点父组、落点之前」。
+ */
+function TreeNav(props: {
+  controller: IPanelController;
+  state: PanelState;
+  depths: Map<string, number>;
+  t: Translate;
+}): JSX.Element {
+  const { controller, state, depths, t } = props;
+  const snapshot = state.snapshot as PanelSnapshot;
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  return (
+    <nav aria-label={t('treeMoveNode')} style={{ width: 260, borderRight: '1px solid var(--dsh-border, #e5e5e5)', overflowY: 'auto', padding: '8px 0' }}>
+      {snapshot.tree.map((node) => (
+        <div key={node.id}>
+          <button
+            type="button"
+            draggable
+            aria-label={`${node.title} · ${t('treeDragHandle')}`}
+            onClick={() => controller.select(node.id)}
+            onDragStart={(event) => {
+              setDragId(node.id);
+              event.dataTransfer.setData('text/plain', node.id);
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              const source = dragId ?? event.dataTransfer.getData('text/plain');
+              if (source !== '' && source !== node.id) {
+                controller.beginMove(source, node.parentId, node.id);
+              }
+              setDragId(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setMenuFor((current) => (current === node.id ? null : node.id));
+              }
+            }}
+            style={{
+              display: 'block', width: '100%', textAlign: 'left',
+              padding: '6px 12px', paddingLeft: 12 + (depths.get(node.id) ?? 0) * 14,
+              background: node.id === state.selectedNodeId ? 'var(--dsh-bg-selected, #eef2f7)' : 'transparent',
+              border: 'none', cursor: 'grab', fontSize: 13, color: 'inherit',
+            }}
+          >
+            <span style={{ color: 'var(--dsh-text-secondary, #777)', marginRight: 6 }}>{node.order}</span>
+            {node.title}
+            <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--dsh-text-secondary, #777)' }}>{node.status}</span>
+          </button>
+          {menuFor === node.id ? (
+            <label style={{ display: 'block', padding: '4px 12px 8px', fontSize: 11 }}>
+              {t('treeMoveMenu')}
+              <select
+                aria-label={t('treeMoveMenu')}
+                defaultValue=""
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === '') return;
+                  const [parentId, beforeId] = value.split('|');
+                  controller.beginMove(
+                    node.id,
+                    parentId === 'null' || parentId === undefined ? null : parentId,
+                    beforeId === 'null' || beforeId === undefined ? null : beforeId,
+                  );
+                  setMenuFor(null);
+                }}
+                style={{ display: 'block', width: '100%', marginTop: 4, fontSize: 11 }}
+              >
+                <option value="">—</option>
+                {snapshot.tree
+                  .filter((item) => item.id !== node.id && !isDescendantOf(snapshot.tree, item.id, node.id))
+                  .map((item) => (
+                    <option key={`${String(item.parentId)}|${item.id}`} value={`${item.parentId ?? 'null'}|${item.id}`}>
+                      {t('treeBefore', { node: item.title })}
+                    </option>
+                  ))}
+                {snapshot.tree
+                  .filter((item) => item.id !== node.id && !isDescendantOf(snapshot.tree, item.id, node.id) && item.parentId !== null)
+                  .map((item) => (
+                    <option key={`append-${item.id}`} value={`${item.id}|null`}>
+                      {t('treeMoveTo', { parent: item.title })}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+/** 结构预览（3.1/3.2）：同一形状覆盖拖放/键盘移动与预设插入；含活动工作条件句提示。 */
+function StructurePreviewView(props: {
+  controller: IPanelController;
+  state: PanelState;
+  t: Translate;
+}): JSX.Element {
+  const { controller, state, t } = props;
+  const preview = state.structurePreview;
+  if (preview === null) return <div />;
+  const noChange = preview.noChange;
+  return (
+    <section aria-label={t('ariaTreePreview')} style={{ border: '1px solid var(--dsh-border, #e5e5e5)', padding: 12, marginBottom: 16 }}>
+      <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>
+        {preview.kind === 'move' ? t('treeMoveNode') : t('treeInsertPreset')}
+      </h4>
+      <ul style={{ margin: '0 0 8px 12px', padding: 0, fontSize: 12 }}>
+        {preview.lines.map((line, index) => (
+          <li key={index} style={{ marginLeft: line.depth * 14 }}>{line.title}</li>
+        ))}
+      </ul>
+      {preview.preset === undefined ? null : (
+        <div style={{ fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>
+          <p style={{ margin: '2px 0' }}>{t('treePresetSource', { source: preview.preset.source, version: preview.preset.version })}</p>
+          <p style={{ margin: '2px 0' }}>{preview.preset.name} · {preview.preset.description}</p>
+          <p style={{ margin: '2px 0' }}>{t('treePresetLocales', { locales: preview.preset.locales.join(', '), locale: preview.preset.contentLocale })}</p>
+          <p style={{ margin: '2px 0' }}>{t('treePresetDeps', { deps: preview.preset.dependencies.map((d) => `${d.from} ← ${d.to}`).join(', ') })}</p>
+        </div>
+      )}
+      {noChange ? <p style={{ fontSize: 12, color: '#8a6d00' }}>{t('treeNoChange')}</p> : null}
+      {preview.workNotice ? <p style={{ fontSize: 12, color: '#8a6d00' }}>{t('treeWorkNotice')}</p> : null}
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button type="button" onClick={() => void controller.save()} disabled={noChange}>{t('treeConfirm')}</button>
+        <button type="button" onClick={() => controller.discardDraft()}>{t('treeCancelPreview')}</button>
+        {state.save.status === 'committed-pending-sync' ? (
+          <button type="button" onClick={() => void controller.retryRead()}>{t('refresh')}</button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+/** 随包预设列表（3.2）：显示来源、版本与可用正文语言；选用进入插入草稿（语言现冻结）。 */
+function PresetPanel(props: {
+  controller: IPanelController;
+  state: PanelState;
+  t: Translate;
+}): JSX.Element {
+  const { controller, state, t } = props;
+  useEffect(() => {
+    if (state.presetsStatus === 'idle') void controller.loadPresets();
+  }, [controller, state.presetsStatus]);
+  const parentId = state.selectedNodeId ?? state.snapshot?.tree[0]?.id;
+  return (
+    <section aria-label={t('ariaPresetList')} style={{ border: '1px solid var(--dsh-border, #e5e5e5)', padding: 12, marginBottom: 16 }}>
+      <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>{t('treePresetsTitle')}</h4>
+      {state.presetsStatus === 'rejected' ? (
+        <p style={{ fontSize: 12, color: '#b3261e' }}>
+          {t('treePresetsError', { code: state.presetsError?.code ?? 'unknown' })}
+        </p>
+      ) : state.presets.length === 0 ? (
+        <p style={{ fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>{t('treePresetsEmpty')}</p>
+      ) : (
+        <ul style={{ margin: 0, padding: 0, listStyle: 'none', fontSize: 12 }}>
+          {state.presets.map((preset) => (
+            <PresetRow key={`${preset.id}@${preset.version}`} preset={preset} parentId={parentId ?? null} controller={controller} t={t} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function PresetRow(props: {
+  preset: PresetView;
+  parentId: string | null;
+  controller: IPanelController;
+  t: Translate;
+}): JSX.Element {
+  const { preset, parentId, controller, t } = props;
+  const [locale, setLocale] = useState<string>(preset.contentLocales[0] ?? 'en');
+  if (parentId === null) return <div />;
+  return (
+    <li style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0' }}>
+      <span>{preset.content[locale as 'zh-CN' | 'en']?.title ?? preset.id}</span>
+      <span style={{ color: 'var(--dsh-text-secondary, #777)' }}>
+        {t('treePresetSource', { source: preset.source, version: preset.version })}
+      </span>
+      <select value={locale} onChange={(event) => setLocale(event.target.value)} aria-label={t('treePresetLocales', { locales: '', locale: '' })}>
+        {preset.contentLocales.map((l) => <option key={l} value={l}>{l}</option>)}
+      </select>
+      <button type="button" onClick={() => controller.beginInsertPreset(preset, locale, parentId, null)}>
+        {t('treePresetUse')}
+      </button>
+    </li>
+  );
+}
+
+/** 判断 cand 是否是 anc 的后代（沿 parentId 链向上）。 */
+function isDescendantOf(nodes: PanelSnapshot['tree'], cand: string, anc: string): boolean {
+  let cursor = nodes.find((n) => n.id === cand)?.parentId ?? null;
+  const seen = new Set<string>();
+  while (cursor !== null && !seen.has(cursor)) {
+    if (cursor === anc) return true;
+    seen.add(cursor);
+    cursor = nodes.find((n) => n.id === cursor)?.parentId ?? null;
+  }
+  return false;
+}
 
 function Header(props: {
   state: PanelState;

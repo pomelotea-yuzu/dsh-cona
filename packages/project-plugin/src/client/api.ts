@@ -4,8 +4,14 @@
 import type { Command, CommandEnvelope, CommandResult } from '../application/command-service.js';
 import type { ProjectSnapshot, SnapshotResult, StreamEventView } from '../application/snapshot.js';
 import type { ConaProjectStatus } from '../host/project-service.js';
+import type { PresetDescriptor } from '../domain/presets.js';
 
 export type PanelSnapshot = ProjectSnapshot;
+/** 随包预设的预览载荷（host treePresets 结果）。 */
+export type PresetView = PresetDescriptor;
+export type TreePresetsResult =
+  | { status: 'listed'; presets: PresetView[] }
+  | { status: 'rejected'; code: string; message: string };
 
 export interface SnapshotRequest {
   connectionGeneration: number;
@@ -45,6 +51,8 @@ export interface PanelTransport {
   status(): Promise<ConaProjectStatus>;
   snapshot(request: SnapshotRequest): Promise<SnapshotResult>;
   execute(request: ExecuteRequest): Promise<CommandResult>;
+  /** 随包流程预设列表（owner 入口；按实例路由由载体合并 instanceId）。 */
+  treePresets?(): Promise<TreePresetsResult>;
   follow?(request: { instanceId?: string; afterStateRevision?: number }): Promise<
     | { status: 'following'; value: FollowHandle }
     | { status: 'rejected'; code: string; message: string }
@@ -53,4 +61,4 @@ export interface PanelTransport {
   followClose?(request: { subscriptionId: string }): Promise<{ closed: boolean }>;
 }
 
-export type { Command, CommandEnvelope, CommandResult, ProjectSnapshot, SnapshotResult, ConaProjectStatus, StreamEventView };
+export type { Command, CommandEnvelope, CommandResult, ProjectSnapshot, SnapshotResult, ConaProjectStatus, StreamEventView, PresetDescriptor };

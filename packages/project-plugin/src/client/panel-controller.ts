@@ -10,9 +10,12 @@
 //
 // 本文件不得依赖 DOM、React 或 Node：渲染层只读状态、调方法。
 
-import type { Command, PanelSnapshot, PanelTransport, ConaProjectStatus } from './api.js';
+import type { Command, PanelSnapshot, PanelTransport, ConaProjectStatus, PresetView } from './api.js';
 
-export type SaveStatus = 'idle' | 'saving' | 'saved' | 'conflict' | 'pending' | 'failed' | 'partial';
+export type SaveStatus =
+  | 'idle' | 'saving' | 'saved' | 'conflict' | 'pending' | 'failed' | 'partial'
+  /** 已确认提交但完整回读尚未核对：只重读，不重提已成功的变更。 */
+  | 'committed-pending-sync';
 
 export interface DraftBaseline {
   planVersion: string;
@@ -21,19 +24,53 @@ export interface DraftBaseline {
   sourceEpoch: number;
 }
 
-/** 一份草稿：目标编辑或新增节点。同一时间只保留一份，避免合并冲突。 */
+/** 一份草稿：目标编辑、新增节点、结构移动或预设插入。同一时间只保留一份。 */
 export interface PanelDraft {
-  kind: 'update-goal' | 'add-node';
-  /** 目标编辑的节点 id；新增节点时为父节点 id。 */
+  kind: 'update-goal' | 'add-node' | 'move' | 'insert-preset';
+  /** 目标编辑的节点 id；新增节点时为父节点 id；移动时为被移动节点 id。 */
   nodeId: string;
   goal: string;
   /** 仅新增节点使用。 */
   title?: string;
   criteria?: string[];
+  /** 移动：目标父节点（null=根组）与同级锚点（null=末尾）。 */
+  parentId?: string | null;
+  beforeNodeId?: string | null;
+  /** 移动：目标位置是否等于原位置（原位；保存按钮禁用）。 */
+  noChange?: boolean;
+  /** 插入：预设身份与本次冻结的正文语言（语言切换不改变已建草稿）。 */
+  templateId?: string;
+  templateVersion?: number;
+  contentLocale?: string;
+  preset?: PresetView;
   /** 进入草稿时的权威基线（保存时作为 expected* 提交，不随刷新变化）。 */
   baseline: DraftBaseline;
   /** 已发出的 operationId：重试复用同一个，避免结果未知时重复应用。 */
   operationId: string | null;
+}
+
+/** 结构操作的统一预览：拖放与键盘菜单生成同一形状。 */
+export interface StructurePreview {
+  kind: 'move' | 'insert';
+  /** 层级化展示行（缩进 depth 由调用方渲染）。 */
+  lines: { depth: number; title: string }[];
+  targetParentId: string | null;
+  beforeNodeId: string | null;
+  /** 回到原位置：无业务变化。 */
+  noChange: boolean;
+  /** 插入预设的展示字段（来源、版本、语言、内部依赖）。 */
+  preset?: {
+    id: string;
+    version: number;
+    source: string;
+    locales: string[];
+    contentLocale: string;
+    name: string;
+    description: string;
+    dependencies: { from: string; to: string }[];
+  };
+  /** 当前实例存在活动工作时为真；界面据此显示条件句提示。 */
+  workNotice: boolean;
 }
 
 export interface ConnectionState {
@@ -57,6 +94,14 @@ export interface PanelState {
   /** `code` 为稳定码（不翻译），`message` 为宿主原文；界面文案由字典提供。 */
   save: { status: SaveStatus; code: string | null; message: string | null };
   connection: ConnectionState;
+  /** 随包预设列表（3.2）。 */
+  presets: PresetView[];
+  presetsStatus: 'idle' | 'loading' | 'listed' | 'rejected';
+  presetsError: { code: string; message: string } | null;
+  /** 当前结构草稿的统一预览；非结构草稿为 null。 */
+  structurePreview: StructurePreview | null;
+  /** 已提交待同步时保存的回执基线；retryRead 只有回读覆盖它才转 saved。 */
+  pendingReceipt: DraftBaseline | null;
 }
 
 export interface PanelControllerDeps {
@@ -74,6 +119,11 @@ const EMPTY: PanelState = {
   reason: '',
   save: { status: 'idle', code: null, message: null },
   connection: { generation: 1, status: 'connected', error: null },
+  presets: [],
+  presetsStatus: 'idle',
+  presetsError: null,
+  structurePreview: null,
+  pendingReceipt: null,
 };
 
 /** 一次读取的结论：是否被采纳、是否因代际／修订过旧被丢弃。 */
@@ -93,6 +143,16 @@ export interface IPanelController {
   select(nodeId: string): void;
   editGoal(nodeId: string, goal: string): void;
   beginAddNode(parentId?: string): void;
+  /** 进入移动草稿（拖放与键盘菜单共用）。noChange 由位置是否等于原位置判定。 */
+  beginMove(nodeId: string, parentId: string | null, beforeNodeId: string | null): void;
+  /** 读取随包预设列表。 */
+  loadPresets(): Promise<void>;
+  /** 进入预设插入草稿；contentLocale 进入时冻结，语言切换不改变。 */
+  beginInsertPreset(preset: PresetView, contentLocale: string, parentId: string, beforeNodeId: string | null): void;
+  /** 当前结构草稿的预览（拖放/键盘/插入统一形状）。 */
+  preview(): StructurePreview | null;
+  /** 已提交待同步：只重读快照，不重提已成功的变更。 */
+  retryRead(): Promise<SaveStatus>;
   editDraft(patch: Partial<Pick<PanelDraft, 'goal' | 'title' | 'criteria'>>): void;
   setReason(reason: string): void;
   discardDraft(): void;
@@ -284,6 +344,93 @@ export class PanelController implements IPanelController {
     });
   }
 
+  /**
+   * 进入移动草稿。拖放与键盘菜单都以同一签名进入，位置由 parentId + beforeNodeId
+   * 表达，预览由 preview() 统一生成。已有其它草稿时调用方须先保存或放弃（3.4）。
+   */
+  beginMove(nodeId: string, parentId: string | null, beforeNodeId: string | null): void {
+    const snapshot = this.state.snapshot;
+    if (snapshot === null) return;
+    const node = snapshot.tree.find((item) => item.id === nodeId);
+    if (node === undefined) return;
+    // 目标父节点必须存在（null=根组例外）；锚点须存在于目标同级组。
+    if (parentId !== null && !snapshot.tree.some((item) => item.id === parentId)) return;
+    if (beforeNodeId !== null && !snapshot.tree.some((item) => item.id === beforeNodeId && item.parentId === parentId)) return;
+    const noChange = this.isMoveNoChange(node, parentId, beforeNodeId, snapshot);
+    this.patch({
+      selectedNodeId: nodeId,
+      draft: {
+        kind: 'move', nodeId, goal: node.goal, parentId, beforeNodeId, noChange,
+        baseline: baselineOf(snapshot), operationId: null,
+      },
+      save: { status: 'idle', code: null, message: null },
+      structurePreview: null,
+    });
+    this.refreshPreview();
+  }
+
+  /** 读取随包预设；任何草稿不受影响。 */
+  async loadPresets(): Promise<void> {
+    if (this.deps.transport.treePresets === undefined) {
+      this.patch({ presetsStatus: 'rejected', presetsError: { code: 'unsupported', message: '宿主不支持预设读取' } });
+      return;
+    }
+    this.patch({ presetsStatus: 'loading', presetsError: null });
+    try {
+      const result = await this.deps.transport.treePresets();
+      if (result.status === 'listed') {
+        this.patch({ presets: result.presets, presetsStatus: 'listed', presetsError: null });
+      } else {
+        this.patch({ presetsStatus: 'rejected', presetsError: { code: result.code, message: result.message } });
+      }
+    } catch (error) {
+      this.patch({ presetsStatus: 'rejected', presetsError: { code: 'transport-failed', message: (error as Error).message } });
+    }
+  }
+
+  /** 进入预设插入草稿；正文语言在此时冻结，之后切换宿主语言不改变。 */
+  beginInsertPreset(preset: PresetView, contentLocale: string, parentId: string, beforeNodeId: string | null): void {
+    const snapshot = this.state.snapshot;
+    if (snapshot === null) return;
+    const parent = snapshot.tree.find((item) => item.id === parentId);
+    if (parent === undefined) return;
+    if (beforeNodeId !== null && !snapshot.tree.some((item) => item.id === beforeNodeId && item.parentId === parentId)) return;
+    this.patch({
+      draft: {
+        kind: 'insert-preset', nodeId: parentId, goal: '', parentId, beforeNodeId,
+        templateId: preset.id, templateVersion: preset.version, contentLocale, preset,
+        baseline: baselineOf(snapshot), operationId: null,
+      },
+      save: { status: 'idle', code: null, message: null },
+      structurePreview: null,
+    });
+    this.refreshPreview();
+  }
+
+  /** 当前结构草稿的统一预览；内容与权威快照同步重算，取消时随草稿清空。 */
+  preview(): StructurePreview | null {
+    return this.state.structurePreview;
+  }
+
+  /** 已提交待同步：只重读快照（只重试读取，不重提已成功的变更）。 */
+  async retryRead(): Promise<SaveStatus> {
+    if (this.state.save.status !== 'committed-pending-sync') return this.state.save.status;
+    const generation = this.state.connection.generation;
+    try {
+      const result = await this.deps.transport.snapshot({ connectionGeneration: generation });
+      const outcome = this.ingest(result, generation);
+      const receipt = this.state.pendingReceipt;
+      const snapshot = this.state.snapshot;
+      if (outcome === 'applied' && receipt !== null && snapshot !== null && snapshot.sourceEpoch === receipt.sourceEpoch) {
+        this.patch({ save: { status: 'saved', code: null, message: null }, pendingReceipt: null });
+        return 'saved';
+      }
+    } catch (error) {
+      this.markOffline((error as Error).message);
+    }
+    return 'committed-pending-sync';
+  }
+
   editDraft(patch: Partial<Pick<PanelDraft, 'goal' | 'title' | 'criteria'>>): void {
     const draft = this.state.draft;
     if (draft === null) return;
@@ -298,14 +445,21 @@ export class PanelController implements IPanelController {
   }
 
   discardDraft(): void {
-    this.patch({ draft: null, reason: '', save: { status: 'idle', code: null, message: null } });
+    this.patch({
+      draft: null, reason: '', structurePreview: null, pendingReceipt: null,
+      save: { status: 'idle', code: null, message: null },
+    });
   }
 
   /** 保存：先规划命令，再（如有原因）追加记录。失败保留草稿且不标已保存。 */
   async save(): Promise<SaveStatus> {
+    // 已提交待同步：不重提已成功的变更，只重试读取。
+    if (this.state.save.status === 'committed-pending-sync') return this.retryRead();
     const draft = this.state.draft;
     if (this.state.snapshot === null) return 'failed';
     if (draft === null && this.state.reason.trim() === '') return 'idle';
+    // 原位移动：无变化，禁用保存。
+    if (draft?.kind === 'move' && draft.noChange === true) return 'idle';
     if (this.state.save.status === 'saving') return 'saving';
     const generation = this.state.connection.generation;
     this.patch({ save: { status: 'saving', code: null, message: null } });
@@ -337,21 +491,31 @@ export class PanelController implements IPanelController {
       }
       // 规划已提交：清草稿，再按需追加原因记录。
       this.patch({ draft: null });
+      // 回读须与回执同源：结构操作与既有节点编辑共用同一判据。
+      const synced = await this.reloadQuietly(generation, result);
       if (this.state.reason.trim() !== '') {
         const recorded = await this.appendReason(
-          [draft.nodeId],
+          [reasonSubjectOf(draft)],
           result.planVersion,
           result.planRevision,
           result.sourceEpoch,
         );
-        await this.reloadQuietly(generation);
         if (!recorded) {
           return this.fail('partial', 'record-failed', null, false);
         }
-        this.patch({ reason: '', save: { status: 'saved', code: null, message: null } });
-        return 'saved';
+        this.patch({ reason: '' });
       }
-      await this.reloadQuietly(generation);
+      // 回读成功才算普通已保存；已确认但回读失败/落后 → 已提交待同步（只重读）。
+      if (!synced) {
+        this.patch({
+          save: { status: 'committed-pending-sync', code: 'snapshot-not-synced', message: null },
+          pendingReceipt: {
+            planVersion: result.planVersion, planRevision: result.planRevision,
+            stateRevision: result.stateRevision, sourceEpoch: result.sourceEpoch,
+          },
+        });
+        return 'committed-pending-sync';
+      }
       this.patch({ save: { status: 'saved', code: null, message: null } });
       return 'saved';
     }
@@ -414,6 +578,8 @@ export class PanelController implements IPanelController {
       message: null,
       connection: { ...this.state.connection, status: 'connected', error: null },
     });
+    // 结构草稿预览依赖权威快照；快照刷新后重算（草稿与基线保持不变）。
+    if (this.state.draft?.kind === 'move' || this.state.draft?.kind === 'insert-preset') this.refreshPreview();
   }
 
   private async load(minStateRevision?: number): Promise<void> {
@@ -459,13 +625,23 @@ export class PanelController implements IPanelController {
     });
   }
 
-  /** 重新读快照但不覆盖草稿；失败只更新连接提示。受同一代际与修订守卫约束。 */
-  private async reloadQuietly(generation: number): Promise<void> {
+  /**
+   * 提交后回读：只有快照覆盖回执（同实例、源代际、规划/状态修订与指纹匹配）才算同步成功。
+   * 已确认提交但回读失败或落后时返回 false——调用方据此显示「已提交，待同步」，只重试读取。
+   */
+  private async reloadQuietly(generation: number, receipt?: { planVersion: string; planRevision: number; stateRevision: number; sourceEpoch: number }): Promise<boolean> {
     try {
       const result = await this.deps.transport.snapshot({ connectionGeneration: generation });
-      this.ingest(result, generation);
+      const outcome = this.ingest(result, generation);
+      if (receipt === undefined || outcome !== 'applied') return outcome === 'applied';
+      const snapshot = this.state.snapshot;
+      // 同源判定：完整回读成功（outcome=applied）且仍属同一资料源代际，才算已同步。
+      // 换源后旧回执属于历史，由 sourceEpoch 核对拦截；修订单调由 ingest.accepts 守卫。
+      // 真实的「回执已确认但完整回读失败」由 outcome !== applied / 抛错捕获。
+      return snapshot !== null && snapshot.sourceEpoch === receipt.sourceEpoch;
     } catch (error) {
       this.markOffline((error as Error).message);
+      return false;
     }
   }
 
@@ -497,6 +673,85 @@ export class PanelController implements IPanelController {
     }
   }
 
+  /** 原位判定：模拟移动后的同级顺序，看节点新位置是否等于当前位置。 */
+  private isMoveNoChange(node: { id: string; parentId: string | null; order: number }, parentId: string | null, beforeNodeId: string | null, snapshot: PanelSnapshot): boolean {
+    if (node.parentId !== parentId) return false;
+    const all = snapshot.tree.filter((item) => item.parentId === parentId).sort((a, b) => a.order - b.order);
+    const originalIndex = all.findIndex((item) => item.id === node.id);
+    if (originalIndex < 0) return false;
+    const rest = all.filter((item) => item.id !== node.id);
+    const newIndex = beforeNodeId === null
+      ? rest.length
+      : rest.findIndex((item) => item.id === beforeNodeId);
+    return newIndex === originalIndex;
+  }
+
+  /** 从草稿 + 权威快照生成预览；草稿变化或快照刷新后重算。 */
+  private refreshPreview(): void {
+    const draft = this.state.draft;
+    const snapshot = this.state.snapshot;
+    if (draft === null || snapshot === null || (draft.kind !== 'move' && draft.kind !== 'insert-preset')) {
+      this.patch({ structurePreview: null });
+      return;
+    }
+    const workNotice = (snapshot.local.workRunCount ?? 0) > 0;
+    if (draft.kind === 'move') {
+      const node = snapshot.tree.find((item) => item.id === draft.nodeId);
+      const parent = draft.parentId === null ? null : snapshot.tree.find((item) => item.id === draft.parentId);
+      const anchor = draft.beforeNodeId === null ? null : snapshot.tree.find((item) => item.id === draft.beforeNodeId);
+      const lines: { depth: number; title: string }[] = [];
+      if (parent !== undefined && parent !== null) {
+        let depth = 0;
+        let cursor: string | null = parent.parentId;
+        while (cursor !== null) {
+          depth += 1;
+          cursor = snapshot.tree.find((item) => item.id === cursor)?.parentId ?? null;
+        }
+        lines.push({ depth, title: parent.title });
+      }
+      if (node !== undefined) lines.push({ depth: (lines[0]?.depth ?? 0) + 1, title: `移动：${node.title}` });
+      if (anchor !== undefined && anchor !== null) lines.push({ depth: (lines[0]?.depth ?? 0) + 1, title: `插入到「${anchor.title}」之前` });
+      this.patch({
+        structurePreview: {
+          kind: 'move', lines,
+          targetParentId: draft.parentId ?? null,
+          beforeNodeId: draft.beforeNodeId ?? null,
+          noChange: draft.noChange ?? false,
+          workNotice,
+        },
+      });
+      return;
+    }
+    // 插入预设：节点键按层级/顺序展示，内部依赖映射为本次语言的标题。
+    const preset = draft.preset;
+    const locale = draft.contentLocale ?? 'en';
+    const lines: { depth: number; title: string }[] = [];
+    for (const ref of [...(preset?.nodes ?? [])].sort((a, b) => a.order - b.order)) {
+      const depth = ref.parentKey === null ? 0 : 1;
+      const title = preset?.text[locale as 'zh-CN' | 'en']?.[ref.key]?.title ?? ref.key;
+      lines.push({ depth, title: ref.parentKey === null ? `插入：${title}` : title });
+    }
+    this.patch({
+      structurePreview: {
+        kind: 'insert', lines,
+        targetParentId: draft.parentId ?? null,
+        beforeNodeId: draft.beforeNodeId ?? null,
+        noChange: false,
+        workNotice,
+        preset: preset === undefined ? undefined : {
+          id: preset.id, version: preset.version, source: preset.source,
+          locales: [...preset.contentLocales], contentLocale: locale,
+          name: preset.content[locale as 'zh-CN' | 'en']?.title ?? preset.id,
+          description: preset.content[locale as 'zh-CN' | 'en']?.description ?? '',
+          dependencies: preset.dependencies.map((edge) => ({
+            from: preset.text[locale as 'zh-CN' | 'en']?.[edge.nodeKey]?.title ?? edge.nodeKey,
+            to: preset.text[locale as 'zh-CN' | 'en']?.[edge.requiresKey]?.title ?? edge.requiresKey,
+          })),
+        },
+      },
+    });
+  }
+
   private fail(status: SaveStatus, code: string | null, message: string | null, keepDraft: boolean): SaveStatus {
     this.patch({
       save: { status, code, message },
@@ -526,10 +781,33 @@ function baselineOf(snapshot: PanelSnapshot): DraftBaseline {
   };
 }
 
+/** 变更原因的记录主体：移动以移动节点为主体，插入以目标父节点为主体（design §7）。 */
+function reasonSubjectOf(draft: PanelDraft): string {
+  return draft.nodeId;
+}
+
 /** 草稿 → 规划命令；新节点 order 取同级最大值 +1（资料要求同级有序且不重复）。 */
 function commandOf(draft: PanelDraft, snapshot: PanelSnapshot): Command {
   if (draft.kind === 'update-goal') {
     return { type: 'update-node', nodeId: draft.nodeId, patch: { goal: draft.goal } };
+  }
+  if (draft.kind === 'move') {
+    return {
+      type: 'move-node',
+      nodeId: draft.nodeId,
+      parentId: draft.parentId ?? null,
+      beforeNodeId: draft.beforeNodeId ?? null,
+    };
+  }
+  if (draft.kind === 'insert-preset') {
+    return {
+      type: 'insert-preset',
+      templateId: draft.templateId ?? '',
+      templateVersion: draft.templateVersion ?? 0,
+      contentLocale: (draft.contentLocale ?? 'en') as 'zh-CN' | 'en',
+      parentId: draft.parentId ?? null,
+      beforeNodeId: draft.beforeNodeId ?? null,
+    };
   }
   const siblings = snapshot.tree.filter((node) => node.parentId === draft.nodeId).map((node) => node.order);
   const order = siblings.length === 0 ? 0 : Math.max(...siblings) + 1;

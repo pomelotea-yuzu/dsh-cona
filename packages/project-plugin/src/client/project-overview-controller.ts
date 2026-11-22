@@ -2,8 +2,8 @@
 // 以及按实例隔离的 PanelController（草稿/选择/连接代际各自独立）。
 // 不依赖 DOM/React，可脱离浏览器测试；渲染层只读状态、调方法。
 
-import { PanelController, type IPanelController, type IngestOutcome, type PanelDraft, type PanelState, type SaveStatus } from './panel-controller.js';
-import type { PanelTransport } from './api.js';
+import { PanelController, type IPanelController, type IngestOutcome, type PanelDraft, type PanelState, type SaveStatus, type StructurePreview } from './panel-controller.js';
+import type { PanelTransport, PresetView } from './api.js';
 import { buildResume, type NextStepKind, type ResumePayload } from '../domain/resume.js';
 import type {
   ResumeChatChoiceView,
@@ -528,6 +528,7 @@ export class DelegatingPanelController implements IPanelController {
           selectedNodeId: null, draft: null, reason: '',
           save: { status: 'idle', code: null, message: null },
           connection: { generation: 1, status: 'connected', error: null },
+          presets: [], presetsStatus: 'idle', presetsError: null, structurePreview: null, pendingReceipt: null,
         }
       : active.getState();
   }
@@ -545,6 +546,13 @@ export class DelegatingPanelController implements IPanelController {
   select(nodeId: string): void { this.current().select(nodeId); }
   editGoal(nodeId: string, goal: string): void { this.current().editGoal(nodeId, goal); }
   beginAddNode(parentId?: string): void { this.current().beginAddNode(parentId); }
+  beginMove(nodeId: string, parentId: string | null, beforeNodeId: string | null): void { this.current().beginMove(nodeId, parentId, beforeNodeId); }
+  loadPresets(): Promise<void> { return this.current().loadPresets(); }
+  beginInsertPreset(preset: PresetView, contentLocale: string, parentId: string, beforeNodeId: string | null): void {
+    this.current().beginInsertPreset(preset, contentLocale, parentId, beforeNodeId);
+  }
+  preview(): StructurePreview | null { return this.current().preview(); }
+  retryRead(): Promise<SaveStatus> { return this.current().retryRead(); }
   editDraft(patch: Partial<Pick<PanelDraft, 'goal' | 'title' | 'criteria'>>): void { this.current().editDraft(patch); }
   setReason(reason: string): void { this.current().setReason(reason); }
   discardDraft(): void { this.current().discardDraft(); }

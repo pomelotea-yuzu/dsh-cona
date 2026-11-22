@@ -4,7 +4,9 @@
 
 > **2026-11-22 进度（1.x 领域层）**：tasks 1.1–1.3 已完成，A 层自动测试在 `test/tree-editing.test.ts` 覆盖 T01、T04–T07、T14 的领域变换与预设部分。证据见 [1.x 实施记录](implementation/2026-11-22-1.x-domain-transforms.md)。
 >
-> **2026-11-22 进度（2.x 服务与授权）**：tasks 2.1–2.4 已完成，`test/tree-commands.test.ts` 新增 16 个 A／F 用例，覆盖 owner-only 准入、预设目录、结构命令发布／单次修订／原位保留／冲突与源变化／外部指纹、回执与恢复／升级移除预设版本、活动 WorkRun 边界。证据见 [2.x 实施记录](implementation/2026-11-22-2.x-service-authorization.md)。验证矩阵各组合项的 H 分句仍为 `untested`，状态列保持不变。
+> **2026-11-22 进度（2.x 服务与授权）**：tasks 2.1–2.4 已完成，`test/tree-commands.test.ts` 新增 16 个 A／F 用例，覆盖 owner-only 准入、预设目录、结构命令发布／单次修订／原位保留／冲突与源变化／外部指纹、回执与恢复／升级移除预设版本、活动 WorkRun 边界。证据见 [2.x 实施记录](implementation/2026-11-22-2.x-service-authorization.md)。
+>
+> **2026-11-22 进度（3.x 界面交互）**：tasks 3.1–3.4 已完成，`test/panel-structure.test.ts` 新增 10 个 A 层控制器用例，覆盖拖放/键盘统一预览、原位与活动工作提示、预设载荷与语言冻结、operationId 冻结/原样重试/冲突新号、已提交待同步与仅重读、按实例草稿隔离。中英字典同步扩充。证据见 [3.x 实施记录](implementation/2026-11-22-3.x-client-interaction.md)。全量测试 341/341、CI 与仓库门禁全绿。各组合项 H 分句仍 `untested`，状态列保持不变。
 
 | ID | [增量场景](specs/project-tree-editing/spec.md) | 方法与观察点 | 状态 |
 |---|---|---|---|
