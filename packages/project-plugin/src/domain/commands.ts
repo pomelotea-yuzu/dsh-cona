@@ -2,7 +2,7 @@
 // 新节点身份由应用层生成后传入；命令不接受模型指定的新节点 id 来覆盖旧节点。
 
 import { computePlanVersion } from './canonical/plan-fingerprint.js';
-import { addNodes, instantiateTemplate, moveNode, setDependencies, splitNode } from './transforms.js';
+import { addNodes, groupNodes, instantiateTemplate, moveNode, setDependencies, splitNode, type GroupContent } from './transforms.js';
 import type { PresetContentLocale, PresetDescriptor } from './presets.js';
 import type {
   DependencyEdge,
@@ -85,11 +85,12 @@ export function appendRecordIndex(
   return { ok: true, value: [...records, entry] };
 }
 
-/** 规划命令：add-nodes / update-node / split-node / set-dependencies / set-node-status / move-node。 */
+/** 规划命令：add-nodes / update-node / split-node / group-nodes / set-dependencies / set-node-status / move-node。 */
 export type PlanCommand =
   | { type: 'add-nodes'; nodes: WorkNode[] }
   | { type: 'update-node'; nodeId: string; patch: NodePatch }
   | { type: 'split-node'; parentId: string; children: WorkNode[] }
+  | { type: 'group-nodes'; nodeIds: string[]; group: GroupContent; anchorId: string | null; newGroupId: string }
   | { type: 'set-dependencies'; dependencies: DependencyEdge[] }
   | { type: 'set-node-status'; nodeId: string; status: NodeStatus }
   | { type: 'move-node'; nodeId: string; parentId: string | null; beforeNodeId: string | null }
@@ -121,6 +122,9 @@ export function applyPlanCommand(
       break;
     case 'split-node':
       result = splitNode(doc.plan, command.parentId, command.children);
+      break;
+    case 'group-nodes':
+      result = groupNodes(doc.plan, command.nodeIds, command.group, command.newGroupId, command.anchorId);
       break;
     case 'set-dependencies':
       result = setDependencies(doc.plan, command.dependencies);

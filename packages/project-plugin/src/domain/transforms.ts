@@ -77,6 +77,117 @@ export function splitNode(plan: Plan, parentId: string, newChildren: readonly Wo
   return addNodes(plan, normalized);
 }
 
+/** 分组节点的组内容：标题、目标与完成条件由请求提供，身份由应用层分配。 */
+export interface GroupContent {
+  title: string;
+  goal: string;
+  completionCriteria: string[];
+}
+
+/**
+ * 分组同级普通节点（tasks 2.1，design §2）：创建一个组节点并移动选中的原子树。
+ * - 选择必须非空、全部存在且同父级；任一为根节点即拒绝（根降为组子节点违反 v1 父链规则）；
+ * - 组节点挂在同一父级之下，`anchorId`（null=末尾）定位插入点；锚点不得是被选中节点；
+ * - 新组 id 由应用层生成后传入（UUID、不与现有节点冲突）；
+ * - 原子树 id、目标、完成条件、状态、显式依赖与记录引用保持原值；成员在组内保持
+ *   原同级相对顺序；不产生新的依赖边。任何一项非法时整批拒绝。
+ */
+export function groupNodes(
+  plan: Plan,
+  nodeIds: readonly string[],
+  content: GroupContent,
+  newGroupId: string,
+  anchorId: string | null,
+): TransformResult<Plan> {
+  if (nodeIds.length === 0) {
+    return fail({ code: 'empty-selection', path: '/plan/nodes', message: '分组选择为空' });
+  }
+  if (!UUID_RE.test(newGroupId)) {
+    return fail({ code: 'invalid-uuid', path: '/group/id', message: '组节点 ID 必须是 v4 UUID' });
+  }
+  const existingIds = new Set(plan.nodes.map((node) => node.id));
+  if (existingIds.has(newGroupId)) {
+    return fail({ code: 'duplicate-node-id', path: '/group/id', message: '组节点 ID 与现有节点冲突' });
+  }
+
+  const selected: WorkNode[] = [];
+  for (const id of nodeIds) {
+    const found = plan.nodes.find((node) => node.id === id);
+    if (found === undefined) {
+      return fail({ code: 'node-not-found', path: '/plan/nodes', message: `节点 ${id} 不存在` });
+    }
+    if (found.parentId === null) {
+      return fail({ code: 'root-in-selection', path: '/plan/nodes', message: `根节点 ${id} 不能成为组节点的子节点` });
+    }
+    selected.push(found);
+  }
+  const parentId = selected[0]!.parentId;
+  if (selected.some((node) => node.parentId !== parentId)) {
+    return fail({ code: 'cross-parent-selection', path: '/plan/nodes', message: '分组选择必须属于同一父级' });
+  }
+
+  if (anchorId !== null) {
+    const anchor = plan.nodes.find((node) => node.id === anchorId);
+    if (anchor === undefined) {
+      return fail({ code: 'invalid-anchor', path: '/plan/nodes', message: `锚点节点 ${anchorId} 不存在` });
+    }
+    if (anchor.parentId !== parentId) {
+      return fail({ code: 'invalid-anchor', path: '/plan/nodes', message: '锚点不属于分组节点的同级组' });
+    }
+    if (nodeIds.includes(anchorId)) {
+      return fail({ code: 'invalid-anchor', path: '/plan/nodes', message: '锚点不能是被分组的节点' });
+    }
+  }
+
+  // 同级组按 order 排序；成员按原相对顺序取出（与请求 nodeIds 顺序无关）。
+  const siblings = plan.nodes
+    .filter((node) => node.parentId === parentId)
+    .sort((a, b) => a.order - b.order)
+    .map((node) => ({ ...node, completionCriteria: [...node.completionCriteria] }));
+  const selectedIds = new Set(nodeIds);
+  const selectedInOrder = siblings.filter((node) => selectedIds.has(node.id));
+  const rest = siblings.filter((node) => !selectedIds.has(node.id));
+
+  const group: WorkNode = {
+    id: newGroupId,
+    parentId,
+    order: 0,
+    title: content.title,
+    goal: content.goal,
+    completionCriteria: [...content.completionCriteria],
+    status: 'todo',
+  };
+  const insertAt = anchorId === null ? rest.length : rest.findIndex((node) => node.id === anchorId);
+  const nextSiblings = [...rest.slice(0, insertAt), group, ...rest.slice(insertAt)];
+
+  const members = selectedInOrder.map((node, index) => ({
+    ...node,
+    parentId: newGroupId,
+    order: index,
+  }));
+  // 成员的后代保持原 parentId 与 order；分组不触及成员子树内部的次序。
+  const untouched = plan.nodes
+    .filter((node) => !selectedIds.has(node.id) && node.parentId !== parentId)
+    .map((node) => ({ ...node, completionCriteria: [...node.completionCriteria] }));
+
+  const nodes: WorkNode[] = [...untouched];
+  nextSiblings.forEach((node, index) => {
+    node.order = index;
+    nodes.push(node);
+  });
+  nodes.push(...members);
+
+  const candidate: Plan = {
+    nodes,
+    dependencies: plan.dependencies.map((edge) => ({ ...edge })),
+  };
+  const issues = validatePlanStructure(candidate);
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+  return { ok: true, value: candidate };
+}
+
 /**
  * 移动节点：以目标父节点 `parentId`（null 表示根组）和同级锚点 `beforeNodeId`
  * （null 表示追加到同级末尾）定位。先从原同级组取出节点，再插入目标组并重编号

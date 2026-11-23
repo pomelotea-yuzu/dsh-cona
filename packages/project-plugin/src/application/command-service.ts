@@ -4,6 +4,7 @@
 // 4.5 增补：unknown-state／聚合不可读时写隔离标记，停止该实例读写，并提供只读诊断与显式解除。
 
 import { applyPlanCommand, appendRecordIndex, type NodePatch, type PlanCommand } from '../domain/commands.js';
+import type { GroupContent } from '../domain/transforms.js';
 import {
   FEATURE_DEVELOPMENT_PRESET,
   validatePreset,
@@ -83,6 +84,7 @@ export type Command =
   | { type: 'add-nodes'; nodes: NewNodeInput[] }
   | { type: 'update-node'; nodeId: string; patch: NodePatch }
   | { type: 'split-node'; parentId: string; children: Omit<NewNodeInput, 'parentId'>[] }
+  | { type: 'group-nodes'; nodeIds: string[]; group: GroupContent; anchorId: string | null }
   | { type: 'set-dependencies'; dependencies: DependencyEdge[] }
   | { type: 'set-node-status'; nodeId: string; status: NodeStatus }
   | MoveNodeCommand
@@ -90,7 +92,7 @@ export type Command =
   | AppendRecordCommand;
 
 /** 只能由 owner 发起的结构命令；agent-work 上下文直达须在准入阶段拒绝。 */
-const OWNER_ONLY_COMMANDS = new Set<string>(['move-node', 'insert-preset']);
+const OWNER_ONLY_COMMANDS = new Set<string>(['move-node', 'insert-preset', 'group-nodes']);
 
 /** 随包预设目录：按 ID 与版本精确匹配，未知 ID／不可用版本返回稳定诊断。 */
 export interface PresetCatalog {
@@ -1071,10 +1073,11 @@ export class ProjectCommandService {
       if (!applied.ok) {
         // 结构命令把领域拒绝码原样上抛（parent-not-found / invalid-anchor 等），
         // 便于界面逐项提示；其余命令维持既有 invalid-project 诊断。
-        const structural = command.type === 'move-node' || command.type === 'insert-preset';
+        const structural = command.type === 'move-node' || command.type === 'insert-preset' || command.type === 'group-nodes';
         const domainCode = structural ? applied.issues.find((issue) =>
           ['parent-not-found', 'invalid-anchor', 'node-not-found', 'root-to-child', 'child-to-root',
-            'invalid-parent', 'template-invalid', 'template-locale-unsupported', 'duplicate-node-id',
+            'invalid-parent', 'empty-selection', 'cross-parent-selection', 'root-in-selection',
+            'template-invalid', 'template-locale-unsupported', 'duplicate-node-id',
             'invalid-uuid', 'template-id-count-mismatch'].includes(issue.code),
         ) : undefined;
         return {
@@ -1127,6 +1130,8 @@ export class ProjectCommandService {
     if (command.type === 'append-record') return { recordId: this.deps.newRecordId() };
     if (command.type === 'add-nodes') return { nodeIds: command.nodes.map(() => this.deps.newNodeId()) };
     if (command.type === 'split-node') return { nodeIds: command.children.map(() => this.deps.newNodeId()) };
+    // 2.1 分组：组节点身份由应用层分配，成员沿用原 id。
+    if (command.type === 'group-nodes') return { nodeIds: [this.deps.newNodeId()] };
     if (command.type === 'insert-preset' && preset !== undefined) {
       return { nodeIds: preset.nodes.map(() => this.deps.newNodeId()) };
     }
@@ -1154,6 +1159,14 @@ export class ProjectCommandService {
           type: 'split-node',
           parentId: command.parentId,
           children: command.children.map((child) => toNode({ ...child, parentId: command.parentId }, command.parentId)),
+        };
+      case 'group-nodes':
+        return {
+          type: 'group-nodes',
+          nodeIds: [...command.nodeIds],
+          group: { title: command.group.title, goal: command.group.goal, completionCriteria: [...command.group.completionCriteria] },
+          anchorId: command.anchorId,
+          newGroupId: nextId(),
         };
       case 'move-node':
         return command;

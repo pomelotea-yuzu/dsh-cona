@@ -201,6 +201,7 @@ export function commandAction(command: Command): WorkAction {
     // 结构命令为 owner-only，agent 准入在命令服务入口即拒绝；这里给出保守映射，
     // 避免穷尽 switch 遗漏，且任何意外的 agent 直达都落在受限动作上。
     case 'move-node':
+    case 'group-nodes':
       return 'update';
     case 'insert-preset':
       return 'add';
@@ -229,6 +230,8 @@ export function commandTargets(command: Command): string[] {
       return [...new Set(command.subjectNodeIds)];
     case 'move-node':
       return [command.nodeId, ...(command.parentId === null ? [] : [command.parentId])];
+    case 'group-nodes':
+      return [...new Set(command.nodeIds)];
     case 'insert-preset':
       return command.parentId === null ? [] : [command.parentId];
   }
