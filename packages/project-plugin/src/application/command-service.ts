@@ -198,6 +198,8 @@ const WORK_RUN_STRUCTURAL_COMMANDS = new Set<string>([
 const INVERTIBLE_COMMANDS = new Set<string>([
   'add-nodes', 'update-node', 'split-node', 'group-nodes', 'merge-nodes', 'copy-subtree',
   'set-dependencies', 'set-node-status', 'move-node', 'insert-preset', 'insert-user-template',
+  // 4.5：里程碑条目编辑与逆向信息一起保存（未触及的条目不受影响）。
+  'set-milestone', 'remove-milestone',
 ]);
 
 /** 逆向命令的方向与目标。 */
@@ -2403,10 +2405,28 @@ export class ProjectCommandService {
         },
       };
     }
-    // v2 roadmap 不参与结构逆向：撤销/重做保留未被编辑的里程碑扩展。
+    // v2 roadmap 不参与结构逆向：撤销/重做保留未被编辑的里程碑扩展；
+    // 里程碑条目自身的逆向已由 applyPlanInverse 写回（不带 roadmapChanges 时保持原值）。
     const inversePlan = doc.plan.roadmap === undefined
       ? applied.value
-      : { ...applied.value, roadmap: doc.plan.roadmap };
+      : { ...applied.value, roadmap: applied.value.roadmap ?? doc.plan.roadmap };
+
+    // 4.5：重做普通状态命令也不能完成里程碑（与直接提交同一判据）。
+    if (context.direction === 'redo') {
+      const completesMilestone = context.inverse.fieldChanges.some((change) =>
+        change.field === 'status'
+        && change.after === 'done'
+        && (inversePlan.roadmap?.milestones.some((item) => item.nodeId === change.nodeId) ?? false));
+      if (completesMilestone) {
+        return {
+          rejected: {
+            status: 'rejected',
+            code: 'milestone-evidence-required',
+            message: '重做不能完成里程碑；用 complete-milestone 提交逐项证据',
+          },
+        };
+      }
+    }
     const draft: ProjectDocument = {
       schemaVersion: doc.schemaVersion,
       project: doc.project,

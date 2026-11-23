@@ -154,6 +154,10 @@ node lib/cli/local.js release-lock --local-root <目录> (--force | --token <tok
 - **独立核对**：`node lib/cli/validate.js check-completion <资料根>` 只读 `project.json` 与正文，
   逐项核对记录身份、正文哈希、主题、受检版本与证据顺序；`issues` 非空退出码为 1。
 - **归属**：里程碑编辑与完成都是 owner-only；Agent 工具与工作绑定不获得这两类资格。
+- **变换保留与撤销（4.5）**：字段编辑、移动、状态、拆分、新增、依赖、两类模板插入、分组、合并、复制
+  与逆向操作都原样保留未编辑的 `roadmap`；`set-milestone`／`remove-milestone` 保存条目级逆向信息，
+  撤销只回滚该条里程碑（其余条目不动），重做恢复编辑后的条目；重做普通状态命令同样不能完成里程碑。
+  v1 夹具跑同样的命令仍保持 v1 字段与字节协议。
 
 ## 目标视图（4.4）
 

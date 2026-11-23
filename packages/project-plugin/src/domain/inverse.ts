@@ -9,7 +9,7 @@
 // - 字段级变更让无关编辑保留：只回滚原操作触及的字段，其余字段保持当前值。
 // - 节点身份在生成批次中固定：undo 删除生成节点，redo 复用同一批 ID 与快照。
 
-import type { DependencyEdge, Plan, TransformResult, WorkNode } from './types.js';
+import type { DependencyEdge, Milestone, Plan, TransformResult, WorkNode } from './types.js';
 import { UUID_RE } from './validate-constants.js';
 import { validatePlanStructure } from './validate.js';
 
@@ -31,6 +31,13 @@ export interface InverseDependencyChange {
   edge: DependencyEdge;
   /** added：原操作新增；removed：原操作删除。 */
   direction: 'added' | 'removed';
+}
+
+/** 里程碑条目的前后值（tasks 4.5）：null 表示该节点当时没有里程碑。 */
+export interface InverseRoadmapChange {
+  nodeId: string;
+  before: Milestone | null;
+  after: Milestone | null;
 }
 
 /** merge 发布的结构化替代记录，撤销追加 clear、重做产生新 replace。 */
@@ -64,6 +71,8 @@ export interface PlanInverse {
   affectedNodeIds: string[];
   /** merge 发布的结构化替代记录。 */
   replacement?: InverseReplacement;
+  /** 里程碑条目变化（仅在 set-milestone／remove-milestone 出现）。 */
+  roadmapChanges?: InverseRoadmapChange[];
 }
 
 export type InverseDirection = 'undo' | 'redo';
@@ -100,6 +109,26 @@ function edgeKey(edge: DependencyEdge): string {
   return `${edge.nodeId}\u0000${edge.requiresNodeId}`;
 }
 
+function validMilestoneSide(value: Milestone | null): boolean {
+  if (value === null) return true;
+  if (typeof value !== 'object' || !Array.isArray(value.deliveries)) return false;
+  if (!UUID_RE.test(value.nodeId)) return false;
+  return value.deliveries.every((delivery) =>
+    delivery !== null && typeof delivery === 'object' && UUID_RE.test(delivery.refId)
+    && (delivery.kind === 'node' || delivery.kind === 'record'));
+}
+
+function sameMilestone(a: Milestone | null, b: Milestone | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.nodeId !== b.nodeId || a.deliveries.length !== b.deliveries.length) return false;
+  return a.deliveries.every((delivery, index) => {
+    const other = b.deliveries[index];
+    if (other === undefined || other.kind !== delivery.kind || other.refId !== delivery.refId) return false;
+    if (delivery.kind === 'record' && other.kind === 'record') return delivery.contentHash === other.contentHash;
+    return true;
+  });
+}
+
 function validInverseFieldChange(change: InverseFieldChange): boolean {
   return typeof change.nodeId === 'string' && UUID_RE.test(change.nodeId)
     && (INVERSE_FIELDS as readonly string[]).includes(change.field);
@@ -117,6 +146,15 @@ export function validatePlanInverse(value: unknown): PlanInverse | null {
     || !Array.isArray(raw.removedNodes) || !Array.isArray(raw.dependencyChanges)
     || !Array.isArray(raw.affectedNodeIds)) return null;
   if (!raw.fieldChanges.every((item) => validInverseFieldChange(item))) return null;
+  if (raw.roadmapChanges !== undefined) {
+    if (!Array.isArray(raw.roadmapChanges)) return null;
+    if (!raw.roadmapChanges.every((item) =>
+      item !== null && typeof item === 'object'
+      && typeof (item as InverseRoadmapChange).nodeId === 'string'
+      && UUID_RE.test((item as InverseRoadmapChange).nodeId)
+      && validMilestoneSide((item as InverseRoadmapChange).before)
+      && validMilestoneSide((item as InverseRoadmapChange).after))) return null;
+  }
   return raw as PlanInverse;
 }
 
@@ -164,6 +202,18 @@ export function buildPlanInverse(params: {
     if (node.parentId !== null) affected.add(node.parentId);
   }
 
+  // 里程碑条目：只记录被编辑节点条目的前后值（未触及的条目保持现状）。
+  const beforeMilestones = new Map((params.before.roadmap?.milestones ?? []).map((item) => [item.nodeId, item] as const));
+  const afterMilestones = new Map((params.after.roadmap?.milestones ?? []).map((item) => [item.nodeId, item] as const));
+  const roadmapChanges: InverseRoadmapChange[] = [];
+  for (const nodeId of new Set([...beforeMilestones.keys(), ...afterMilestones.keys()])) {
+    const before = beforeMilestones.get(nodeId) ?? null;
+    const after = afterMilestones.get(nodeId) ?? null;
+    if (sameMilestone(before, after)) continue;
+    roadmapChanges.push({ nodeId, before: cloneMilestone(before), after: cloneMilestone(after) });
+    affected.add(nodeId);
+  }
+
   const beforeEdges = new Map(params.before.dependencies.map((edge) => [edgeKey(edge), edge]));
   const afterEdges = new Map(params.after.dependencies.map((edge) => [edgeKey(edge), edge]));
   const dependencyChanges: InverseDependencyChange[] = [];
@@ -193,6 +243,18 @@ export function buildPlanInverse(params: {
     dependencyChanges,
     affectedNodeIds: [...affected].sort(),
     ...(params.replacement === undefined ? {} : { replacement: params.replacement }),
+    ...(roadmapChanges.length === 0 ? {} : { roadmapChanges }),
+  };
+}
+
+function cloneMilestone(value: Milestone | null): Milestone | null {
+  if (value === null) return null;
+  return {
+    nodeId: value.nodeId,
+    deliveries: value.deliveries.map((delivery) =>
+      delivery.kind === 'record'
+        ? { kind: delivery.kind, refId: delivery.refId, contentHash: delivery.contentHash }
+        : { kind: delivery.kind, refId: delivery.refId }),
   };
 }
 
@@ -242,6 +304,19 @@ export function checkInverseState(
     }
     if (direction === 'redo' && !exists) {
       conflicts.push({ kind: 'removed-node', code: 'inverse-node-missing', message: `原移除节点 ${node.id} 已不存在`, nodeId: node.id });
+    }
+  }
+
+  const currentMilestones = new Map((current.roadmap?.milestones ?? []).map((item) => [item.nodeId, item] as const));
+  for (const change of inverse.roadmapChanges ?? []) {
+    const expected = change[expectedSide];
+    const actual = currentMilestones.get(change.nodeId) ?? null;
+    if (!sameMilestone(expected, actual)) {
+      conflicts.push({
+        kind: 'invalid-inverse', code: 'inverse-roadmap-changed',
+        message: `里程碑 ${change.nodeId} 的交付已被后续编辑改动`,
+        nodeId: change.nodeId,
+      });
     }
   }
 
@@ -331,7 +406,21 @@ export function applyPlanInverse(current: Plan, inverse: PlanInverse, direction:
       ordered.push(node);
     });
   }
-  const candidate: Plan = { nodes: ordered, dependencies: edges };
+  let milestones = current.roadmap?.milestones.map((item) => cloneMilestone(item) as Milestone);
+  if (current.roadmap !== undefined) {
+    milestones = milestones ?? [];
+    for (const change of inverse.roadmapChanges ?? []) {
+      const target = change[restoring ? 'before' : 'after'];
+      milestones = milestones.filter((item) => item.nodeId !== change.nodeId);
+      if (target !== null) milestones.push(cloneMilestone(target) as Milestone);
+    }
+    milestones.sort((a, b) => (a.nodeId < b.nodeId ? -1 : a.nodeId > b.nodeId ? 1 : 0));
+  }
+  const candidate: Plan = {
+    nodes: ordered,
+    dependencies: edges,
+    ...(current.roadmap === undefined ? {} : { roadmap: { milestones: milestones ?? [] } }),
+  };
   const issues = validatePlanStructure(candidate);
   if (issues.length > 0) return { ok: false, issues };
   return { ok: true, value: candidate };
