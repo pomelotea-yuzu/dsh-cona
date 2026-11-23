@@ -39,6 +39,10 @@ const FORBIDDEN_EXT = new Set([
   '.gz', '.tgz', '.tar', '.dmg', '.deb', '.rpm', '.AppImage', '.mp4', '.webm',
 ]);
 
+// 无扩展名的散落文件几乎都是临时文件/探测产物（`blat` 之类）。只放行明确登记的名字：
+// 许可证、构建入口、hook 脚本。其余一律要求改名到正式目录或登记豁免理由。
+const EXTENSIONLESS_ALLOWED = new Set(['LICENSE', 'NOTICE', 'Makefile', 'Dockerfile', 'Procfile', 'pre-commit']);
+
 const SECRET_RULES = [
   ['私钥块', /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/],
   ['OpenAI 形态 key', /\bsk-[A-Za-z0-9_-]{16,}\b/],
@@ -183,6 +187,9 @@ function main() {
       if (hitExact) add(fails, '本机配置/凭据', file, '`.env*`、`.mcp.json` 一类永不入库；需要模板就提交 `.env.example`');
       else if (hitPath) add(fails, '垃圾场路径', file, '该文件属于本地产物或本机记忆，移到 docs/ 或 datasets/ 的正确位置，或留在 artifacts/ 与 .dsh-cona/');
       else if (FORBIDDEN_EXT.has(ext)) add(fails, '二进制/归档后缀', file, `${ext} 不入历史；先登记 .git-hygiene-allowlist 理由再 add -f`);
+      else if (ext === '' && !base.startsWith('.') && !EXTENSIONLESS_ALLOWED.has(base) && !file.includes('/fixtures/')) {
+        add(fails, '无扩展名散落文件', file, '临时/探测文件不入库；确属构建入口或脚本需在 .git-hygiene-allowlist 登记理由');
+      }
     }
 
     const bytes = sizes.get(file);
@@ -327,6 +334,10 @@ function selftest() {
       setup: ({ stage, write }) => { stage('sample.txt', safe); write('sample.txt', 'x'.repeat(MAX_BYTES + 1)); } },
     { name: '忽略却已跟踪反例', file: 'ignored.txt', rule: '忽略却已跟踪',
       setup: ({ stage }) => { stage('.gitignore', 'ignored.txt\n'); stage('ignored.txt', safe); } },
+    { name: '无扩展名散落文件反例', file: 'straytmp', rule: '无扩展名散落文件',
+      setup: ({ stage }) => stage('straytmp', 'blat') },
+    { name: '白名单无扩展名文件放行',
+      setup: ({ stage }) => stage('LICENSE', safe) },
     { name: '索引中豁免无理由反例', file: '.git-hygiene-allowlist', rule: '豁免无理由',
       setup: ({ stage, write }) => {
         stage('.git-hygiene-allowlist', 'sample.txt\n');
