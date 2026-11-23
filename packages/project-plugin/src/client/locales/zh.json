@@ -138,6 +138,8 @@
   "roadmapEnable": "启用扩展规划",
   "roadmapEnabled": "已启用扩展规划（{count} 个里程碑）",
   "roadmapEnabledEmpty": "里程碑集合为空；里程碑编辑与目标视图在后续步骤提供。",
+  "roadmapMilestoneCounts": "交付 {deliveries} · 条件 {criteria}",
+  "roadmapCompletedBy": "完成记录 {record}（受检版本 {version}）",
   "roadmapImpactTitle": "启用影响",
   "roadmapImpactVersion": "规划版本：{from} → {to}",
   "roadmapImpactIdentity": "保留项目、{nodes} 个节点与 {records} 条记录的身份",

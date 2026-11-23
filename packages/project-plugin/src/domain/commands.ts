@@ -19,6 +19,7 @@ import { instantiateUserTemplate } from './user-template.js';
 import type { UserTemplateBody } from './user-template.js';
 import type {
   DependencyEdge,
+  MilestoneDelivery,
   NodeStatus,
   Plan,
   ProjectDocument,
@@ -30,6 +31,7 @@ import type {
 } from './types.js';
 import { NODE_STATUSES } from './types.js';
 import { validatePlanStructure, validateProjectDocument } from './validate.js';
+import { removeMilestone, setMilestone } from './roadmap.js';
 
 function fail(...issues: ValidationIssue[]): TransformResult<never> {
   return { ok: false, issues };
@@ -109,6 +111,9 @@ export type PlanCommand =
   | { type: 'set-dependencies'; dependencies: DependencyEdge[] }
   | { type: 'set-node-status'; nodeId: string; status: NodeStatus }
   | { type: 'move-node'; nodeId: string; parentId: string | null; beforeNodeId: string | null }
+  /** 4.3：只改目标里程碑的公开字段（整体替换 deliveries，空数组合法）。 */
+  | { type: 'set-milestone'; nodeId: string; deliveries: MilestoneDelivery[] }
+  | { type: 'remove-milestone'; nodeId: string }
   | {
       type: 'instantiate-template';
       preset: PresetDescriptor;
@@ -134,6 +139,25 @@ export function applyPlanCommand(
   command: PlanCommand,
   sha256: Sha256Fn,
 ): { ok: true; doc: ProjectDocument } | { ok: false; issues: ValidationIssue[] } {
+  // 里程碑完成只能走 complete-milestone（4.3）：普通状态命令、改条件、重新标记都要先重新打开。
+  const guardedNodeId = command.type === 'set-node-status' || command.type === 'update-node' || command.type === 'set-milestone'
+    ? command.nodeId
+    : null;
+  if (guardedNodeId !== null && doc.plan.roadmap?.milestones.some((item) => item.nodeId === guardedNodeId)) {
+    const node = doc.plan.nodes.find((item) => item.id === guardedNodeId);
+    if (node !== undefined) {
+      if (command.type === 'set-node-status' && command.status === 'done') {
+        return { ok: false, issues: [{ code: 'milestone-evidence-required', path: '/plan/nodes', message: '里程碑节点不能由普通状态命令完成；用 complete-milestone 提交逐项证据' }] };
+      }
+      if (node.status === 'done' && command.type === 'update-node' && command.patch.completionCriteria !== undefined) {
+        return { ok: false, issues: [{ code: 'milestone-reopen-required', path: '/plan/nodes', message: '已完成里程碑的完成条件不能直接修改；先重新打开并补验' }] };
+      }
+      if (node.status === 'done' && command.type === 'set-milestone') {
+        return { ok: false, issues: [{ code: 'milestone-reopen-required', path: '/plan/roadmap', message: '已完成里程碑的交付不能直接修改；先重新打开并补验' }] };
+      }
+    }
+  }
+
   let result: TransformResult<Plan>;
   switch (command.type) {
     case 'add-nodes':
@@ -163,6 +187,12 @@ export function applyPlanCommand(
     case 'move-node':
       result = moveNode(doc.plan, command.nodeId, command.parentId, command.beforeNodeId);
       break;
+    case 'set-milestone':
+      result = setMilestone(doc.plan, command.nodeId, command.deliveries);
+      break;
+    case 'remove-milestone':
+      result = removeMilestone(doc.plan, command.nodeId);
+      break;
     case 'instantiate-template':
       result = instantiateTemplate(
         doc.plan,
@@ -189,9 +219,10 @@ export function applyPlanCommand(
   }
   if (!result.ok) return { ok: false, issues: result.issues };
 
-  // v2 roadmap 不属于普通变换的目标：结构编辑原样保留未编辑的里程碑扩展
-  // （里程碑的增删改由专用命令处理；4.5 再逐命令补保留断言）。
-  const transformed: Plan = doc.plan.roadmap === undefined
+  // v2 roadmap 不属于普通变换的目标：结构编辑原样保留未编辑的里程碑扩展；
+  // 里程碑专用命令的结果已带新 roadmap，不能被原值覆盖。
+  const milestoneCommand = command.type === 'set-milestone' || command.type === 'remove-milestone';
+  const transformed: Plan = doc.plan.roadmap === undefined || milestoneCommand
     ? result.value
     : { ...result.value, roadmap: doc.plan.roadmap };
   const draft: ProjectDocument = {

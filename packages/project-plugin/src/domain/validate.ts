@@ -438,8 +438,10 @@ const DELIVERY_RECORD_KEYS = ['kind', 'refId', 'contentHash'] as const;
 function checkRoadmap(
   value: unknown,
   nodeIds: ReadonlySet<string>,
+  nodeStatuses: ReadonlyMap<string, string>,
   recordHashes: ReadonlyMap<string, string>,
   issues: ValidationIssue[],
+  diagnostics: ValidationIssue[],
 ): void {
   if (!checkKeys(value, ['milestones'], [], '/plan/roadmap', issues)) return;
   const roadmap = value as { [key: string]: unknown };
@@ -485,7 +487,10 @@ function checkRoadmap(
           if (item['nodeId'] === refId) {
             add(issues, 'milestone-self-delivery', `${deliveryPath}/refId`, '里程碑不能把自身作为交付');
           } else if (!nodeIds.has(refId)) {
-            add(issues, 'milestone-delivery-node-missing', `${deliveryPath}/refId`, `交付节点 ${refId} 不在当前树中`);
+            // 4.3：已保存交付的来源后来被替代／移出时保留引用，只给诊断；新增引用由命令层强制核对。
+            add(diagnostics, 'milestone-delivery-node-missing', `${deliveryPath}/refId`, `交付节点 ${refId} 不在当前树中`);
+          } else if (nodeStatuses.get(refId) === 'canceled') {
+            add(diagnostics, 'milestone-delivery-node-canceled', `${deliveryPath}/refId`, `交付节点 ${refId} 已取消（或被合并替代）`);
           }
           const key = `node\u0000${refId}`;
           if (seenDeliveries.has(key)) {
@@ -503,9 +508,9 @@ function checkRoadmap(
         const refId = delivery['refId'] as string;
         const actual = recordHashes.get(refId);
         if (actual === undefined) {
-          add(issues, 'milestone-delivery-record-missing', `${deliveryPath}/refId`, `交付记录 ${refId} 不在索引中`);
+          add(diagnostics, 'milestone-delivery-record-missing', `${deliveryPath}/refId`, `交付记录 ${refId} 不在索引中`);
         } else if (okHash && actual !== delivery['contentHash']) {
-          add(issues, 'milestone-delivery-hash-mismatch', `${deliveryPath}/contentHash`, '交付记录的正文哈希与索引不一致');
+          add(diagnostics, 'milestone-delivery-hash-mismatch', `${deliveryPath}/contentHash`, '交付记录的正文哈希与索引不一致');
         }
         const key = `record\u0000${refId}`;
         if (seenDeliveries.has(key)) {
@@ -522,6 +527,8 @@ function checkRoadmap(
 /** 校验完整文档。传入 sha256 时额外比对 planVersion 与重算指纹。 */
 export function validateProjectDocument(value: unknown, options: { sha256?: Sha256Fn } = {}): ValidationResult {
   const issues: ValidationIssue[] = [];
+  // 非致命诊断：形状合法但当前不可核对的已保存交付（4.3）。不影响读取与指纹。
+  const diagnostics: ValidationIssue[] = [];
   if (!checkKeys(value, TOP_LEVEL_KEYS, [], '', issues)) {
     return { ok: false, issues };
   }
@@ -622,7 +629,10 @@ export function validateProjectDocument(value: unknown, options: { sha256?: Sha2
         recordHashes.set(record['id'], record['contentHash']);
       }
     }
-    checkRoadmap(plan['roadmap'], nodeIds, recordHashes, issues);
+    const nodeStatuses = new Map<string, string>(
+      candidate.plan.nodes.map((node) => [node.id, node.status] as const),
+    );
+    checkRoadmap(plan['roadmap'], nodeIds, nodeStatuses, recordHashes, issues, diagnostics);
   }
 
   // done 节点完成条件（1.4）：非空 criteria + 显式 pass 验证记录；不按子节点推导。
@@ -657,5 +667,5 @@ export function validateProjectDocument(value: unknown, options: { sha256?: Sha2
   if (issues.length > 0) {
     return { ok: false, issues };
   }
-  return { ok: true, doc: candidate };
+  return { ok: true, doc: candidate, diagnostics };
 }

@@ -33,6 +33,7 @@ import {
 } from '../domain/presets.js';
 import type {
   DependencyEdge,
+  MilestoneDelivery,
   NodeStatus,
   ProjectDocument,
   RecordKind,
@@ -43,7 +44,13 @@ import type {
   WorkNode,
 } from '../domain/types.js';
 import { validateProjectDocument } from '../domain/validate.js';
-import { convertToRoadmap, roadmapEnableDigest } from '../domain/roadmap.js';
+import { convertToRoadmap, milestoneOf, resolveDelivery, roadmapEnableDigest, sameDelivery } from '../domain/roadmap.js';
+import {
+  MILESTONE_COMPLETION_SUMMARY_PREFIX,
+  buildMilestoneCompletionText,
+  type MilestoneCompletionBody,
+  type MilestoneCompletionEvidence,
+} from '../domain/milestone-completion.js';
 import { UUID_RE } from '../domain/validate-constants.js';
 import { readSourceBaseline, type SourceBaseline } from './baseline.js';
 import { InstanceCommandQueue } from './command-queue.js';
@@ -155,6 +162,11 @@ export type Command =
   | { type: 'set-node-status'; nodeId: string; status: NodeStatus }
   /** 4.2 启用扩展规划：owner 预览后按确认摘要发布 v2（不改节点与记录身份）。 */
   | { type: 'enable-roadmap'; previewDigest: string }
+  /** 4.3 里程碑：只改目标节点的公开字段；交付整体替换，空数组合法。 */
+  | { type: 'set-milestone'; nodeId: string; deliveries: MilestoneDelivery[] }
+  | { type: 'remove-milestone'; nodeId: string }
+  /** 4.3 正式完成：逐项证据 + 一次原子发布（节点 done + 完成记录 + 新指纹）。 */
+  | { type: 'complete-milestone'; nodeId: string; evidence: MilestoneCompletionEvidence[] }
   | MoveNodeCommand
   | InsertPresetCommand
   | UndoPlanEditCommand
@@ -172,6 +184,8 @@ const OWNER_ONLY_COMMANDS = new Set<string>([
   'undo-plan-edit', 'redo-plan-edit', 'save-user-template',
   // 4.2 启用扩展：改变公开格式版本，只能由 owner 在预览确认后发起。
   'enable-roadmap',
+  // 4.3 里程碑编辑与完成：owner 决定交付与逐项证据的对应关系，工具不能代替。
+  'set-milestone', 'remove-milestone', 'complete-milestone',
 ]);
 
 /** 可由可信 WorkRun 发起的结构命令（3.3）：缺工作端口时不得降级放行。 */
@@ -226,14 +240,26 @@ export type InversePreviewResult =
     }
   | { status: 'unavailable' | 'conflict' | 'not-found'; direction: InverseDirection; message: string; conflicts?: InverseConflictView[]; current?: CommandCurrent };
 
-/** 路线图只读状态：v1 为“未启用”，v2 给出里程碑节点（不含详情，详情属目标视图）。 */
+/** 路线图只读状态：v1 为“未启用”，v2 给出里程碑节点、条件、诊断与最近完成证据定位。 */
 export interface RoadmapStateView {
   schemaVersion: number;
   planVersion: string;
   planRevision: number;
   sourceEpoch: number;
   enabled: boolean;
-  milestones: { nodeId: string; deliveryCount: number }[];
+  milestones: {
+    nodeId: string;
+    /** 取节点原值，不复制成第二套真源。 */
+    title: string;
+    status: string;
+    deliveryCount: number;
+    criterionCount: number;
+    /** 交付引用当前不可核对/已取消的诊断码（顺序同交付项，空表示可核对）。 */
+    diagnostics: string[];
+    /** 最近一条完成记录（按索引顺序）与它记录的受检版本；没有则为 null。 */
+    completionRecordId: string | null;
+    completionSubjectVersion: string | null;
+  }[];
 }
 
 export type RoadmapStateResult =
@@ -522,16 +548,43 @@ function originOf(ctx: TrustedContext): OperationOrigin {
 /** 路线图只读投影：v1 没有 roadmap 字段，按“未启用 + 空里程碑”表达。 */
 function roadmapStateOf(doc: ProjectDocument, sourceEpoch: number, planRevision: number): RoadmapStateView {
   const milestones = doc.plan.roadmap?.milestones ?? [];
+  const nodeById = new Map(doc.plan.nodes.map((node) => [node.id, node] as const));
   return {
     schemaVersion: doc.schemaVersion,
     planVersion: doc.planVersion,
     planRevision,
     sourceEpoch,
     enabled: doc.schemaVersion === 2,
-    milestones: milestones.map((milestone) => ({
-      nodeId: milestone.nodeId,
-      deliveryCount: milestone.deliveries.length,
-    })),
+    milestones: milestones.map((milestone) => {
+      const node = nodeById.get(milestone.nodeId);
+      const diagnostics: string[] = [];
+      for (const delivery of milestone.deliveries) {
+        if (delivery.kind === 'node') {
+          const target = nodeById.get(delivery.refId);
+          if (target === undefined) diagnostics.push('milestone-delivery-node-missing');
+          else if (target.status === 'canceled') diagnostics.push('milestone-delivery-node-canceled');
+          continue;
+        }
+        const record = doc.records.find((item) => item.id === delivery.refId);
+        if (record === undefined) diagnostics.push('milestone-delivery-record-missing');
+        else if (record.contentHash !== delivery.contentHash) diagnostics.push('milestone-delivery-hash-mismatch');
+      }
+      const completion = [...doc.records]
+        .reverse()
+        .find((record) => record.kind === 'verification'
+          && record.summary.startsWith(MILESTONE_COMPLETION_SUMMARY_PREFIX)
+          && record.subjectNodeIds.includes(milestone.nodeId));
+      return {
+        nodeId: milestone.nodeId,
+        title: node?.title ?? '',
+        status: node?.status ?? 'unknown',
+        deliveryCount: milestone.deliveries.length,
+        criterionCount: node?.completionCriteria.length ?? 0,
+        diagnostics,
+        completionRecordId: completion?.id ?? null,
+        completionSubjectVersion: completion?.verification?.subjectVersion ?? null,
+      };
+    }),
   };
 }
 
@@ -1492,6 +1545,94 @@ export class ProjectCommandService {
       }
     }
 
+    // 4.3 里程碑：只有“新增或改变”的交付必须可解析；既有失效引用按待核对保留。
+    if (envelope.command.type === 'set-milestone') {
+      if (baseline.doc.schemaVersion !== 2) {
+        return { status: 'rejected', code: 'roadmap-not-enabled', message: '该规划未启用扩展（schemaVersion 1）；先显式启用 v2' };
+      }
+      const nodeId = envelope.command.nodeId;
+      const node = baseline.doc.plan.nodes.find((item) => item.id === nodeId);
+      if (node === undefined) {
+        return { status: 'rejected', code: 'milestone-node-missing', message: `里程碑节点 ${String(nodeId)} 不在当前树中` };
+      }
+      if (node.status === 'done') {
+        return {
+          status: 'rejected', code: 'milestone-reopen-required',
+          message: '该节点已完成；先重新打开并补验，再调整里程碑交付',
+        };
+      }
+      const previous = baseline.doc.plan.roadmap?.milestones.find((item) => item.nodeId === nodeId);
+      for (const delivery of envelope.command.deliveries) {
+        if (delivery.kind !== 'node' && delivery.kind !== 'record') {
+          return { status: 'rejected', code: 'invalid-delivery-kind', message: "交付项 kind 必须是 'node' 或 'record'" };
+        }
+        const resolved = resolveDelivery(baseline.doc.plan, baseline.doc.records, delivery);
+        if (resolved.resolved) continue;
+        const existing = previous?.deliveries.some((item) => sameDelivery(item, delivery)) ?? false;
+        if (!existing) {
+          return { status: 'rejected', code: resolved.code, message: resolved.message };
+        }
+      }
+    }
+
+    // 4.3 正式完成：里程碑、逐项条件、证据状态、主体与受检版本在发布前一次核对。
+    if (envelope.command.type === 'complete-milestone') {
+      const command = envelope.command;
+      if (baseline.doc.schemaVersion !== 2) {
+        return { status: 'rejected', code: 'roadmap-not-enabled', message: '该规划未启用扩展（schemaVersion 1）' };
+      }
+      const milestone = milestoneOf(baseline.doc.plan, command.nodeId);
+      const node = baseline.doc.plan.nodes.find((item) => item.id === command.nodeId);
+      if (milestone === null || node === undefined) {
+        return { status: 'rejected', code: 'milestone-not-found', message: `节点 ${String(command.nodeId)} 没有里程碑条目` };
+      }
+      if (node.status === 'done') {
+        return { status: 'rejected', code: 'milestone-already-complete', message: '该里程碑已完成；改变条件或交付需先重新打开' };
+      }
+      if (node.completionCriteria.length === 0) {
+        return { status: 'rejected', code: 'milestone-criteria-empty', message: '里程碑没有完成条件；先补充条件再完成' };
+      }
+      if (!Array.isArray(command.evidence) || command.evidence.length !== node.completionCriteria.length) {
+        return {
+          status: 'rejected', code: 'milestone-evidence-mismatch',
+          message: `证据必须逐项覆盖 ${node.completionCriteria.length} 条完成条件`,
+        };
+      }
+      for (const [index, item] of command.evidence.entries()) {
+        const criterion = node.completionCriteria[index];
+        if (item.criterionIndex !== index || item.criterionText !== criterion) {
+          return {
+            status: 'rejected', code: 'milestone-evidence-mismatch',
+            message: `第 ${index} 项证据的条件索引或原文与当前规划不一致（当前：${String(criterion)}）`,
+          };
+        }
+        const record = baseline.doc.records.find((entry) => entry.id === item.recordId);
+        if (record === undefined) {
+          return { status: 'rejected', code: 'milestone-evidence-unavailable', message: `证据记录 ${item.recordId} 不在索引中` };
+        }
+        if (record.kind !== 'verification' || record.contentHash !== item.contentHash) {
+          return { status: 'rejected', code: 'milestone-evidence-unavailable', message: `证据记录 ${item.recordId} 不是验证记录或正文哈希不符` };
+        }
+        const verification = record.verification;
+        if (verification === undefined || verification.status !== 'pass'
+          || verification.subject.kind !== 'node' || verification.subject.id !== command.nodeId) {
+          return {
+            status: 'rejected', code: 'milestone-evidence-not-pass',
+            message: `证据记录 ${item.recordId} 必须是以该节点为主题、结论为 pass 的验证记录`,
+          };
+        }
+        if (verification.subjectVersion !== baseline.doc.planVersion) {
+          return {
+            status: 'rejected', code: 'milestone-evidence-stale',
+            message: `证据记录 ${item.recordId} 的受检版本 ${String(verification.subjectVersion)} 不是当前规划 ${baseline.doc.planVersion}`,
+          };
+        }
+        if (verification.scope === undefined || verification.scope.trim() === '') {
+          return { status: 'rejected', code: 'milestone-evidence-scope-missing', message: `证据记录 ${item.recordId} 缺少可查阅的受检范围` };
+        }
+      }
+    }
+
     // 结构命令：按 ID 与版本精确解析随包预设并核对正文语言。解析失败返回稳定码，
     // 不写文件也不推进修订。解析只在首次提交发生；重试／恢复用已持久化的候选与回执。
     let resolvedPreset: PresetDescriptor | undefined;
@@ -1912,6 +2053,64 @@ export class ProjectCommandService {
       };
       return this.buildCandidate(asRecord, doc, baselineRecords, generated, resolvedPreset, inverseContext, resolvedUserTemplate);
     }
+    // 4.3 正式完成：节点 done + 完成记录 + 新指纹在同一次发布中落盘（一条记录、一次修订）。
+    if (command.type === 'complete-milestone') {
+      const recordId = generated.recordId ?? this.deps.newRecordId();
+      const nodes = doc.plan.nodes.map((node) =>
+        node.id === command.nodeId
+          ? { ...node, status: 'done' as const, completionCriteria: [...node.completionCriteria] }
+          : { ...node, completionCriteria: [...node.completionCriteria] },
+      );
+      const draft: ProjectDocument = {
+        schemaVersion: doc.schemaVersion,
+        project: doc.project,
+        plan: { ...doc.plan, nodes },
+        planVersion: '',
+        records: doc.records,
+      };
+      draft.planVersion = computePlanVersion(draft, this.deps.sha256).planVersion;
+      const body: MilestoneCompletionBody = {
+        version: 1,
+        milestoneNodeId: command.nodeId,
+        inputPlanVersion: doc.planVersion,
+        evidence: command.evidence.map((item) => ({ ...item })),
+      };
+      const bodyText = buildMilestoneCompletionText(body);
+      const bytesData = new TextEncoder().encode(bodyText);
+      const contentHash = 'sha256:' + this.deps.sha256(bytesData);
+      const recordPath = `records/${recordId}/${contentHash.slice('sha256:'.length)}.md`;
+      const appended = appendRecordIndex(draft.records, {
+        id: recordId,
+        kind: 'verification',
+        subjectNodeIds: [command.nodeId],
+        path: recordPath,
+        contentHash,
+        summary: `${MILESTONE_COMPLETION_SUMMARY_PREFIX}完成 ${command.nodeId}（${command.evidence.length} 项条件）`,
+        sources: [],
+        verification: {
+          status: 'pass',
+          subject: { kind: 'node', id: command.nodeId },
+          subjectVersion: draft.planVersion,
+          scope: `里程碑完成记录：逐项核对 ${command.evidence.length} 项完成条件`,
+        },
+      });
+      if (!appended.ok) {
+        return {
+          rejected: { status: 'rejected', code: 'invalid-project', message: '完成记录索引追加失败', issues: appended.issues },
+        };
+      }
+      const validated = validateProjectDocument({ ...draft, records: appended.value }, { sha256: this.deps.sha256 });
+      if (!validated.ok) {
+        return { rejected: { status: 'rejected', code: 'invalid-project', message: '完成候选未通过领域校验', issues: validated.issues } };
+      }
+      return {
+        doc: validated.doc,
+        records: baselineRecords,
+        bodies: [{ recordId, contentHash, path: recordPath, bytes: bytesData.length, bytesData }],
+        recordId,
+        recordPath,
+      };
+    }
     if (command.type !== 'append-record') {
       // 4.2：启用扩展不经过规划变换，直接由 v1 文档构造空里程碑候选（节点／记录身份不变）。
       if (command.type === 'enable-roadmap') {
@@ -1934,15 +2133,25 @@ export class ProjectCommandService {
         const structural =
           command.type === 'move-node' || command.type === 'insert-preset' || command.type === 'group-nodes'
           || command.type === 'merge-nodes' || command.type === 'copy-subtree'
-          || command.type === 'insert-user-template';
-        const domainCode = structural ? applied.issues.find((issue) =>
-          ['parent-not-found', 'invalid-anchor', 'node-not-found', 'root-to-child', 'child-to-root',
+          || command.type === 'insert-user-template'
+          || command.type === 'set-milestone' || command.type === 'remove-milestone';
+        // 里程碑守卫（4.3）对普通命令也要原样上抛：它来自 update-node／set-node-status 等入口。
+        const MILESTONE_CODES = [
+          'roadmap-not-enabled', 'milestone-invalid-node', 'milestone-node-missing',
+          'milestone-self-delivery', 'duplicate-milestone-delivery', 'invalid-delivery-kind',
+          'milestone-not-found', 'milestone-reopen-required', 'milestone-evidence-required',
+          'milestone-delivery-node-missing', 'milestone-delivery-record-missing',
+          'milestone-delivery-hash-mismatch',
+        ];
+        const domainCode = applied.issues.find((issue) =>
+          (structural && ['parent-not-found', 'invalid-anchor', 'node-not-found', 'root-to-child', 'child-to-root',
             'invalid-parent', 'empty-selection', 'cross-parent-selection', 'root-in-selection',
             'invalid-merge-source', 'duplicate-merge-source', 'unresolved-dependency', 'dependency-not-found',
             'copy-id-count-mismatch',
             'template-invalid', 'template-locale-unsupported', 'duplicate-node-id',
-            'invalid-uuid', 'template-id-count-mismatch'].includes(issue.code),
-        ) : undefined;
+            'invalid-uuid', 'template-id-count-mismatch'].includes(issue.code))
+          || MILESTONE_CODES.includes(issue.code),
+        );
         return {
           rejected: {
             status: 'rejected',
@@ -2133,6 +2342,7 @@ export class ProjectCommandService {
     }
     if (command.type === 'append-record') return { recordId: this.deps.newRecordId() };
     if (command.type === 'save-user-template') return { recordId: this.deps.newRecordId() };
+    if (command.type === 'complete-milestone') return { recordId: this.deps.newRecordId() };
     if (command.type === 'add-nodes') return { nodeIds: command.nodes.map(() => this.deps.newNodeId()) };
     if (command.type === 'split-node') return { nodeIds: command.children.map(() => this.deps.newNodeId()) };
     // 2.1 分组：组节点身份由应用层分配，成员沿用原 id。
@@ -2235,6 +2445,9 @@ export class ProjectCommandService {
       case 'enable-roadmap':
         // 4.2 启用扩展不经过规划变换：候选由 convertToRoadmap 直接从 v1 文档构造。
         throw new Error('启用扩展规划命令不能物化为规划命令');
+      case 'complete-milestone':
+        // 4.3 完成：节点状态、完成记录与指纹在 buildCandidate 中一次构造。
+        throw new Error('里程碑完成命令不能物化为规划命令');
       default:
         return command;
     }

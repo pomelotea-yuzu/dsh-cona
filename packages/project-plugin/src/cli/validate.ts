@@ -5,6 +5,7 @@
 //   validate.js check-file <file>                 校验单个 project.json
 //   validate.js compute-plan-version <file>       输出期望指纹（可 --print-canonical 输出规范文本）
 //   validate.js init <dir>                        建立资料根骨架（README / protocol / schema / records）
+//   validate.js check-completion <root>           独立核对里程碑完成记录（正文与逐项证据）
 // 输出为一行 JSON；校验失败退出码 1。
 
 import { createHash } from 'node:crypto';
@@ -20,7 +21,9 @@ import {
   utf8Encode,
   validateProjectDocument,
   computePlanVersion,
+  verifyMilestoneCompletions,
 } from '../domain/index.js';
+import type { MilestoneCompletionIssue } from '../domain/index.js';
 import type { ProjectDocument, Sha256Fn, ValidationIssue } from '../domain/types.js';
 
 const sha256: Sha256Fn = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -83,6 +86,8 @@ interface RootCheckResult {
   root: string;
   planVersion?: string;
   issues: ValidationIssue[];
+  /** 非致命诊断（已保存交付的来源失效）：不影响退出码。 */
+  diagnostics: ValidationIssue[];
 }
 
 async function checkRoot(root: string): Promise<RootCheckResult> {
@@ -90,11 +95,11 @@ async function checkRoot(root: string): Promise<RootCheckResult> {
   const projectJsonPath = path.join(root, 'project.json');
   const read = await readProjectJsonText(projectJsonPath);
   if (!read.ok) {
-    return { ok: false, root, issues: [read.issue] };
+    return { ok: false, root, issues: [read.issue], diagnostics: [] };
   }
   const parsed = strictParse(read.text);
   if (!parsed.ok) {
-    return { ok: false, root, issues: [{ code: parsed.error.code, path: '/<root>/project.json', message: parsed.error.message }] };
+    return { ok: false, root, issues: [{ code: parsed.error.code, path: '/<root>/project.json', message: parsed.error.message }], diagnostics: [] };
   }
   const validated = validateProjectDocument(parsed.value, { sha256 });
   let doc: ProjectDocument | null = validated.ok ? validated.doc : null;
@@ -135,24 +140,25 @@ async function checkRoot(root: string): Promise<RootCheckResult> {
     root,
     planVersion: doc?.planVersion,
     issues,
+    diagnostics: validated.ok ? validated.diagnostics : [],
   };
 }
 
-async function checkFile(filePath: string): Promise<{ ok: boolean; issues: ValidationIssue[]; planVersion?: string }> {
+async function checkFile(filePath: string): Promise<{ ok: boolean; issues: ValidationIssue[]; diagnostics: ValidationIssue[]; planVersion?: string }> {
   const read = await readProjectJsonText(filePath);
   if (!read.ok) {
-    return { ok: false, issues: [read.issue] };
+    return { ok: false, issues: [read.issue], diagnostics: [] };
   }
   const parsed = strictParse(read.text);
   if (!parsed.ok) {
-    return { ok: false, issues: [{ code: parsed.error.code, path: '', message: parsed.error.message }] };
+    return { ok: false, issues: [{ code: parsed.error.code, path: '', message: parsed.error.message }], diagnostics: [] };
   }
   // 完整校验（含自报 planVersion 与重算指纹比对）。
   const validated = validateProjectDocument(parsed.value, { sha256 });
   if (!validated.ok) {
-    return { ok: false, issues: validated.issues };
+    return { ok: false, issues: validated.issues, diagnostics: [] };
   }
-  return { ok: true, issues: [], planVersion: validated.doc.planVersion };
+  return { ok: true, issues: [], diagnostics: validated.diagnostics, planVersion: validated.doc.planVersion };
 }
 
 async function computePlanVersionCommand(filePath: string, printCanonical: boolean): Promise<{ ok: boolean; issues: ValidationIssue[]; planVersion?: string; canonicalText?: string }> {
@@ -179,6 +185,50 @@ async function computePlanVersionCommand(filePath: string, printCanonical: boole
     issues: [],
     planVersion: computed,
     canonicalText: printCanonical ? canonicalTextOf(validated.doc) : undefined,
+  };
+}
+
+/** 独立核对完成记录：公开索引 + 实际正文，不依赖 DSH 与本机状态。 */
+async function checkCompletion(root: string): Promise<{
+  ok: boolean;
+  root: string;
+  completions: { recordId: string; milestoneNodeId: string; evidenceCount: number }[];
+  issues: (ValidationIssue | MilestoneCompletionIssue)[];
+  diagnostics: ValidationIssue[];
+}> {
+  const read = await readProjectJsonText(path.join(root, 'project.json'));
+  if (!read.ok) return { ok: false, root, completions: [], issues: [read.issue], diagnostics: [] };
+  const parsed = strictParse(read.text);
+  if (!parsed.ok) {
+    return {
+      ok: false, root, completions: [],
+      issues: [{ code: parsed.error.code, path: 'project.json', message: parsed.error.message }],
+      diagnostics: [],
+    };
+  }
+  const validated = validateProjectDocument(parsed.value, { sha256 });
+  if (!validated.ok) return { ok: false, root, completions: [], issues: validated.issues, diagnostics: [] };
+
+  // 先逐条读正文（异步），再交给同步核对函数。
+  const bodies = new Map<string, string | null>();
+  for (const record of validated.doc.records) {
+    try {
+      bodies.set(record.path, await readFile(path.join(root, ...record.path.split('/')), 'utf8'));
+    } catch {
+      bodies.set(record.path, null);
+    }
+  }
+  const filled = verifyMilestoneCompletions({
+    doc: validated.doc,
+    textOf: (record) => bodies.get(record.path) ?? null,
+    sha256,
+  });
+  return {
+    ok: filled.ok,
+    root,
+    completions: filled.completions,
+    issues: filled.issues,
+    diagnostics: validated.diagnostics,
   };
 }
 
@@ -226,7 +276,7 @@ async function main(): Promise<number> {
   // lib/cli/validate.js → lib → 包根（lib 直接镜像 src；旧 dist/src/cli 布局已废弃）。
   const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   if (command === undefined || target === undefined) {
-    process.stderr.write('用法: validate.js <check|check-file|compute-plan-version|init> <path> [--print-canonical]\n');
+    process.stderr.write('用法: validate.js <check|check-file|check-completion|compute-plan-version|init> <path> [--print-canonical]\n');
     return 2;
   }
   try {
@@ -237,6 +287,11 @@ async function main(): Promise<number> {
     }
     if (command === 'check-file') {
       const result = await checkFile(path.resolve(target));
+      process.stdout.write(JSON.stringify(result) + '\n');
+      return result.ok ? 0 : 1;
+    }
+    if (command === 'check-completion') {
+      const result = await checkCompletion(path.resolve(target));
       process.stdout.write(JSON.stringify(result) + '\n');
       return result.ok ? 0 : 1;
     }

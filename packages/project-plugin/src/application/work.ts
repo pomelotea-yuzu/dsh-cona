@@ -280,6 +280,11 @@ export function commandAction(command: Command): WorkAction {
     // 启用扩展规划是 owner-only 的格式发布（命令服务入口拒绝 agent）；保守映射，不走工作绑定。
     case 'enable-roadmap':
       return 'update';
+    // 里程碑编辑与完成同为 owner-only；保守映射，不走工作绑定。
+    case 'set-milestone':
+    case 'remove-milestone':
+    case 'complete-milestone':
+      return 'update';
   }
 }
 
@@ -442,6 +447,11 @@ export function commandTargets(command: Command, outline?: PlanOutline): string[
     // 启用扩展规划不写节点（owner-only）；目标为空。
     case 'enable-roadmap':
       return [];
+    // 里程碑命令只写目标节点的公开字段与 roadmap 条目；目标就是该节点。
+    case 'set-milestone':
+    case 'remove-milestone':
+    case 'complete-milestone':
+      return [command.nodeId];
   }
 }
 

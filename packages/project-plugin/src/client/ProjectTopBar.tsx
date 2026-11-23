@@ -931,7 +931,24 @@ function RoadmapSection(props: { controller: ProjectOverviewController; state: O
           {view.milestones.length === 0 ? <p style={rowStyle}>{t('roadmapEnabledEmpty')}</p> : null}
           {view.milestones.map((milestone) => (
             <div key={milestone.nodeId} data-cona-roadmap-milestone={milestone.nodeId} style={{ fontSize: 12 }}>
-              {milestone.nodeId} · {milestone.deliveryCount}
+              <div>
+                {milestone.title || milestone.nodeId} · {milestone.status} ·{' '}
+                {t('roadmapMilestoneCounts', {
+                  deliveries: String(milestone.deliveryCount),
+                  criteria: String(milestone.criterionCount),
+                })}
+              </div>
+              {milestone.diagnostics.length > 0 ? (
+                <div style={{ color: '#8a6d3b' }}>{milestone.diagnostics.join('、')}</div>
+              ) : null}
+              {milestone.completionRecordId !== null ? (
+                <div style={{ color: '#8a6d3b' }}>
+                  {t('roadmapCompletedBy', {
+                    record: milestone.completionRecordId.slice(0, 8),
+                    version: (milestone.completionSubjectVersion ?? '').slice(7, 19),
+                  })}
+                </div>
+              ) : null}
             </div>
           ))}
         </>

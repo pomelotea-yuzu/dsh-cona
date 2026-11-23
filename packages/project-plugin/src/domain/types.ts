@@ -57,6 +57,18 @@ export interface Milestone {
   deliveries: MilestoneDelivery[];
 }
 
+/** 4.3 里程碑完成证据：一项完成条件对应一条已发布验证记录。 */
+export interface MilestoneCompletionEvidence {
+  /** 完成条件索引，从 0 开始连续；顺序即证据顺序。 */
+  criterionIndex: number;
+  /** 完成条件原文（逐字，用于发现条件被改动）。 */
+  criterionText: string;
+  /** 已发布验证记录 id（必须在本条完成记录之前）。 */
+  recordId: string;
+  /** 该验证记录的正文哈希。 */
+  contentHash: string;
+}
+
 /** v2 路线图扩展：只含里程碑集合（可为空），不表达执行依赖或完成状态。 */
 export interface Roadmap {
   milestones: Milestone[];
@@ -123,7 +135,15 @@ export interface ValidationIssue {
 }
 
 export type ValidationResult =
-  | { ok: true; doc: ProjectDocument }
+  | {
+      ok: true;
+      doc: ProjectDocument;
+      /**
+       * 非致命诊断（tasks 4.3）：形状合法但引用当前不可核对的已保存交付。
+       * 资料仍可读取；命令层对“新增／改变”的引用另行强制核对。
+       */
+      diagnostics: ValidationIssue[];
+    }
   | { ok: false; issues: ValidationIssue[] };
 
 /** 纯变换结果：批量操作整体接受或整体拒绝。 */

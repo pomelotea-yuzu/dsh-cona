@@ -36,11 +36,12 @@ const codes = (issues: { code: string }[]): string[] => issues.map((issue) => is
 
 interface V2Vector {
   id: string;
-  scope: 'plan' | 'reject';
+  scope: 'plan' | 'reject' | 'diagnose';
   inputJson: string;
   canonical?: string;
   expectedPlanVersion?: string;
   expectedError?: string;
+  expectedDiagnostics?: string[];
 }
 
 const v2Vectors = (): { protocol: string; vectors: V2Vector[] } =>
@@ -74,7 +75,9 @@ test('4.1 v2 向量协议标识与数量', () => {
   const vectors = v2Vectors();
   assert.equal(vectors.protocol, 'v2-plan');
   assert.ok(vectors.vectors.filter((item) => item.scope === 'plan').length >= 4);
-  assert.ok(vectors.vectors.filter((item) => item.scope === 'reject').length >= 8);
+  assert.ok(vectors.vectors.filter((item) => item.scope === 'reject').length >= 7);
+  // 4.3：已保存交付的来源失效是可读诊断，不是拒绝。
+  assert.ok(vectors.vectors.filter((item) => item.scope === 'diagnose').length >= 2);
 });
 
 for (const vector of v2Vectors().vectors) {
@@ -92,6 +95,14 @@ for (const vector of v2Vectors().vectors) {
       assert.equal(alt.canonicalText, primary.canonicalText);
       assert.equal(alt.planVersion, primary.planVersion);
       assert.deepEqual(new Uint8Array(Buffer.from(alt.canonicalText, 'utf8')), primary.canonicalBytes);
+    });
+  } else if (vector.scope === 'diagnose') {
+    test(`[v2-diagnose/${vector.id}] 两实现均接受并给 ${vector.expectedDiagnostics?.join(',')}`, () => {
+      const primary = planVersionFromJsonText(vector.inputJson, sha256);
+      assert.deepEqual(primary.issues, [], '保存的引用失效不阻断读取');
+      assert.deepEqual(primary.diagnostics.map((item) => item.code), vector.expectedDiagnostics ?? []);
+      const alt = planVersionFromJsonTextAlt(vector.inputJson, sha256);
+      assert.deepEqual(alt.issues, []);
     });
   } else {
     test(`[v2-reject/${vector.id}] 两实现均拒绝为 ${vector.expectedError}`, () => {
@@ -121,7 +132,7 @@ test('4.1 过程记录变化不改变 v2 规划指纹', () => {
   assert.equal(base?.expectedPlanVersion, withRecord?.expectedPlanVersion);
 });
 
-test('4.1 v2 诊断：缺里程碑节点、重复里程碑、重复交付、哈希失配、未知字段、缺 roadmap、v1 带 roadmap', () => {
+test('4.1／4.3 v2 诊断：缺里程碑节点、重复里程碑、重复交付、未知字段、缺 roadmap、v1 带 roadmap 拒绝；来源失效给诊断', () => {
   const base = sampleV2();
   const cases: { label: string; mutate: (doc: ProjectDocument) => void; code: string }[] = [
     {
@@ -140,15 +151,6 @@ test('4.1 v2 诊断：缺里程碑节点、重复里程碑、重复交付、哈�
         (doc.plan.roadmap as NonNullable<ProjectDocument['plan']['roadmap']>).milestones[0]!.deliveries.push({ kind: 'node', refId: '00000000-0000-4000-8000-000000000003' });
       },
       code: 'duplicate-milestone-delivery',
-    },
-    {
-      label: '交付记录哈希失配',
-      mutate: (doc) => {
-        (doc.plan.roadmap as NonNullable<ProjectDocument['plan']['roadmap']>).milestones[0]!.deliveries = [
-          { kind: 'record', refId: '00000000-0000-4000-8000-000000000007', contentHash: `sha256:${'b'.repeat(64)}` },
-        ];
-      },
-      code: 'milestone-delivery-hash-mismatch',
     },
     {
       label: '未知字段',
@@ -174,6 +176,39 @@ test('4.1 v2 诊断：缺里程碑节点、重复里程碑、重复交付、哈�
     if (result.ok) continue;
     assert.ok(codes(result.issues).includes(item.code), `${item.label}: ${JSON.stringify(codes(result.issues))}`);
   }
+
+  // 4.3：已保存交付的来源失效（哈希失配、记录移出索引、交付节点被替代）不阻断读取，只给诊断。
+  const diagnose = (mutate: (doc: ProjectDocument) => void): string[] => {
+    const doc = clone(base);
+    mutate(doc);
+    const result = validateProjectDocument(doc);
+    assert.equal(result.ok, true, '来源失效不应让资料不可读');
+    return result.ok ? codes(result.diagnostics) : [];
+  };
+  assert.deepEqual(
+    diagnose((doc) => {
+      (doc.plan.roadmap as NonNullable<ProjectDocument['plan']['roadmap']>).milestones[0]!.deliveries = [
+        { kind: 'record', refId: '00000000-0000-4000-8000-000000000007', contentHash: `sha256:${'b'.repeat(64)}` },
+      ];
+    }),
+    ['milestone-delivery-hash-mismatch'],
+  );
+  assert.deepEqual(
+    diagnose((doc) => {
+      (doc.plan.roadmap as NonNullable<ProjectDocument['plan']['roadmap']>).milestones[0]!.deliveries = [
+        { kind: 'record', refId: 'ffffffff-ffff-4fff-8fff-ffffffffffff', contentHash: `sha256:${'c'.repeat(64)}` },
+      ];
+    }),
+    ['milestone-delivery-record-missing'],
+  );
+  assert.deepEqual(
+    diagnose((doc) => {
+      (doc.plan.roadmap as NonNullable<ProjectDocument['plan']['roadmap']>).milestones[0]!.deliveries = [
+        { kind: 'node', refId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' },
+      ];
+    }),
+    ['milestone-delivery-node-missing'],
+  );
 
   // v1 文档出现 roadmap：按未知字段拒绝，不静默按 v2 解释。
   const v1WithRoadmap = JSON.parse(

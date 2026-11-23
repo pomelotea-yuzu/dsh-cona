@@ -77,19 +77,25 @@ v2 的 `plan` 比 v1 多一个 `roadmap` 字段，其形状固定为：
 | `duplicate-milestone` | 同一节点出现多个里程碑条目 |
 | `milestone-node-missing` | 里程碑 `nodeId` 不在当前树中 |
 | `milestone-self-delivery` | 交付节点就是里程碑自身 |
-| `milestone-delivery-node-missing` | 交付节点不在当前树中 |
-| `milestone-delivery-record-missing` | 交付记录不在索引中 |
-| `milestone-delivery-hash-mismatch` | 交付记录的 `contentHash` 与索引不一致 |
+| `milestone-delivery-node-missing` | 交付节点不在当前树中（**诊断**，不拒绝） |
+| `milestone-delivery-node-canceled` | 交付节点已取消／被合并替代（**诊断**；节点仍在） |
+| `milestone-delivery-record-missing` | 交付记录不在索引中（**诊断**） |
+| `milestone-delivery-hash-mismatch` | 交付记录的 `contentHash` 与索引不一致（**诊断**） |
 | `duplicate-milestone-delivery` | 同一里程碑内 `(kind, refId)` 重复 |
 | `invalid-delivery-kind` | 交付项 `kind` 不是 `node`／`record` |
 | `plan-version-mismatch` | 自报 `planVersion` 与重算值不一致（含伪造指纹） |
+
+**致命 vs 诊断**：形状、唯一性、里程碑节点存在性与自报指纹属于致命问题（资料不可用）；
+已保存交付的来源后来失效（节点被替代、记录移出索引、正文哈希改变）只产生诊断，资料仍可读，
+指纹照常计算。写入口对“新增／改变”的交付强制核对，悬空即拒绝。
 
 ## 7. 一致性向量
 
 `protocol/plan-vectors-v2.json` 的 `protocol` 字段为 `v2-plan`，包含：
 
 - `scope: "plan"`：完整文档输入、期望 canonical 文本与 `expectedPlanVersion`；
-- `scope: "reject"`：必须被拒绝的输入与 `expectedError` 诊断码。
+- `scope: "reject"`：必须被拒绝的输入与 `expectedError` 诊断码；
+- `scope: "diagnose"`：必须被接受、但必须给出 `expectedDiagnostics` 的输入（已保存来源失效）。
 
 主实现与独立第二实现都必须复算全部正向向量（canonical 字节与散列完全一致）并拒绝全部负向向量；
 向量不得由被测实现重新生成期望值。v1 向量文件保持不变。

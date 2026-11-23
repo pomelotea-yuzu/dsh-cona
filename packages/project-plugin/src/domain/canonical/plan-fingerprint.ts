@@ -161,6 +161,8 @@ export function computePlanVersion(doc: ProjectDocument, sha256: Sha256Fn): Plan
 
 export interface PlanVersionFromTextResult extends PlanVersionComputation {
   issues: ValidationIssue[];
+  /** 非致命诊断（4.3）：已保存但当前不可核对的交付引用；不影响指纹。 */
+  diagnostics: ValidationIssue[];
 }
 
 /**
@@ -170,12 +172,15 @@ export interface PlanVersionFromTextResult extends PlanVersionComputation {
 export function planVersionFromJsonText(text: string, sha256: Sha256Fn): PlanVersionFromTextResult {
   const parsed = strictParse(text);
   if (!parsed.ok) {
-    return { canonicalText: '', canonicalBytes: new Uint8Array(), planVersion: '', issues: [{ code: parsed.error.code, path: '', message: parsed.error.message }] };
+    return {
+      canonicalText: '', canonicalBytes: new Uint8Array(), planVersion: '',
+      issues: [{ code: parsed.error.code, path: '', message: parsed.error.message }], diagnostics: [],
+    };
   }
   const validated = validateProjectDocument(parsed.value);
   if (!validated.ok) {
-    return { canonicalText: '', canonicalBytes: new Uint8Array(), planVersion: '', issues: validated.issues };
+    return { canonicalText: '', canonicalBytes: new Uint8Array(), planVersion: '', issues: validated.issues, diagnostics: [] };
   }
   const computed = computePlanVersion(validated.doc, sha256);
-  return { ...computed, issues: [] };
+  return { ...computed, issues: [], diagnostics: validated.diagnostics };
 }

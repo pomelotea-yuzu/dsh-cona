@@ -75,3 +75,26 @@ export {
   instantiateUserTemplate,
 } from './user-template.js';
 export type { UserTemplateNode, UserTemplateDependency, UserTemplateBody } from './user-template.js';
+export {
+  convertToRoadmap,
+  roadmapEnableDigest,
+  setMilestone,
+  removeMilestone,
+  milestoneOf,
+  resolveDelivery,
+  sameDelivery,
+} from './roadmap.js';
+export type { RoadmapConversionResult } from './roadmap.js';
+export {
+  MILESTONE_COMPLETION_SUMMARY_PREFIX,
+  MILESTONE_COMPLETION_VERSION_MARKER,
+  buildMilestoneCompletionText,
+  parseMilestoneCompletionText,
+  verifyMilestoneCompletions,
+} from './milestone-completion.js';
+export type {
+  MilestoneCompletionBody,
+  MilestoneCompletionEvidence,
+  MilestoneCompletionIssue,
+  ParsedMilestoneCompletion,
+} from './milestone-completion.js';

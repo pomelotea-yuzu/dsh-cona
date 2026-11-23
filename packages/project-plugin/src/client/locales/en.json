@@ -138,6 +138,8 @@
   "roadmapEnable": "Enable extended plan",
   "roadmapEnabled": "Extended plan enabled ({count} milestones)",
   "roadmapEnabledEmpty": "The milestone set is empty; milestone editing and the goal view arrive in later steps.",
+  "roadmapMilestoneCounts": "{deliveries} deliveries · {criteria} criteria",
+  "roadmapCompletedBy": "Completed by {record} (checked version {version})",
   "roadmapImpactTitle": "Impact of enabling",
   "roadmapImpactVersion": "Plan version: {from} → {to}",
   "roadmapImpactIdentity": "Keeps the identity of the project, {nodes} nodes and {records} records",

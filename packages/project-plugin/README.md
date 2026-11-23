@@ -134,6 +134,26 @@ node lib/cli/local.js release-lock --local-root <目录> (--force | --token <tok
   同 `operationId` 重发只回放原回执。启用后无法退回 v1（需要回退按 Git 历史处理）。
 - **旧读者行为**：仍按 v1 的读方（含 `formats/v1/project-v1.schema.json`）看到 `schemaVersion: 2` 时应报未知格式
   并**保持文件不动**，不得回写覆盖；升级前请确认所有写方都已支持 v2。
+
+## 里程碑与完成证据（4.3）
+
+- **编辑**：`set-milestone` 整体替换一个里程碑的交付（空数组合法），`remove-milestone` 只删标记。
+  两者都只写目标节点的公开字段与 `roadmap` 条目，不改节点、依赖或状态；v1 资料返回 `roadmap-not-enabled`。
+- **新增交付必须可核对**：节点要在树中、记录要在索引中且哈希精确匹配；自引用、跨项目（缺失节点）、
+  重复与非法 `kind` 一律拒绝。已有引用后来失效时保留原引用与稳定 ID，只给诊断
+  （`milestone-delivery-node-missing` / `-node-canceled` / `-record-missing` / `-hash-mismatch`）。
+- **完成只能显式**：普通 `set-node-status: done` 对里程碑返回 `milestone-evidence-required`；
+  已完成里程碑改条件或交付返回 `milestone-reopen-required`（先重新打开并补验）。
+- **`complete-milestone`**：证据必须逐项覆盖全部完成条件（索引从 0 连续、条件原文逐字一致），
+  每条证据须是索引中更早、结论 `pass`、主题为该节点、`subjectVersion` 等于当前规划且有 `scope` 的验证记录。
+  一次发布内原子完成：节点置 `done`、追加一条 `verification` 完成记录、推进一次规划修订与新指纹。
+- **完成记录正文**：首行 `<!-- cona:milestone-completion v1 -->`，紧接 `json` 围栏严格 JSON
+  `{version, milestoneNodeId, inputPlanVersion, evidence[]}`，其后为可读表格。工件见
+  `formats/v2/milestone-completion-v1.schema.json` 与 `formats/v2/milestone-completion-protocol.md`
+  （随新资料根发布到 `schema/` 与 `protocol/`）。
+- **独立核对**：`node lib/cli/validate.js check-completion <资料根>` 只读 `project.json` 与正文，
+  逐项核对记录身份、正文哈希、主题、受检版本与证据顺序；`issues` 非空退出码为 1。
+- **归属**：里程碑编辑与完成都是 owner-only；Agent 工具与工作绑定不获得这两类资格。
 - **独立核对**：`node lib/cli/validate.js check-file <project.json>` 与 `check <资料根>` 对 v1／v2 都可用，
   不依赖 DSH 或本机状态。
 
@@ -163,8 +183,15 @@ node lib/cli/command.js run --local-root <目录> --instance <id> \
 node lib/cli/command.js run --local-root <目录> --instance <id> \
   --command '{"type":"append-record","kind":"analysis-note","subjectNodeIds":["<节点>"],"summary":"结论","sources":[],"body":"# 正文\n"}'
 
+# 里程碑（4.3）：交付整体替换；完成后由专用命令发布节点 done + 完成记录
+node lib/cli/command.js run --local-root <目录> --instance <id> \
+  --command '{"type":"set-milestone","nodeId":"<里程碑节点>","deliveries":[{"kind":"node","refId":"<交付节点>"}]}'
+node lib/cli/command.js run --local-root <目录> --instance <id> \
+  --command '{"type":"remove-milestone","nodeId":"<里程碑节点>"}'
+
 # 启用扩展规划（4.2）：previewDigest 只能由 roadmapPreview 预览得到，CLI 不提供预览，
 # 因此该命令只经 owner Remote 发起（conaOverview/roadmapPreview → conaOverview/execute）。
+# complete-milestone 需要逐项证据（记录 id + 正文哈希 + 条件原文），同样只经 owner Remote 发起。
 ```
 
 可选参数：`--expected-plan-version`／`--expected-plan-revision`（覆盖默认基线，用于复现冲突）、`--epoch`、`--trusted remote-owner|agent-work`、`--work-run`、`--binding-version`、`--operation <uuid>`（固定操作 id，用于重试）。

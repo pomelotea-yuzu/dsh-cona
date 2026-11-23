@@ -9,6 +9,8 @@
 - `protocol/plan-canonicalization.md`：规划指纹字节协议（权威）。
 - `protocol/plan-vectors.json`：强制一致性向量（实现必须复算，不得由被测实现重新生成）。
 - `schema/project-v2.schema.json` 与 `protocol/plan-canonicalization-v2.md`：v2 格式说明（`plan.roadmap` 里程碑与交付引用）；`protocol/plan-vectors-v2.json` 为 v2 向量，`protocol/roadmap-protocol.md` 为可读语义与正反例。v1 资料保持原 schema 与指纹，不补扩展字段。
+- `schema/milestone-completion-v1.schema.json` 与 `protocol/milestone-completion-v1.md`：里程碑完成记录正文的
+  结构、逐项证据规则、正反例与独立核对命令（`validate.js check-completion <资料根>`）。
 - `records/`：不可变记录正文，路径 `records/<recordId>/<contentHash-hex>.md`。
 
 ## 如何编辑与校验

@@ -31,6 +31,9 @@ export const FORMAT_ASSET_FILES: readonly { source: string; target: string; from
   { source: 'plan-canonicalization-v2.md', target: 'protocol/plan-canonicalization-v2.md', from: 'v2' },
   { source: 'plan-vectors-v2.json', target: 'protocol/plan-vectors-v2.json', from: 'v2' },
   { source: 'roadmap-protocol.md', target: 'protocol/roadmap-protocol.md', from: 'v2' },
+  // 4.3：里程碑完成记录的正文工件（schema、协议说明含正反例与独立核对命令）。
+  { source: 'milestone-completion-v1.schema.json', target: 'schema/milestone-completion-v1.schema.json', from: 'v2' },
+  { source: 'milestone-completion-protocol.md', target: 'protocol/milestone-completion-v1.md', from: 'v2' },
 ];
 
 /** 只描述磁盘现状：不判断项目是否合法，也不因存在其他文件就推断资料归属。 */

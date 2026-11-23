@@ -36,6 +36,9 @@ export type {
   RoadmapEnablePreviewResult,
 } from './application/command-service.js'
 export type { InverseDirection } from './domain/inverse.js'
+// 4.3 里程碑命令的边界类型（Command 联合包含交付与证据）。
+export type { Milestone, MilestoneDelivery, Roadmap, VerificationBlock } from './domain/types.js'
+export type { MilestoneCompletionEvidence } from './domain/milestone-completion.js'
 export type { PresetDescriptor, PresetContentLocale, PresetNodeRef, PresetNodeText, PresetContent, PresetDependencyRef } from './domain/presets.js'
 export type { ProjectSnapshot, SnapshotResult, PlanSummary, SnapshotSync, StreamEventView, FollowResult } from './application/snapshot.js'
 // follow 订阅（V32）：Remote follow/followEvents/followClose 的边界类型。
