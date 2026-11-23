@@ -31,7 +31,7 @@
 | E09 | 工作运行中修改同实例的树 | A＋F＋H · 原位预览与实际编辑前后比较运行目标及绑定，真实 Agent 的两种原运行写法均被拒，新工作获准写入 | `untested` |
 | E10 | 插入预设并独立再次插入 | A＋F＋H · v1 与 v2 均在两个位置插入原内置预设，核对 v1 旧校验器、v2 里程碑与交付原值和现有信封兼容 | `untested` |
 | E11 | 拒绝不可用或无效的模板输入 | A＋F · 复核不可用内置版本、无效结构、语言及锚点诊断，拒绝时磁盘和规划修订保持原值 | `pass`（2026-11-23 A/F 层：用户模板插入的版本不存在、哈希/身份不符、正文无效、父节点 null/不存在、锚点不属于目标同级组分别返回稳定码；全部拒绝后磁盘字节与规划修订保持；内置 `insert-preset` 原协议与失败诊断回归通过（见 `tree-commands.test.ts` 与 `insert-user-template.test.ts`）。内置预设无效结构/语言诊断沿用 2.1 既有覆盖，见 [2.5 记录](implementation/2026-11-23-2.5-insert-user-template.md)） |
-| E12 | 原子候选与原操作回执 | A＋F · 结构及衍生正文同一权威头。非法子步骤、发布前中断与无操作保留原头。回执丢失返回原 ID、双修订和结果，同号换参数拒绝 | `untested` |
+| E12 | 原子候选与原操作回执 | A＋F · 结构及衍生正文同一权威头。非法子步骤、发布前中断与无操作保留原头。回执丢失返回原 ID、双修订和结果，同号换参数拒绝 | `pass`（2026-11-23 A/F 层：`unified-command-receipt.test.ts` 10 项。请求摘要覆盖业务载荷与基线（位置／模板版本／锚点／记录三元组／组成与合并处置／复制目标／模板子树根／逆向目标／验证结论逐项改参均产生不同摘要，字面量顺序不影响，基线三项任一变化即变摘要）；合并的规划候选与替代正文只经一次 `writeDocument` 与一次 `writeBody`（hooks 计数各 1），回执 `recordId`＝意图 `generated.recordId`＝索引条目 id、正文实际哈希＝索引 `contentHash`、候选头与磁盘一致，双修订各只 +1；`append-record` 带 `verification` 同样单头单正文、只推进状态修订、规划指纹不变；分组无衍生正文（1 头 0 正文）；插入预设的 `generated.nodeIds` 与磁盘新节点集合一致且重发返回同一修订；非法子步骤（合并未处置依赖）退回 `unresolved-dependency` 且不写正文／不改头／不落意图；头发布前中断（publish `beforeRename` 注入）退回 `persistence-failed`，头与记录索引保持，先落的正文不进索引；回执丢失（第三次聚合替换注入失败）返回 `pending-reconciliation`／stage `receipt`，`recover` 按候选匹配返回原 operationId、规划指纹、双修订 2/2 与原记录 id，`getReceipt` 与原样重发同源且不重复发布；同号改位置／模板版本／验证结论／逆向目标分别 `operation-mismatch` 且字节与修订不变；原位移动只推进状态修订、头字节与指纹保持。见 [2.7 记录](implementation/2026-11-23-2.7-unified-command-receipt.md)；4.x 的路线图格式与里程碑命令按 4.1／4.3／4.5 复用同一契约复测，H 层（真实宿主同号重发与中断）随 5.x 补） |
 
 ## 聊天与执行
 
