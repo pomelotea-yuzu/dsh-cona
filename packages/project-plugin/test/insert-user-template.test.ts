@@ -330,12 +330,13 @@ test('2.5 用户模板插入可撤销（2.3 契约）：批次身份记录、撤
   assert.equal(validateProjectDocument(fx.doc(), { sha256 }).ok, true);
 });
 
-test('2.5 owner 准入与命令目标映射；内置 insert-preset 保持原协议', async () => {
+test('2.5／3.3 owner 准入与命令目标映射；内置 insert-preset 保持原协议', async () => {
   const fx = await setup('tpl-insert-admit-');
   const ids = await saveTemplate(fx);
   const denied = await fx.service.execute(AGENT(fx.instanceId), fx.envelope(insertCmd(ids)));
   assert.equal(rejected(denied).code, 'forbidden');
-  assert.equal(commandAction(insertCmd(ids)), 'add');
+  // 3.3：插入是独立动作；缺工作端口时 agent 直达不降级放行。
+  assert.equal(commandAction(insertCmd(ids)), 'insert');
   assert.deepEqual(commandTargets(insertCmd(ids)), [ROOT_NODE]);
   assert.deepEqual(commandTargets(insertCmd(ids, null)), []);
   // 内置预设仍可插入（原协议不回归）。

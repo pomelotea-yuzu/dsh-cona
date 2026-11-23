@@ -140,6 +140,15 @@ export function planNodeView(
         })),
       };
     },
+    /** 结构命令影响范围（3.3）：只投影 id／父级／顺序，不携带任何正文。 */
+    async planOutline() {
+      const read = await readDoc();
+      if (!read.ok) return read;
+      return {
+        ok: true as const,
+        nodes: read.doc.plan.nodes.map((node) => ({ id: node.id, parentId: node.parentId, order: node.order })),
+      };
+    },
     async nodeDetails(ids) {
       const read = await readDoc();
       if (!read.ok) return read;

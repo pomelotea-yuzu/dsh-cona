@@ -62,6 +62,10 @@ export type {
   WorkPreview,
   WorkPreviewRequest,
   WorkPreviewTarget,
+  WorkTemplateAuthorization,
+  PlanOutline,
+  PlanOutlineNode,
+  StructuralImpact,
 } from './application/work.js'
 export type {
   ConaWorkObserveRequest,

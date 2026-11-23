@@ -30,10 +30,19 @@ import {
   type WorkIntent,
   type WorkRunRecord,
   type WorkSuggestion,
+  type WorkTemplateAuthorization,
 } from './local-state.js';
 import type { LocalStateStorePort, PlanNodeViewPort } from './ports.js';
 
-export type { WorkAction, WorkBaseline, WorkContinuation, WorkIntent, WorkRunRecord, WorkSuggestion };
+export type {
+  WorkAction,
+  WorkBaseline,
+  WorkContinuation,
+  WorkIntent,
+  WorkRunRecord,
+  WorkSuggestion,
+  WorkTemplateAuthorization,
+};
 export { WORK_ACTIONS };
 
 export type WorkOutcome<S> =
@@ -75,6 +84,10 @@ export interface PrepareWorkRequest {
   origin?: 'panel' | 'agent';
   /** 输入规划基线：确认时所见快照；startWork 时与本机已知基线核对，过期即拒绝。 */
   baseline: WorkBaseline;
+  /** 根组重排许可（tasks 3.3）：单独授予，缺省不授予。 */
+  rootGroupAllowed?: boolean;
+  /** 插入模板精确授权（tasks 3.3）：缺省空＝不授权任何模板。 */
+  templates?: WorkTemplateAuthorization[];
 }
 
 export interface StartWorkRequest {
@@ -247,15 +260,16 @@ export function commandAction(command: Command): WorkAction {
       return 'record';
     case 'set-node-status':
       return 'status';
-    // 结构命令为 owner-only，agent 准入在命令服务入口即拒绝；这里给出保守映射，
-    // 避免穷尽 switch 遗漏，且任何意外的 agent 直达都落在受限动作上。
+    // 结构命令（tasks 3.3）：move／insert 需显式动作授权；其余结构编辑仍为 owner-only。
     case 'move-node':
+      return 'move';
+    case 'insert-preset':
+    case 'insert-user-template':
+      return 'insert';
     case 'group-nodes':
     case 'merge-nodes':
     case 'copy-subtree':
       return 'update';
-    case 'insert-preset':
-      return 'add';
     // 撤销/重做是 owner-only（命令服务入口拒绝 agent 直达）；保守映射，实际不走工作绑定。
     case 'undo-plan-edit':
     case 'redo-plan-edit':
@@ -263,17 +277,131 @@ export function commandAction(command: Command): WorkAction {
     // 模板保存是 owner-only 的记录发布；保守映射，不走工作绑定。
     case 'save-user-template':
       return 'record';
-    // 用户模板插入是 owner-only（本阶段），与内置预设一致按 add 保守映射。
-    case 'insert-user-template':
-      return 'add';
   }
+}
+
+/** 规划轮廓（tasks 3.3）：结构命令影响范围要用当前父子与顺序解析，不能只看命令字面量。 */
+export interface PlanOutlineNode {
+  id: string;
+  parentId: string | null;
+  order: number;
+}
+
+export interface PlanOutline {
+  nodes: PlanOutlineNode[];
+}
+
+/** 结构命令的影响范围：子树、源／目的父组、锚点以及因归一化而变序的同级节点。 */
+export interface StructuralImpact {
+  kind: 'move' | 'insert';
+  /** 必须全部落在运行目标集合内的既有节点。 */
+  targets: string[];
+  /** 移动子树（含自身）；插入为空。 */
+  subtree: string[];
+  sourceParentId: string | null;
+  destParentId: string | null;
+  anchorId: string | null;
+  /** 触及根组：源或目的父组为根（null）时为真。 */
+  touchesRootGroup: boolean;
+}
+
+function childrenOf(outline: PlanOutline, parentId: string | null): PlanOutlineNode[] {
+  return outline.nodes
+    .filter((node) => node.parentId === parentId)
+    .sort((a, b) => (a.order === b.order ? a.id.localeCompare(b.id) : a.order - b.order));
+}
+
+/**
+ * 计算 move／insert 的影响范围（当前计划轮廓）。非结构命令或轮廓缺节点时返回 null，
+ * 由调用方退回保守投影或让领域变换给出 node-not-found。
+ */
+export function structuralImpact(command: Command, outline: PlanOutline): StructuralImpact | null {
+  if (command.type === 'move-node') {
+    const node = outline.nodes.find((item) => item.id === command.nodeId);
+    if (node === undefined) return null;
+    const subtree: string[] = [];
+    const queue = [node.id];
+    while (queue.length > 0) {
+      const current = queue.shift() as string;
+      subtree.push(current);
+      for (const child of outline.nodes) {
+        if (child.parentId === current) queue.push(child.id);
+      }
+    }
+    const subtreeSet = new Set(subtree);
+    const sourceParent = node.parentId;
+    const destParent = command.parentId;
+    const anchor = command.beforeNodeId === null ? undefined : outline.nodes.find((item) => item.id === command.beforeNodeId);
+    // 源组：移除后 order 大于原位置的同级节点会前移。
+    const sourceShifts = childrenOf(outline, sourceParent)
+      .filter((item) => !subtreeSet.has(item.id) && item.order > node.order)
+      .map((item) => item.id);
+    // 目的组：插入点及其后的同级节点会后退；锚点本身也在影响内。
+    const destSiblings = childrenOf(outline, destParent).filter((item) => !subtreeSet.has(item.id));
+    const insertIndex = anchor === undefined ? destSiblings.length : destSiblings.findIndex((item) => item.id === anchor.id);
+    const destShifts = insertIndex < 0
+      ? []
+      : destSiblings.slice(insertIndex).map((item) => item.id);
+    const targets = [...new Set([
+      ...subtree,
+      ...(sourceParent === null ? [] : [sourceParent]),
+      ...(destParent === null ? [] : [destParent]),
+      ...(command.beforeNodeId === null ? [] : [command.beforeNodeId]),
+      ...sourceShifts,
+      ...destShifts,
+    ])];
+    return {
+      kind: 'move',
+      targets,
+      subtree,
+      sourceParentId: sourceParent,
+      destParentId: destParent,
+      anchorId: command.beforeNodeId,
+      touchesRootGroup: sourceParent === null || destParent === null,
+    };
+  }
+  if (command.type === 'insert-preset' || command.type === 'insert-user-template') {
+    const destParent = command.parentId;
+    if (destParent === null) {
+      // 根级插入在任何许可下都不允许；由调用方先返回 parent-not-found。
+      return {
+        kind: 'insert',
+        targets: command.beforeNodeId === null ? [] : [command.beforeNodeId],
+        subtree: [],
+        sourceParentId: null,
+        destParentId: null,
+        anchorId: command.beforeNodeId,
+        touchesRootGroup: false,
+      };
+    }
+    const siblings = childrenOf(outline, destParent);
+    const anchor = command.beforeNodeId === null ? undefined : siblings.find((item) => item.id === command.beforeNodeId);
+    const insertIndex = anchor === undefined ? siblings.length : siblings.findIndex((item) => item.id === anchor.id);
+    const shifts = insertIndex < 0 ? [] : siblings.slice(insertIndex).map((item) => item.id);
+    return {
+      kind: 'insert',
+      targets: [...new Set([destParent, ...(command.beforeNodeId === null ? [] : [command.beforeNodeId]), ...shifts])],
+      subtree: [],
+      sourceParentId: null,
+      destParentId: destParent,
+      anchorId: command.beforeNodeId,
+      touchesRootGroup: false,
+    };
+  }
+  return null;
 }
 
 /**
  * 命令的目标节点集合：所有被写到的规划节点。add-nodes 以父节点为目标；
  * 父为 null（新增根级节点）不在任何节点目标集合内，准入层直接拒绝。
  */
-export function commandTargets(command: Command): string[] {
+export function commandTargets(command: Command, outline?: PlanOutline): string[] {
+  // 结构命令（tasks 3.3）：给了当前计划轮廓就按真实影响范围解析（子树／同级变序），
+  // 否则退回保守投影（旧调用方与只说“两个端点”的提示保持原样）。
+  if (outline !== undefined) {
+    const impact = structuralImpact(command, outline);
+    if (impact !== null) return impact.targets;
+  }
   switch (command.type) {
     case 'add-nodes': {
       const parents = command.nodes.map((node) => node.parentId).filter((id): id is string => id !== null);
@@ -378,6 +506,8 @@ export class WorkService {
         purpose: request.purpose,
         origin: request.origin ?? 'panel',
         baseline: { ...request.baseline },
+        ...(request.rootGroupAllowed === undefined ? {} : { rootGroupAllowed: request.rootGroupAllowed }),
+        ...(request.templates === undefined ? {} : { templates: request.templates.map((item) => ({ ...item })) }),
         status: 'pending',
         createdAt: now,
         updatedAt: now,
@@ -593,6 +723,8 @@ export class WorkService {
         targets: [...intent.nodeIds],
         allowedActions: [...intent.allowedActions],
         reasonScope: intent.reasonScope,
+        ...(intent.rootGroupAllowed === undefined ? {} : { rootGroupAllowed: intent.rootGroupAllowed }),
+        ...(intent.templates === undefined ? {} : { templates: intent.templates.map((item) => ({ ...item })) }),
         rpcId: event.rpcId,
         status: 'active',
         startedAt: now,
@@ -724,12 +856,63 @@ export class WorkService {
         return { ok: false, code: 'forbidden', message };
       }
     }
-    const targets = commandTargets(envelope.command);
+
+    // 结构命令（tasks 3.3）：插入先拒绝根级父节点并核对精确模板授权，再用当前轮廓算影响范围。
+    const command = envelope.command;
+    if (command.type === 'insert-preset' || command.type === 'insert-user-template') {
+      if (command.parentId === null) {
+        return {
+          ok: false,
+          code: 'parent-not-found',
+          message: '插入必须以现有节点为父节点；即使持有插入与根组许可，根级插入也不允许',
+        };
+      }
+      if (!templateAuthorized(run, command)) {
+        const message = command.type === 'insert-preset'
+          ? `未授权内置模板 ${command.templateId} v${command.templateVersion}；绑定只授权显式确认的模板与版本`
+          : `未授权用户模板 ${command.templateId}（记录 ${command.versionRecordId}）；绑定只授权显式确认的版本与正文哈希`;
+        return { ok: false, code: 'template-not-authorized', message };
+      }
+    }
+    let outline: PlanOutline | undefined;
+    if (command.type === 'move-node' || command.type === 'insert-preset' || command.type === 'insert-user-template') {
+      const readOutline = this.deps.planNodes.planOutline;
+      if (readOutline === undefined) {
+        return {
+          ok: false,
+          code: 'structure-scope-unavailable',
+          message: '宿主未提供规划轮廓；结构命令的影响范围不可判定，拒绝写入',
+        };
+      }
+      const outlineResult = await readOutline.call(this.deps.planNodes);
+      if (!outlineResult.ok) {
+        return { ok: false, code: 'structure-scope-unavailable', message: outlineResult.message };
+      }
+      outline = { nodes: outlineResult.nodes.map((node) => ({ ...node })) };
+    }
+    if (command.type === 'move-node' && outline !== undefined) {
+      const impact = structuralImpact(command, outline);
+      if (impact === null) {
+        return { ok: false, code: 'node-not-found', message: `移动源节点 ${command.nodeId} 不在当前资料中` };
+      }
+      if (impact.touchesRootGroup && run.rootGroupAllowed !== true) {
+        const message = '根组重排需要单独授予的根组许可；本次绑定未授予';
+        await this.noteSuggestion(run, action, impact.targets, message);
+        return { ok: false, code: 'root-group-not-allowed', message };
+      }
+    }
+    const targets = commandTargets(command, outline);
     const outside = targets.filter((id) => !run.targets.includes(id));
     if (outside.length > 0) {
       const message = `目标超出工作范围：${outside.join(', ')}`;
       await this.noteSuggestion(run, action, targets, message);
-      return { ok: false, code: 'forbidden', message };
+      return {
+        ok: false,
+        code: command.type === 'move-node' || command.type === 'insert-preset' || command.type === 'insert-user-template'
+          ? 'structure-scope-denied'
+          : 'forbidden',
+        message,
+      };
     }
     if (
       envelope.expectedPlanVersion !== run.acceptedBaseline.planVersion
@@ -1446,6 +1629,35 @@ export class WorkService {
     ) {
       return { status: 'rejected', code: 'operation-mismatch', message: 'baseline 缺失或形状不合法' };
     }
+    if (request.rootGroupAllowed !== undefined && typeof request.rootGroupAllowed !== 'boolean') {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'rootGroupAllowed 必须是布尔值' };
+    }
+    if (request.templates !== undefined) {
+      const templates = request.templates;
+      if (!Array.isArray(templates)) {
+        return { status: 'rejected', code: 'operation-mismatch', message: 'templates 必须是数组' };
+      }
+      for (const item of templates) {
+        if (item === null || typeof item !== 'object') {
+          return { status: 'rejected', code: 'operation-mismatch', message: '模板授权必须是对象' };
+        }
+        if (item.source !== 'builtin' && item.source !== 'user') {
+          return { status: 'rejected', code: 'operation-mismatch', message: "模板来源必须是 'builtin' 或 'user'" };
+        }
+        if (typeof item.templateId !== 'string' || item.templateId === '') {
+          return { status: 'rejected', code: 'operation-mismatch', message: '模板授权缺少 templateId' };
+        }
+        if (item.source === 'builtin'
+          && (!Number.isSafeInteger(item.templateVersion) || (item.templateVersion as number) < 1)) {
+          return { status: 'rejected', code: 'operation-mismatch', message: '内置模板授权必须给出正整数版本' };
+        }
+        if (item.source === 'user'
+          && (typeof item.versionRecordId !== 'string' || item.versionRecordId === ''
+            || typeof item.contentHash !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(item.contentHash))) {
+          return { status: 'rejected', code: 'operation-mismatch', message: '用户模板授权必须给出记录 id 与 sha256 正文哈希' };
+        }
+      }
+    }
     return null;
   }
 
@@ -1545,13 +1757,50 @@ function sameIntent(intent: WorkIntent, request: PrepareWorkRequest): boolean {
     && request.nodeIds.every((id) => intent.nodeIds.includes(id));
   const sameActions = intent.allowedActions.length === request.allowedActions.length
     && request.allowedActions.every((action) => intent.allowedActions.includes(action));
+  // 结构权限也属于“范围”：同号换许可必须拒绝，不能拿原意图的旧许可继续用。
+  const sameRootGroup = (intent.rootGroupAllowed === true) === (request.rootGroupAllowed === true);
+  const sameTemplates = templateKey(intent.templates ?? []) === templateKey(request.templates ?? []);
   return sameIds
     && sameActions
+    && sameRootGroup
+    && sameTemplates
     && intent.reasonScope === request.reasonScope
     && intent.purpose === request.purpose
     && intent.baseline.planVersion === request.baseline.planVersion
     && intent.baseline.planRevision === request.baseline.planRevision
     && intent.baseline.sourceEpoch === request.baseline.sourceEpoch;
+}
+
+/** 模板授权的规范化键（顺序无关）；用于幂等比较。 */
+function templateKey(templates: readonly WorkTemplateAuthorization[]): string {
+  return templates
+    .map((item) => [item.source, item.templateId, item.templateVersion ?? '', item.versionRecordId ?? '', item.contentHash ?? ''].join('\u0000'))
+    .sort()
+    .join('\u0001');
+}
+
+/**
+ * 精确模板授权核对（tasks 3.3）：内置按 ID+版本，用户模板按 ID+版本记录+正文哈希。
+ * 旧运行／旧意图没有 templates 字段 → 空授权，不因缺字段放宽。
+ */
+function templateAuthorized(
+  run: Pick<WorkRunRecord, 'templates'>,
+  command: Extract<Command, { type: 'insert-preset' } | { type: 'insert-user-template' }>,
+): boolean {
+  const templates = run.templates ?? [];
+  if (command.type === 'insert-preset') {
+    return templates.some((item) =>
+      item.source === 'builtin'
+      && item.templateId === command.templateId
+      && item.templateVersion === command.templateVersion,
+    );
+  }
+  return templates.some((item) =>
+    item.source === 'user'
+    && item.templateId === command.templateId
+    && item.versionRecordId === command.versionRecordId
+    && item.contentHash === command.contentHash,
+  );
 }
 
 function validMessageEvent(event: { sessionId?: unknown; rpcId?: unknown }): boolean {

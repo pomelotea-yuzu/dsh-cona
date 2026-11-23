@@ -717,6 +717,8 @@ const WORK_ACTION_KEY: Record<string, LocaleKey> = {
   add: 'workActionAdd',
   split: 'workActionSplit',
   dependencies: 'workActionDependencies',
+  move: 'workActionMove',
+  insert: 'workActionInsert',
 };
 
 const ITEM_KIND_KEY: Record<string, LocaleKey> = {

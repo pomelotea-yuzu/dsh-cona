@@ -129,6 +129,8 @@
   "workActionAdd": "Add nodes",
   "workActionSplit": "Split",
   "workActionDependencies": "Dependencies",
+  "workActionMove": "Move nodes",
+  "workActionInsert": "Insert templates",
   "workItemDecision": "User confirmed",
   "workItemSuggestion": "Suggestion",
   "workItemUnverified": "Unverified",

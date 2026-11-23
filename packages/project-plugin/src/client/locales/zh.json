@@ -129,6 +129,8 @@
   "workActionAdd": "新增节点",
   "workActionSplit": "拆分",
   "workActionDependencies": "调依赖",
+  "workActionMove": "移动节点",
+  "workActionInsert": "插入模板",
   "workItemDecision": "用户确认",
   "workItemSuggestion": "建议",
   "workItemUnverified": "待核对",

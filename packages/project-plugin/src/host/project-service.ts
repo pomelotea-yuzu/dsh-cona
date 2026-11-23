@@ -103,6 +103,10 @@ export interface ConaWorkPrepareRequest {
   purpose: string;
   origin?: 'panel' | 'agent';
   baseline: { planVersion: string; planRevision: number; sourceEpoch: number };
+  /** 3.3：根组重排许可（单独授予）。 */
+  rootGroupAllowed?: boolean;
+  /** 3.3：插入模板精确授权（内置版本／用户模板记录与哈希）。 */
+  templates?: import('../application/local-state.js').WorkTemplateAuthorization[];
 }
 
 /** “开始工作”确认：登记期望消息来源（Client prompt requestId ＝ source.rpcId）。 */
@@ -415,6 +419,8 @@ export class ConaProjectService extends TypertRemoteService {
       purpose: request.purpose,
       baseline: request.baseline,
       ...(request.origin === undefined ? {} : { origin: request.origin }),
+      ...(request.rootGroupAllowed === undefined ? {} : { rootGroupAllowed: request.rootGroupAllowed }),
+      ...(request.templates === undefined ? {} : { templates: request.templates.map((item) => ({ ...item })) }),
     })
   }
 

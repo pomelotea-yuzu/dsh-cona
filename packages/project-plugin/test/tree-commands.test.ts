@@ -220,8 +220,9 @@ test('2.1 同项目 ID 不同实例：错实例 envelope 被拒，不影响目�
 });
 
 test('2.1 新命令的动作/目标映射保守且穷尽', () => {
-  assert.equal(commandAction({ ...MOVE_IN_PLACE }), 'update');
-  assert.equal(commandAction({ ...INSERT }), 'add');
+  // 3.3：移动与插入是独立动作（需显式授权），不再借用 update／add。
+  assert.equal(commandAction({ ...MOVE_IN_PLACE }), 'move');
+  assert.equal(commandAction({ ...INSERT }), 'insert');
   assert.deepEqual(commandTargets({ ...MOVE_IN_PLACE }).sort(), [CHILD_NODE, ROOT_NODE].sort());
   assert.deepEqual(commandTargets({ ...INSERT }), [ROOT_NODE]);
 });

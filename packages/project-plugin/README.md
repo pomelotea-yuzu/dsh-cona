@@ -132,6 +132,10 @@ node lib/cli/local.js release-lock --local-root <目录> (--force | --token <tok
 node lib/cli/command.js run --local-root <目录> --instance <id> \
   --command '{"type":"add-nodes","nodes":[{"parentId":"<父节点>","order":1,"title":"新节点","goal":"目标","completionCriteria":[]}]}'
 
+# 结构命令（Agent 需对应动作授权）：move-node / insert-preset / insert-user-template
+node lib/cli/command.js run --local-root <目录> --instance <id> \
+  --command '{"type":"move-node","nodeId":"<节点>","parentId":"<父节点或 null>","beforeNodeId":null}'
+
 # 记录命令：正文哈希与路径由应用层计算
 node lib/cli/command.js run --local-root <目录> --instance <id> \
   --command '{"type":"append-record","kind":"analysis-note","subjectNodeIds":["<节点>"],"summary":"结论","sources":[],"body":"# 正文\n"}'
@@ -143,6 +147,12 @@ node lib/cli/command.js run --local-root <目录> --instance <id> \
 
 - **封套**：`operationId`、`projectId`、`instanceId`、`sourceEpoch`、`expectedPlanVersion`、`expectedPlanRevision`、`command`。缺字段或形态非法一律 `operation-mismatch`。
 - **访问校验**：UI Remote 与 Agent 工具是两条判据；缺可信上下文直接 `forbidden`，不降级为进程内 owner。工具要求真实 `workRunId`、正数绑定版本且实例一致。
+- **结构命令授权（3.3）**：`move-node`／`insert-preset`／`insert-user-template` 不再静态 owner-only，可由配置实例内的可信 WorkRun 发起，但必须逐项通过：
+  - 动作：运行须显式含 `move` 或 `insert`；缺动作 `forbidden`。
+  - 位置：按当前计划轮廓核对源父组、移动子树、目的父组、锚点与因归一化而变序的同级节点；任一不在目标集合内 → `structure-scope-denied`。根组内重排另需 `rootGroupAllowed`，否则 `root-group-not-allowed`；非根节点升为根仍由领域拒绝（`child-to-root`）。
+  - 插入：必须以现有节点为父；`parentId: null` 一律 `parent-not-found`（即使已授予 insert、根组许可与精确模板版本），且不分配候选、不生成节点。
+  - 模板：运行冻结精确授权——内置按 `templateId + templateVersion`，用户模板再带 `versionRecordId + contentHash`；不符 → `template-not-authorized`。旧运行缺 `templates` 字段按空授权读取。
+  - 绑定与基线：提交时核对捕获版本与已接受基线；owner 在运行中改了规划，旧运行仍可读，但拿新基线写会被 `binding-expired` 拒绝，需结束旧运行后显式发起新运行。生成节点不加入目标集合。
 - **同一提交序列**：两种入口都经 `ProjectCommandService`，先核对实例 → 源代际 → 双修订 → 重读权威资料 → 变换 → 先正文后头 → 本机聚合。入口不同不改变任何校验。
 - **双修订**：规划命令推进 `planRevision + stateRevision`；记录命令只推进 `stateRevision`，`planVersion` 不变，因此记录之后仍可用原规划基线提交规划修改。
 - **不可变变换**：命令只描述结构，新节点 id 由应用层生成；变换不修改输入，失败整体拒绝。

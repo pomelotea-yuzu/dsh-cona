@@ -295,10 +295,25 @@ export interface ConversationState {
   intents: ConversationIntent[];
 }
 
-/** 工作意图允许的动作子集（design §7）：范围显式确认，不自动扩大。 */
-export type WorkAction = 'add' | 'update' | 'split' | 'dependencies' | 'record' | 'status';
+/** 工作意图允许的动作子集（design §7／§3）：范围显式确认，不自动扩大。 */
+export type WorkAction = 'add' | 'update' | 'split' | 'dependencies' | 'record' | 'status' | 'move' | 'insert';
 
-export const WORK_ACTIONS: readonly WorkAction[] = ['add', 'update', 'split', 'dependencies', 'record', 'status'];
+export const WORK_ACTIONS: readonly WorkAction[] = ['add', 'update', 'split', 'dependencies', 'record', 'status', 'move', 'insert'];
+
+/**
+ * 插入模板的精确授权（tasks 3.3）：内置按 ID+版本，用户模板再冻结记录 id 与正文哈希。
+ * 缺省（旧意图／旧运行）视为空授权，不因缺字段而放宽。
+ */
+export interface WorkTemplateAuthorization {
+  source: 'builtin' | 'user';
+  templateId: string;
+  /** 内置模板版本号（source==='builtin'）。 */
+  templateVersion?: number;
+  /** 用户模板版本记录 id（source==='user'）。 */
+  versionRecordId?: string;
+  /** 用户模板正文哈希（source==='user'）。 */
+  contentHash?: string;
+}
 
 /** 工作意图登记的输入规划基线快照；运行期间命令基线与之核对，外部变化即失配。 */
 export interface WorkBaseline {
@@ -322,6 +337,10 @@ export interface WorkIntent {
   purpose: string;
   origin: 'panel' | 'agent';
   baseline: WorkBaseline;
+  /** 根组重排许可（tasks 3.3）：只有显式授予时才允许根级移动；缺省 false。 */
+  rootGroupAllowed?: boolean;
+  /** 插入模板的精确授权（tasks 3.3）：缺省空＝不授权任何模板；旧意图按空授权读取。 */
+  templates?: WorkTemplateAuthorization[];
   /** 期望消息来源：Client prompt 的 requestId（宿主保存为消息 source.rpcId）；rpcId 不是授权令牌。 */
   expectedRpcId?: string;
   /** 期望会话；缺省由首次消费匹配确定。 */
@@ -393,6 +412,10 @@ export interface WorkRunRecord {
   allowedActions: WorkAction[];
   reasonScope: 'public' | 'local';
   rpcId: string;
+  /** 根组重排许可（随意图冻结；旧运行缺字段按 false 读取）。 */
+  rootGroupAllowed?: boolean;
+  /** 插入模板精确授权（随意图冻结；旧运行缺字段按空授权读取）。 */
+  templates?: WorkTemplateAuthorization[];
   /** active：生效中；stopped：显式停止；ended：真实终态（完成／取消）。 */
   status: 'active' | 'stopped' | 'ended';
   /**

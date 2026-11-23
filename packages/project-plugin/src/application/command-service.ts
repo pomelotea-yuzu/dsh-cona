@@ -159,10 +159,19 @@ export type Command =
   | InsertUserTemplateCommand
   | AppendRecordCommand;
 
-/** 只能由 owner 发起的结构与逆向命令；agent-work 上下文直达须在准入阶段拒绝。 */
+/**
+ * 只能由 owner 发起的命令：分组／合并／复制、撤销重做、模板保存仍是 owner-only。
+ * move-node／insert-preset／insert-user-template 自 3.3 起可由配置实例内的可信 WorkRun 发起，
+ * 但必须经 WorkAdmissionPort 准入（缺工作端口的 agent 上下文仍拒绝），见 execute。
+ */
 const OWNER_ONLY_COMMANDS = new Set<string>([
-  'move-node', 'insert-preset', 'group-nodes', 'merge-nodes', 'copy-subtree',
-  'undo-plan-edit', 'redo-plan-edit', 'save-user-template', 'insert-user-template',
+  'group-nodes', 'merge-nodes', 'copy-subtree',
+  'undo-plan-edit', 'redo-plan-edit', 'save-user-template',
+]);
+
+/** 可由可信 WorkRun 发起的结构命令（3.3）：缺工作端口时不得降级放行。 */
+const WORK_RUN_STRUCTURAL_COMMANDS = new Set<string>([
+  'move-node', 'insert-preset', 'insert-user-template',
 ]);
 
 /** 可撤销的规划编辑（append-record 与逆向命令自身不写入新的逆向信息）。 */
@@ -841,10 +850,19 @@ export class ProjectCommandService {
     }
     // agent-work 入口的第二层准入（tasks 6.2）：活动 WorkRun、绑定版本、目标／动作范围与基线。
     // remote-owner 路径不走工作绑定；两条入口判据独立，不共用一个“有绑定即放行”。
-    if (ctx !== undefined && ctx.kind === 'agent-work' && this.deps.work !== undefined) {
-      const admitted = await this.deps.work.authorizeAgentCommand(ctx, envelope);
-      if (!admitted.ok) {
-        return { status: 'rejected', code: admitted.code, message: admitted.message };
+    if (ctx !== undefined && ctx.kind === 'agent-work') {
+      if (WORK_RUN_STRUCTURAL_COMMANDS.has(envelope.command?.type) && this.deps.work === undefined) {
+        return {
+          status: 'rejected',
+          code: 'forbidden',
+          message: '结构命令只经可信 WorkRun 准入；宿主未提供工作绑定端口，拒绝降级放行',
+        };
+      }
+      if (this.deps.work !== undefined) {
+        const admitted = await this.deps.work.authorizeAgentCommand(ctx, envelope);
+        if (!admitted.ok) {
+          return { status: 'rejected', code: admitted.code, message: admitted.message };
+        }
       }
     }
     const shape = this.checkEnvelope(envelope);

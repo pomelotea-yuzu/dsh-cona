@@ -106,6 +106,14 @@ export interface PlanNodeViewPort {
     | { ok: true; nodes: PlanNodeTarget[]; dependencies: PlanDependencyEntry[] }
     | { ok: false; code: string; message: string }
   >;
+  /**
+   * 当前规划的父子与顺序轮廓（tasks 3.3 结构命令影响范围）。
+   * 只投影 id／parentId／order，不携带正文；不可用时结构命令准入拒绝。
+   */
+  planOutline?(): Promise<
+    | { ok: true; nodes: Array<{ id: string; parentId: string | null; order: number }> }
+    | { ok: false; code: string; message: string }
+  >;
 }
 
 /** 可信执行上下文：入口处捕获的只读判别联合（remote-owner | agent-work）。 */

@@ -190,7 +190,7 @@ const EMPTY_WORK: WorkState = {
   started: null,
 };
 
-export const WORK_ACTION_OPTIONS: readonly WorkAction[] = ['update', 'record', 'status', 'add', 'split', 'dependencies'];
+export const WORK_ACTION_OPTIONS: readonly WorkAction[] = ['update', 'record', 'status', 'add', 'split', 'dependencies', 'move', 'insert'];
 
 const EMPTY_CHATS: ChatsState = {
   phase: 'idle',

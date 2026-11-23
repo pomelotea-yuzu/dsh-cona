@@ -133,7 +133,7 @@ export type ToolCommittedOutput = {
 
 export interface ProjectApplyArgs {
   operationId: string;
-  /** 规划命令（五类；记录追加走 project_record）。 */
+  /** 规划命令（含 3.3 的 move／insert；记录追加走 project_record）。 */
   command: Command;
   expectedPlanVersion: string;
   expectedPlanRevision: number;
@@ -161,7 +161,11 @@ export interface ProjectToolDeps {
 
 // ---------- 参数校验 ----------
 
-const PLANNING_TYPES = new Set(['add-nodes', 'update-node', 'split-node', 'set-dependencies', 'set-node-status']);
+const PLANNING_TYPES = new Set([
+  'add-nodes', 'update-node', 'split-node', 'set-dependencies', 'set-node-status',
+  // tasks 3.3：结构命令经可信 WorkRun 的 move／insert 动作授权，仍受同一命令服务与回执核对。
+  'move-node', 'insert-preset', 'insert-user-template',
+]);
 const RECORD_KINDS = new Set(['plan-change', 'analysis-note', 'execution-note', 'verification']);
 const VERIFICATION_STATUSES = new Set(['pass', 'fail', 'blocked', 'untested']);
 
@@ -302,7 +306,7 @@ export class ProjectToolAdapter {
     return output as unknown as ToolOutcome;
   }
 
-  // ---- project_apply（五类规划命令；基线必须显式提供并经绑定准入核对） ----
+  // ---- project_apply（规划命令含结构命令；基线必须显式提供并经绑定准入核对） ----
 
   async apply(args: unknown, exec: ConaToolExec): Promise<ToolOutcome> {
     const checked = exactKeys(args, ['operationId', 'command', 'expectedPlanVersion', 'expectedPlanRevision', 'sourceEpoch']);
@@ -573,13 +577,13 @@ export function defineProjectTools(adapter: ProjectToolAdapter): ConaToolDefinit
     },
     {
       name: 'project_apply',
-      description: 'Apply one planning command (add-nodes / update-node / split-node / set-dependencies / set-node-status) through the unified command envelope. Requires operationId, the command, and the expected plan baseline from project_read output. Writes are authorized only inside the active WorkRun scope (targets and allowed actions); the binding version is checked at commit. No identity or authorization fields are accepted.',
+      description: 'Apply one planning command (add-nodes / update-node / split-node / set-dependencies / set-node-status / move-node / insert-preset / insert-user-template) through the unified command envelope. Requires operationId, the command, and the expected plan baseline from project_read output. Writes are authorized only inside the active WorkRun scope: targets, allowed actions, and — for structural commands — the affected source group, subtree, destination group and reordered siblings computed from the current plan. move into or within the root group needs a separately granted root-group permission; insert requires an existing parent (parentId: null always returns parent-not-found) and an exactly authorized template identity/version (user templates also fix the record id and content hash). The binding version and baseline are checked at commit; generated nodes never join the target set. No identity or authorization fields are accepted.',
       parameters: {
         type: 'object',
         additionalProperties: false,
         properties: {
           operationId: { type: 'string', description: '本次操作的稳定 id（重试须复用同一 id）' },
-          command: { type: 'object', description: '规划命令对象（type 为五类之一；记录追加走 project_record）' },
+          command: { type: 'object', description: '规划命令对象（type 为八类之一；记录追加走 project_record）' },
           expectedPlanVersion: { type: 'string', description: '期望规划版本（来自 project_read）' },
           expectedPlanRevision: { type: 'integer', description: '期望规划修订' },
           sourceEpoch: { type: 'integer', description: '资料源代际' },
