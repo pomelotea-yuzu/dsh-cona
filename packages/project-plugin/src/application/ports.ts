@@ -60,6 +60,19 @@ export interface PlanNodeDetail {
   status: string;
 }
 
+/** 目标节点的完整核对信息（tasks 3.2 工作预览）：条件、目标与父级，仍只取请求的节点。 */
+export interface PlanNodeTarget extends PlanNodeDetail {
+  goal?: string;
+  completionCriteria?: string[];
+  parentId?: string | null;
+}
+
+/** 规划依赖边（工作预览用）：只投影端点 id，标题由节点集合解析。 */
+export interface PlanDependencyEntry {
+  nodeId: string;
+  requiresNodeId: string;
+}
+
 /** 与目标相关的公开记录条目（6.4 运行上下文；来自资料头的记录索引）。 */
 export interface PlanRecordEntry {
   id: string;
@@ -81,6 +94,16 @@ export interface PlanNodeViewPort {
     ids: readonly string[],
   ): Promise<
     | { ok: true; nodes: PlanNodeDetail[]; records: PlanRecordEntry[] }
+    | { ok: false; code: string; message: string }
+  >;
+  /**
+   * 目标节点的条件／目标／父级与规划依赖（tasks 3.2 预览）。
+   * 可选方法——不可用时预览退化为标题与状态，不因此拒绝。
+   */
+  planTargets?(
+    ids: readonly string[],
+  ): Promise<
+    | { ok: true; nodes: PlanNodeTarget[]; dependencies: PlanDependencyEntry[] }
     | { ok: false; code: string; message: string }
   >;
 }

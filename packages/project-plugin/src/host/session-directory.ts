@@ -117,6 +117,29 @@ export function planNodeView(
       if (!read.ok) return read;
       return { ok: true as const, nodeIds: new Set(read.doc.plan.nodes.map((node) => node.id)) };
     },
+    /** 工作预览（3.2）：目标条件／目标／父级 + 全部规划依赖；仍只取请求的节点。 */
+    async planTargets(ids) {
+      const read = await readDoc();
+      if (!read.ok) return read;
+      const wanted = new Set(ids);
+      return {
+        ok: true as const,
+        nodes: read.doc.plan.nodes
+          .filter((node) => wanted.has(node.id))
+          .map((node) => ({
+            id: node.id,
+            title: node.title,
+            status: node.status,
+            goal: node.goal,
+            completionCriteria: [...node.completionCriteria],
+            parentId: node.parentId,
+          })),
+        dependencies: read.doc.plan.dependencies.map((edge) => ({
+          nodeId: edge.nodeId,
+          requiresNodeId: edge.requiresNodeId,
+        })),
+      };
+    },
     async nodeDetails(ids) {
       const read = await readDoc();
       if (!read.ok) return read;

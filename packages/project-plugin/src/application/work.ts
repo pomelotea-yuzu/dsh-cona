@@ -79,7 +79,9 @@ export interface PrepareWorkRequest {
 
 export interface StartWorkRequest {
   workIntentId: string;
-  rpcId: string;
+  /** 期望消息的 rpcId（宿主消息 source.rpcId）。面板路径不预知 rpcId 时可省略，
+   *  改为按 sessionId 匹配该会话的下一条用户消息。 */
+  rpcId?: string;
   sessionId?: string;
 }
 
@@ -155,8 +157,55 @@ export interface WorkContext {
   generatedAt: string;
 }
 
-/** 显式接续请求：把新目标纳入活动运行的范围（版本 +1 并保留接续原因）。 */
-export interface ContinueScopeRequest {
+// ---------- 工作预览（tasks 3.2）：确认范围前核对上下文，不建立任何绑定 ----------
+
+/** 预览请求：与 prepareWork 同范围，但只读、不落盘、不登记意图。 */
+export interface WorkPreviewRequest {
+  /** 已由宿主核对过的真实会话（可见且属本实例）；预览不因此获得任何写授权。 */
+  sessionId: string;
+  nodeIds: string[];
+  allowedActions: WorkAction[];
+  reasonScope: 'public' | 'local';
+  purpose: string;
+  /** 预览所依据的基线（客户端快照）；与当前资料不一致时以未核查项呈现。 */
+  baseline: WorkBaseline;
+}
+
+/** 预览中的目标：条件与直接依赖都在这里，缺节点时 known=false（待核对）。 */
+export interface WorkPreviewTarget {
+  id: string;
+  known: boolean;
+  title?: string;
+  status?: string;
+  goal?: string;
+  completionCriteria?: string[];
+  /** 目标依赖的节点（出边）；unknown 目标只给 id。 */
+  dependsOn: Array<{ id: string; known: boolean; title?: string }>;
+  /** 依赖目标的节点（入边）。 */
+  requiredBy: Array<{ id: string; known: boolean; title?: string }>;
+}
+
+/**
+ * 工作预览（spec：从接续摘要选择会话、目标、意图与动作后核对上下文）。
+ * 与运行上下文同源同口径：目标条件、约束、基线、公开记录、聊天入口与三类条目；
+ * 额外标出同会话已关联但不在目标集合内的节点（只作背景，不进写范围）。
+ */
+export interface WorkPreview {
+  sessionId: string;
+  targets: WorkPreviewTarget[];
+  constraints: { allowedActions: WorkAction[]; reasonScope: 'public' | 'local' };
+  baseline: WorkBaseline;
+  /** 预览时读到的源代际；null 表示注册表不可读（不冒充一致）。 */
+  sourceEpoch: number | null;
+  publicRecords: Array<{ id: string; kind: string; summary: string; path: string; subjectNodeIds: string[] }>;
+  chatEntries: Array<{ linkId: string; sessionId: string; purpose: string; origin: string }>;
+  /** 同会话已关联但不在本次目标集合内的节点：只作适用背景。 */
+  backgroundNodeIds: string[];
+  items: ContextItem[];
+  generatedAt: string;
+}
+
+/** 显式接续请求：把新目标纳入活动运行的范围（版本 +1 并保留接续原因）。 */export interface ContinueScopeRequest {
   workRunId: string;
   /** 发起方：panel 走 owner 入口；agent 必须与运行归属会话一致。 */
   origin: 'panel' | 'agent';
@@ -352,11 +401,16 @@ export class WorkService {
    * 但确认只等新消息消费，不恢复任何旧运行。
    */
   async startWork(request: StartWorkRequest): Promise<WorkOutcome<{ workIntentId: string; status: 'awaiting-message' }>> {
-    if (typeof request.rpcId !== 'string' || request.rpcId === '') {
-      return { status: 'rejected', code: 'operation-mismatch', message: '缺少期望消息 rpcId' };
+    if (request.rpcId !== undefined && (typeof request.rpcId !== 'string' || request.rpcId === '')) {
+      return { status: 'rejected', code: 'operation-mismatch', message: '期望消息 rpcId 不能为空字符串' };
     }
     if (request.sessionId !== undefined && (typeof request.sessionId !== 'string' || request.sessionId === '')) {
       return { status: 'rejected', code: 'operation-mismatch', message: 'sessionId 为空' };
+    }
+    // 面板路径不预知宿主消息 rpcId：允许只确认「在本会话发送的下一条消息生效」，
+    // 但必须至少有一个可匹配的身份，不接受“等任意消息”的空白确认。
+    if (request.rpcId === undefined && request.sessionId === undefined) {
+      return { status: 'rejected', code: 'operation-mismatch', message: '必须提供期望消息 rpcId 或已核对的会话 id' };
     }
     return this.deps.queue.run(this.deps.instanceId, async () => {
       const read = await this.readAggregate();
@@ -392,6 +446,7 @@ export class WorkService {
           ? {
               ...item,
               status: 'awaiting-message' as const,
+              // rpcId 缺省＝按会话匹配下一条用户消息（面板路径）；显式给出时按消息身份匹配。
               expectedRpcId: request.rpcId,
               ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
               blockedReason: undefined,
@@ -426,7 +481,11 @@ export class WorkService {
       const now = this.deps.clock();
       let matched = 0;
       const intents = work.intents.map((intent) =>
-        intent.status === 'awaiting-message' && intent.expectedRpcId === event.rpcId
+        intent.status === 'awaiting-message' && (
+          intent.expectedRpcId !== undefined
+            ? intent.expectedRpcId === event.rpcId
+            : intent.sessionId === event.sessionId
+        )
           ? (++matched, { ...intent, queuedAt: now, updatedAt: now })
           : intent,
       );
@@ -454,12 +513,15 @@ export class WorkService {
       if ('outcome' in read) return read.outcome;
       const { aggregate } = read;
       const work = workStateOf(aggregate);
-      const candidates = work.intents.filter(
-        (intent) =>
-          intent.status === 'awaiting-message'
-          && intent.expectedRpcId === event.rpcId
-          && (intent.sessionId === undefined || intent.sessionId === event.sessionId),
-      );
+      const candidates = work.intents.filter((intent) => {
+        if (intent.status !== 'awaiting-message') return false;
+        // 显式 rpcId：按消息身份匹配（可再限定会话）；面板确认（无 rpcId）：只按会话匹配下一条消息。
+        if (intent.expectedRpcId !== undefined) {
+          return intent.expectedRpcId === event.rpcId
+            && (intent.sessionId === undefined || intent.sessionId === event.sessionId);
+        }
+        return intent.sessionId === event.sessionId;
+      });
       if (candidates.length === 0) return { status: 'unmatched' };
 
       const now = this.deps.clock();
@@ -753,6 +815,195 @@ export class WorkService {
         status: 'committed' as const,
         value: await this.contextForRun(run, work, read.aggregate),
         stateRevision: read.aggregate.revisions.state,
+      };
+    });
+  }
+
+  /**
+   * 工作预览（tasks 3.2）：只读核对确认前的上下文，不登记意图、不建立绑定、不推进修订。
+   * 与运行上下文同源：目标条件、直接依赖、约束、基线、相关公开记录、聊天入口与三类条目；
+   * 同会话已关联但不在目标集合内的节点只列背景，不进写范围。
+   */
+  async previewWork(request: WorkPreviewRequest): Promise<WorkOutcome<WorkPreview>> {
+    const invalid = this.validateScope(request, false);
+    if (invalid !== null) return invalid;
+    if (typeof request.sessionId !== 'string' || request.sessionId === '') {
+      return { status: 'rejected', code: 'session-identity-missing', message: '缺少已核对的本机会话 id' };
+    }
+    const nodes = await this.deps.planNodes.currentNodeIds();
+    if (!nodes.ok) return { status: 'rejected', code: nodes.code, message: nodes.message };
+    const missing = request.nodeIds.filter((id) => !nodes.nodeIds.has(id));
+    if (missing.length > 0) {
+      return { status: 'rejected', code: 'unknown-node', message: `节点不存在于当前资料：${missing.join(', ')}` };
+    }
+    return this.deps.queue.run(this.deps.instanceId, async () => {
+      const read = await this.readAggregate();
+      if ('outcome' in read) return read.outcome;
+      const { aggregate } = read;
+      const targets = [...new Set(request.nodeIds)];
+
+      // 目标条件与依赖：planTargets 缺失时退化为仅标题与状态（不因此拒绝）。
+      const detailsById = new Map<string, { title?: string; status?: string; goal?: string; completionCriteria?: string[] }>();
+      let edges: Array<{ nodeId: string; requiresNodeId: string }> = [];
+      const planTargets = this.deps.planNodes.planTargets;
+      if (planTargets !== undefined) {
+        try {
+          const rich = await planTargets.call(this.deps.planNodes, targets);
+          if (rich.ok) {
+            edges = [...rich.dependencies];
+            for (const node of rich.nodes) {
+              detailsById.set(node.id, {
+                title: node.title,
+                status: node.status,
+                ...(node.goal === undefined ? {} : { goal: node.goal }),
+                ...(node.completionCriteria === undefined ? {} : { completionCriteria: [...node.completionCriteria] }),
+              });
+            }
+          }
+        } catch {
+          // 详情不可用：预览退化，不失败。
+        }
+      }
+      if (detailsById.size === 0) {
+        const nodeDetails = this.deps.planNodes.nodeDetails;
+        if (nodeDetails !== undefined) {
+          try {
+            const basic = await nodeDetails.call(this.deps.planNodes, targets);
+            if (basic.ok) {
+              for (const node of basic.nodes) {
+                detailsById.set(node.id, { title: node.title, status: node.status });
+              }
+            }
+          } catch {
+            // 同上。
+          }
+        }
+      }
+
+      // 依赖端点标题：只为已知节点解析，不扩大目标集合。
+      const endpointIds = [...new Set(edges
+        .filter((edge) => targets.includes(edge.nodeId) || targets.includes(edge.requiresNodeId))
+        .flatMap((edge) => [edge.nodeId, edge.requiresNodeId])
+        .filter((id) => !targets.includes(id)))];
+      if (endpointIds.length > 0 && this.deps.planNodes.planTargets !== undefined) {
+        try {
+          const extra = await this.deps.planNodes.planTargets.call(this.deps.planNodes, endpointIds);
+          if (extra.ok) {
+            for (const node of extra.nodes) {
+              detailsById.set(node.id, { title: node.title, status: node.status });
+            }
+          }
+        } catch {
+          // 端点标题缺失时只显示 id。
+        }
+      }
+      const endpointView = (id: string): { id: string; known: boolean; title?: string } => {
+        const detail = detailsById.get(id);
+        return detail?.title === undefined ? { id, known: nodes.nodeIds.has(id) } : { id, known: true, title: detail.title };
+      };
+      const previewTargets: WorkPreviewTarget[] = targets.map((id) => {
+        const detail = detailsById.get(id);
+        const known = nodes.nodeIds.has(id);
+        return {
+          id,
+          known,
+          ...(detail?.title === undefined ? {} : { title: detail.title }),
+          ...(detail?.status === undefined ? {} : { status: detail.status }),
+          ...(detail?.goal === undefined ? {} : { goal: detail.goal }),
+          ...(detail?.completionCriteria === undefined ? {} : { completionCriteria: [...detail.completionCriteria] }),
+          dependsOn: edges.filter((edge) => edge.nodeId === id && !targets.includes(edge.requiresNodeId)).map((edge) => endpointView(edge.requiresNodeId)),
+          requiredBy: edges.filter((edge) => edge.requiresNodeId === id && !targets.includes(edge.nodeId)).map((edge) => endpointView(edge.nodeId)),
+        };
+      });
+      const targetSet = new Set(targets);
+
+      // 公开记录：与目标相交的索引条目（成果／验证／决定都可在此核对）。
+      let records: WorkPreview['publicRecords'] = [];
+      const nodeDetails = this.deps.planNodes.nodeDetails;
+      if (nodeDetails !== undefined) {
+        try {
+          const result = await nodeDetails.call(this.deps.planNodes, targets);
+          if (result.ok) {
+            records = result.records
+              .filter((record) => record.subjectNodeIds.some((id) => targetSet.has(id)))
+              .map((record) => ({
+                id: record.id,
+                kind: record.kind,
+                summary: record.summary,
+                path: record.path,
+                subjectNodeIds: [...record.subjectNodeIds],
+              }));
+          }
+        } catch {
+          // 记录不可用：预览不注入猜测内容。
+        }
+      }
+
+      const chatEntries = aggregate.conversations.links
+        .filter((link) => link.nodeIds.some((id) => targetSet.has(id)))
+        .map((link) => ({ linkId: link.linkId, sessionId: link.sessionId, purpose: link.purpose, origin: link.origin }));
+      // 同会话已关联的其他节点：只作背景，不进入本次范围。
+      const backgroundNodeIds = [...new Set(
+        aggregate.conversations.links
+          .filter((link) => link.sessionId === request.sessionId)
+          .flatMap((link) => link.nodeIds)
+          .filter((id) => !targetSet.has(id)),
+      )];
+
+      const items: ContextItem[] = [{
+        kind: 'decision',
+        source: 'preview:scope',
+        text: `准备确认的工作目的：${request.purpose}；目标 ${targets.join(', ')}；允许动作 ${request.allowedActions.join(', ')}`,
+        nodeIds: [...targets],
+      }];
+      const currentEpoch = await this.currentSourceEpoch(aggregate.instanceId);
+      if (currentEpoch !== null && currentEpoch > request.baseline.sourceEpoch) {
+        items.push({
+          kind: 'unverified',
+          source: `source-generation:${currentEpoch}`,
+          text: `资料源代际已推进（${request.baseline.sourceEpoch}→${currentEpoch}）；预览基于旧资料，新内容待核对`,
+        });
+      }
+      const knownPlanVersion = aggregate.lastObservation?.planVersion;
+      if (knownPlanVersion !== undefined && knownPlanVersion !== null && knownPlanVersion !== request.baseline.planVersion) {
+        items.push({
+          kind: 'unverified',
+          source: `plan-baseline:${knownPlanVersion}`,
+          text: `预览基线与本机已知规划不一致（${request.baseline.planVersion}→${knownPlanVersion}）；提交前请先刷新`,
+        });
+      }
+      const unknownTargets = previewTargets.filter((target) => !target.known).map((target) => target.id);
+      if (unknownTargets.length > 0) {
+        items.push({
+          kind: 'unverified',
+          source: `plan-nodes:${unknownTargets.join(',')}`,
+          text: `目标节点不在当前资料中：${unknownTargets.join(', ')}；待核对，不静默改写`,
+          nodeIds: unknownTargets,
+        });
+      }
+      if (backgroundNodeIds.length > 0) {
+        items.push({
+          kind: 'suggestion',
+          source: `chat-background:${request.sessionId}`,
+          text: `同会话还关联了目标集合外的节点：${backgroundNodeIds.join(', ')}；只作背景，不在本次写范围`,
+          nodeIds: backgroundNodeIds,
+        });
+      }
+      return {
+        status: 'committed' as const,
+        value: {
+          sessionId: request.sessionId,
+          targets: previewTargets,
+          constraints: { allowedActions: [...request.allowedActions], reasonScope: request.reasonScope },
+          baseline: { ...request.baseline },
+          sourceEpoch: currentEpoch,
+          publicRecords: records,
+          chatEntries,
+          backgroundNodeIds,
+          items,
+          generatedAt: this.deps.clock(),
+        },
+        stateRevision: aggregate.revisions.state,
       };
     });
   }
@@ -1159,7 +1410,18 @@ export class WorkService {
   }
 
   private validatePrepareRequest(request: PrepareWorkRequest): WorkRejection | null {
-    if (typeof request.workIntentId !== 'string' || request.workIntentId === '') {
+    return this.validateScope(request, true);
+  }
+
+  /**
+   * 范围校验（prepare 与 preview 共用）：目标、动作、原因范围、目的与基线形状。
+   * `requireIntentId` 仅 prepare 需要（意图要有稳定 id 以便幂等重试）。
+   */
+  private validateScope(
+    request: Omit<PrepareWorkRequest, 'workIntentId'> & { workIntentId?: string },
+    requireIntentId: boolean,
+  ): WorkRejection | null {
+    if (requireIntentId && (typeof request.workIntentId !== 'string' || request.workIntentId === '')) {
       return { status: 'rejected', code: 'operation-mismatch', message: '缺少 workIntentId' };
     }
     if (!Array.isArray(request.nodeIds) || request.nodeIds.length === 0 || !request.nodeIds.every((id) => typeof id === 'string' && id !== '')) {

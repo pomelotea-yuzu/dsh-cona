@@ -29,6 +29,7 @@ export type MigrationPreviewOpView = Exclude<MigrationPreviewOpResult, null>;
 export type MigrationListView = Exclude<MigrationListOpResult, null>;
 import type { ResumeChatPointerView } from '../application/resume-chat.js';
 import type { ChatsView, ConversationOutcome, SessionChoice } from '../application/conversations.js';
+import type { WorkAction } from '../application/work.js';
 
 /** client 侧结果：OwnerDenial 的 null 已在传输层归一为 rejected，不再出现在控制器输入。 */
 type ResumeChatsView = Exclude<ResumeChatsResult, null>;
@@ -131,6 +132,65 @@ export interface RebindDraft {
   recordId: string;
   contentHash: string;
 }
+
+// ---------- 3.2：配置实例上的项目工作 ----------
+
+/** 预览目标（条件、直接依赖与已知性）。 */
+export interface WorkPreviewTargetView {
+  id: string;
+  known: boolean;
+  title?: string;
+  status?: string;
+  goal?: string;
+  completionCriteria?: string[];
+  dependsOn: Array<{ id: string; known: boolean; title?: string }>;
+  requiredBy: Array<{ id: string; known: boolean; title?: string }>;
+}
+
+export type WorkContextItemKind = 'decision' | 'suggestion' | 'unverified';
+
+/** 预览上下文（与运行上下文同源同口径；只读，不构成授权）。 */
+export interface WorkPreviewView {
+  sessionId: string;
+  targets: WorkPreviewTargetView[];
+  constraints: { allowedActions: WorkAction[]; reasonScope: 'public' | 'local' };
+  baseline: { planVersion: string; planRevision: number; sourceEpoch: number };
+  sourceEpoch: number | null;
+  publicRecords: Array<{ id: string; kind: string; summary: string; path: string; subjectNodeIds: string[] }>;
+  chatEntries: Array<{ linkId: string; sessionId: string; purpose: string; origin: string }>;
+  backgroundNodeIds: string[];
+  items: Array<{ kind: WorkContextItemKind; source: string; text: string; nodeIds?: string[] }>;
+  generatedAt: string;
+}
+
+/** 工作草稿：确认前的范围（会话、目标、动作、目的与输入基线）。 */
+export interface WorkDraft {
+  sessionId: string;
+  purpose: string;
+  actions: WorkAction[];
+  reasonScope: 'public' | 'local';
+  nodeIds: string[];
+  workIntentId: string;
+}
+
+export interface WorkState {
+  phase: 'idle' | 'previewing' | 'previewed' | 'preparing' | 'awaiting-message' | 'error';
+  draft: WorkDraft | null;
+  preview: WorkPreviewView | null;
+  notice: { code: string; message: string } | null;
+  /** 已确认范围：在该会话发送下一条消息后由真实消费边界生效。 */
+  started: { workIntentId: string; sessionId: string } | null;
+}
+
+const EMPTY_WORK: WorkState = {
+  phase: 'idle',
+  draft: null,
+  preview: null,
+  notice: null,
+  started: null,
+};
+
+export const WORK_ACTION_OPTIONS: readonly WorkAction[] = ['update', 'record', 'status', 'add', 'split', 'dependencies'];
 
 const EMPTY_CHATS: ChatsState = {
   phase: 'idle',
@@ -294,6 +354,22 @@ export interface OverviewControllerDeps {
     instanceId: string; recordId: string; contentHash: string;
     mode: 'create' | 'link'; sessionId?: string; purpose: string;
   }) => Promise<RebindResumeView>;
+  /** 3.2：工作预览（conaOverview/workPreview；只读）。 */
+  workPreview?: (request: {
+    instanceId: string; sessionId: string; nodeIds: string[]; allowedActions: WorkAction[];
+    reasonScope: 'public' | 'local'; purpose: string;
+    baseline: { planVersion: string; planRevision: number; sourceEpoch: number };
+  }) => Promise<ChatMutationView<WorkPreviewView> | { status: 'rejected'; code: string; message: string }>;
+  /** 3.2：登记意图（conaOverview/workPrepare）。 */
+  workPrepare?: (request: {
+    instanceId: string; workIntentId: string; nodeIds: string[]; allowedActions: WorkAction[];
+    reasonScope: 'public' | 'local'; purpose: string;
+    baseline: { planVersion: string; planRevision: number; sourceEpoch: number };
+  }) => Promise<ChatMutationView<{ workIntentId: string; reused: boolean }>>;
+  /** 3.2：确认范围（conaOverview/workStart；不预填 rpcId）。 */
+  workStart?: (request: { instanceId: string; workIntentId: string; sessionId: string }) => Promise<
+    ChatMutationView<{ workIntentId: string; status: 'awaiting-message' }>
+  >;
 }
 
 export interface OverviewState {
@@ -320,6 +396,8 @@ export interface OverviewState {
   chats: ChatsState;
   /** 3.1：重绑草稿（卡片记录身份）；下一次创建／关联成功后写指针。 */
   rebindDraft: RebindDraft | null;
+  /** 3.2：配置实例的项目工作（草稿、预览、确认与等待消息状态）。 */
+  work: WorkState;
   /** 1.5：迁移操作状态（预览／确认／取消／恢复）。 */
   migration: MigrationState;
   /** 1.1：接入登记状态（预览与显式登记）。 */
@@ -341,6 +419,7 @@ const EMPTY: OverviewState = {
   chatNotice: null,
   chats: EMPTY_CHATS,
   rebindDraft: null,
+  work: EMPTY_WORK,
   migration: EMPTY_MIGRATION,
   register: EMPTY_REGISTER,
 };
@@ -422,6 +501,7 @@ export class ProjectOverviewController {
       chatNotice: null,
       chats: EMPTY_CHATS,
       rebindDraft: null,
+      work: EMPTY_WORK,
       migration: EMPTY_MIGRATION,
       register: EMPTY_REGISTER,
     });
@@ -1154,6 +1234,216 @@ export class ProjectOverviewController {
     } catch (error) {
       if (this.state.selectedId === instanceId) this.chatFailure('transport-failed', (error as Error).message);
     }
+  }
+
+  // ---------- 3.2：配置实例上的项目工作（预览 → 确认 → 等待真实消息边界） ----------
+
+  /** 只有启动配置实例才有工作入口；浏览实例明确不可用（不静默换实例）。 */
+  isWorkEntryAvailable(): boolean {
+    const row = this.selected();
+    return row !== null && row.readable && row.configured === true;
+  }
+
+  private workFailure(code: string, message: string): void {
+    this.patch({ work: { ...EMPTY_WORK, draft: this.state.work.draft, preview: this.state.work.preview, phase: 'error', notice: { code, message } } });
+  }
+
+  /**
+   * 开始填写工作范围：目标 = 树面板当前选择，会话 = 该实例首条可见链接，
+   * 动作默认 update+record（最小可用集合，用户可改）。不落盘。
+   */
+  beginWork(): boolean {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || !this.isWorkEntryAvailable()) {
+      this.workFailure('work-entry-unavailable', '项目工作入口只对启动配置实例可用');
+      return false;
+    }
+    const nodeIds = this.chatNodeIds(instanceId);
+    if (nodeIds.length === 0) {
+      this.workFailure('no-node-selected', '先在树中选择本次工作的目标节点');
+      return false;
+    }
+    const sessionId = this.state.chats.links[0]?.sessionId ?? this.state.chats.sessions[0]?.sessionId ?? '';
+    this.patch({
+      work: {
+        phase: 'idle',
+        draft: {
+          sessionId,
+          purpose: '',
+          actions: ['update', 'record'],
+          reasonScope: 'local',
+          nodeIds,
+          workIntentId: this.deps.newOperationId(),
+        },
+        preview: null,
+        notice: null,
+        started: null,
+      },
+    });
+    return true;
+  }
+
+  /** 修改草稿字段（动作集合只接受已知值）。 */
+  patchWorkDraft(patch: Partial<Omit<WorkDraft, 'workIntentId'>>): void {
+    const draft = this.state.work.draft;
+    if (draft === null) return;
+    const actions = patch.actions === undefined
+      ? draft.actions
+      : patch.actions.filter((action) => WORK_ACTION_OPTIONS.includes(action));
+    this.patch({
+      work: {
+        ...this.state.work,
+        draft: {
+          ...draft,
+          ...patch,
+          ...(patch.actions === undefined ? {} : { actions }),
+        },
+        preview: null,
+        notice: null,
+      },
+    });
+  }
+
+  /** 只读预览：先取当前快照基线，再让宿主按目标集合组装上下文。 */
+  async previewWork(): Promise<'ok' | 'failed' | 'idle'> {
+    const instanceId = this.state.selectedId;
+    const draft = this.state.work.draft;
+    if (instanceId === null || draft === null) return 'idle';
+    if (!this.isWorkEntryAvailable()) {
+      this.workFailure('work-entry-unavailable', '项目工作入口只对启动配置实例可用');
+      return 'failed';
+    }
+    if (draft.sessionId === '') {
+      this.workFailure('session-identity-missing', '先选择一个本机会话');
+      return 'failed';
+    }
+    if (draft.purpose.trim() === '') {
+      this.workFailure('missing-purpose', '用途不能为空');
+      return 'failed';
+    }
+    if (draft.actions.length === 0) {
+      this.workFailure('missing-actions', '至少授权一个动作');
+      return 'failed';
+    }
+    const preview = this.deps.workPreview;
+    if (preview === undefined) {
+      this.workFailure('work-unavailable', '此宿主未提供工作预览入口');
+      return 'failed';
+    }
+    this.patch({ work: { ...this.state.work, phase: 'previewing', notice: null } });
+    const transport = this.deps.transportFor(instanceId);
+    let baseline;
+    try {
+      baseline = await transport.snapshot({ connectionGeneration: 0 });
+    } catch (error) {
+      if (this.state.selectedId === instanceId) this.workFailure('transport-failed', (error as Error).message);
+      return 'failed';
+    }
+    if (this.state.selectedId !== instanceId) return 'ok';
+    if (baseline.status !== 'snapshot') {
+      const code = baseline.status === 'rejected' ? baseline.code : `unsynced-${baseline.reason}`;
+      const message = baseline.status === 'rejected' ? baseline.message : baseline.detail;
+      this.workFailure(code, message);
+      return 'failed';
+    }
+    const base = {
+      planVersion: baseline.snapshot.planVersion,
+      planRevision: baseline.snapshot.planRevision,
+      sourceEpoch: baseline.snapshot.sourceEpoch,
+    };
+    try {
+      const result = await preview({
+        instanceId,
+        sessionId: draft.sessionId,
+        nodeIds: [...draft.nodeIds],
+        allowedActions: [...draft.actions],
+        reasonScope: draft.reasonScope,
+        purpose: draft.purpose.trim(),
+        baseline: base,
+      });
+      if (this.state.selectedId !== instanceId) return 'ok';
+      if (result.status === 'committed') {
+        this.patch({
+          work: {
+            phase: 'previewed',
+            draft: this.state.work.draft === null ? null : { ...this.state.work.draft },
+            preview: result.value,
+            notice: null,
+            started: null,
+          },
+        });
+        return 'ok';
+      }
+      this.workFailure(result.code, result.message);
+      return 'failed';
+    } catch (error) {
+      if (this.state.selectedId === instanceId) this.workFailure('transport-failed', (error as Error).message);
+      return 'failed';
+    }
+  }
+
+  /**
+   * 确认范围：登记意图（pending）→ 确认等待该会话下一条消息 → 记录待生效提示。
+   * 任一步失败都保留预览与草稿；绑定只在真实消费边界形成。
+   */
+  async confirmWork(): Promise<'ok' | 'failed' | 'idle'> {
+    const instanceId = this.state.selectedId;
+    const draft = this.state.work.draft;
+    const preview = this.state.work.preview;
+    if (instanceId === null || draft === null || preview === null) return 'idle';
+    if (this.state.work.phase === 'preparing') return 'idle';
+    const prepare = this.deps.workPrepare;
+    const start = this.deps.workStart;
+    if (prepare === undefined || start === undefined) {
+      this.workFailure('work-unavailable', '此宿主未提供工作确认入口');
+      return 'failed';
+    }
+    this.patch({ work: { ...this.state.work, phase: 'preparing', notice: null } });
+    try {
+      const prepared = await prepare({
+        instanceId,
+        workIntentId: draft.workIntentId,
+        nodeIds: [...draft.nodeIds],
+        allowedActions: [...draft.actions],
+        reasonScope: draft.reasonScope,
+        purpose: draft.purpose.trim(),
+        baseline: preview.baseline,
+      });
+      if (this.state.selectedId !== instanceId) return 'ok';
+      if (prepared.status !== 'committed') {
+        this.workFailure(prepared.code, prepared.message);
+        return 'failed';
+      }
+      const started = await start({ instanceId, workIntentId: draft.workIntentId, sessionId: draft.sessionId });
+      if (this.state.selectedId !== instanceId) return 'ok';
+      if (started.status !== 'committed') {
+        this.workFailure(started.code, started.message);
+        return 'failed';
+      }
+      this.patch({
+        work: {
+          ...this.state.work,
+          phase: 'awaiting-message',
+          notice: null,
+          started: { workIntentId: draft.workIntentId, sessionId: draft.sessionId },
+        },
+      });
+      return 'ok';
+    } catch (error) {
+      if (this.state.selectedId === instanceId) this.workFailure('transport-failed', (error as Error).message);
+      return 'failed';
+    }
+  }
+
+  /** 丢弃工作草稿与预览（已确认待发的意图保留，不在这里撤销）。 */
+  cancelWork(): void {
+    this.patch({ work: EMPTY_WORK });
+  }
+
+  /** 打开已确认范围所在的会话，让用户在那里发送下一条消息。 */
+  openWorkSession(): void {
+    const started = this.state.work.started;
+    if (started !== null) this.deps.openSession(started.sessionId);
   }
 
   /** 取（或建）某实例的面板控制器；同实例复用，草稿/选择/代际保持。 */

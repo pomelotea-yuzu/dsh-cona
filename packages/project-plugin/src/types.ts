@@ -55,9 +55,13 @@ export type {
   ContinueScopeRequest,
   ContextItem,
   WorkAction,
+  WorkBaseline,
   WorkContext,
   WorkListView,
   WorkOutcome,
+  WorkPreview,
+  WorkPreviewRequest,
+  WorkPreviewTarget,
 } from './application/work.js'
 export type {
   ConaWorkObserveRequest,
@@ -100,6 +104,14 @@ export type {
   ConaChatTargetRequest,
   ConaRebindResumeChatRequest,
   RebindResumeChatResult,
+  // R2 收尾 3.2：配置实例上的项目工作（conaOverview work* 边界类型）。
+  ConaOverviewWorkPreviewRequest,
+  ConaOverviewWorkPrepareRequest,
+  ConaOverviewWorkStartRequest,
+  OverviewWorkPreviewResult,
+  OverviewWorkPrepareResult,
+  OverviewWorkStartResult,
+  OverviewWorkListResult,
 } from './host/overview-service.js'
 // R2 收尾 1.4/1.5：位置迁移与接入登记（conaOverview migration*/register* 边界类型）。
 export type { LocationKind } from './application/location.js'

@@ -108,7 +108,8 @@ export interface ConaWorkPrepareRequest {
 /** “开始工作”确认：登记期望消息来源（Client prompt requestId ＝ source.rpcId）。 */
 export interface ConaWorkStartRequest {
   workIntentId: string;
-  rpcId: string;
+  /** 期望消息 rpcId；面板不预知时可省略，改按 sessionId 匹配下一条用户消息。 */
+  rpcId?: string;
   sessionId?: string;
 }
 
@@ -426,7 +427,7 @@ export class ConaProjectService extends TypertRemoteService {
     if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
     return runtime.value.work.startWork({
       workIntentId: request.workIntentId,
-      rpcId: request.rpcId,
+      ...(request.rpcId === undefined ? {} : { rpcId: request.rpcId }),
       ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
     })
   }

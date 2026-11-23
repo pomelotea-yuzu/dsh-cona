@@ -147,6 +147,11 @@ export class InstanceRuntimeRegistry {
     return entry === undefined ? undefined : this.openEntry(entry);
   }
 
+  /** 宿主启动配置实例 id；无配置实例时 undefined。项目工作入口只对它可用。 */
+  configuredInstanceId(): string | undefined {
+    return this.deps.configured?.instanceId;
+  }
+
   /** 已登记实例 id 集合（供定向访问的准入判断）。 */
   async knownInstanceIds(): Promise<Set<string>> {
     const entries = await this.deps.listEntries();

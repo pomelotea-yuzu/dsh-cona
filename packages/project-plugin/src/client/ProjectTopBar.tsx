@@ -7,7 +7,7 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import type { PanelState } from './panel-controller.js';
 import type { LocaleKey } from './locales.js';
 import type { ResumeChatPointerView } from '../application/resume-chat.js';
-import { ProjectOverviewController, type OverviewRow, type OverviewState, type ResumeCardView as ResumeCardState } from './project-overview-controller.js';
+import { ProjectOverviewController, WORK_ACTION_OPTIONS, type OverviewRow, type OverviewState, type ResumeCardView as ResumeCardState } from './project-overview-controller.js';
 
 export interface ProjectTopBarInjected {
   controller: ProjectOverviewController;
@@ -132,6 +132,7 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
           </ul>
           <ResumeCardView state={state.resumeCard} chatNotice={state.chatNotice} controller={controller} t={t} />
           <ChatSection controller={controller} state={state} t={t} />
+          <WorkSection controller={controller} state={state} t={t} />
           <ResumeSaveSection controller={controller} state={state} t={t} />
           <MigrationSection controller={controller} state={state} t={t} />
           <RegisterSection controller={controller} state={state} t={t} />
@@ -703,6 +704,191 @@ function ChatSection(props: {
       {chats.notice !== null ? (
         <p data-cona-chat-notice="1" style={{ ...rowStyle, color: '#b3261e' }}>
           {chats.notice.code}{chats.notice.message ? `: ${chats.notice.message}` : ''}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+const WORK_ACTION_KEY: Record<string, LocaleKey> = {
+  update: 'workActionUpdate',
+  record: 'workActionRecord',
+  status: 'workActionStatus',
+  add: 'workActionAdd',
+  split: 'workActionSplit',
+  dependencies: 'workActionDependencies',
+};
+
+const ITEM_KIND_KEY: Record<string, LocaleKey> = {
+  decision: 'workItemDecision',
+  suggestion: 'workItemSuggestion',
+  unverified: 'workItemUnverified',
+};
+
+/**
+ * 3.2 配置实例的项目工作：从当前选择与会话起草范围 → 预览上下文 → 确认等待消息。
+ * 浏览实例不渲染（实例行已提示入口不可用）。
+ */
+function WorkSection(props: {
+  controller: ProjectOverviewController;
+  state: OverviewState;
+  t: TopTranslate;
+}): JSX.Element | null {
+  const { controller, state, t } = props;
+  const row = state.instances.find((item) => item.instanceId === state.selectedId);
+  if (state.selectedId === null || row === undefined || row.readable !== true || row.configured !== true) return null;
+  const work = state.work;
+  const draft = work.draft;
+
+  if (work.started !== null) {
+    return (
+      <section data-cona-work="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
+        <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>{t('workTitle')}</h4>
+        <p data-cona-work-awaiting="1" style={rowStyle}>{t('workAwaitingMessage')}</p>
+        <button type="button" data-cona-work-open-session="1" onClick={() => { controller.openWorkSession(); }}>
+          {t('workOpenSession')}
+        </button>
+        <button type="button" onClick={() => { controller.cancelWork(); }}>
+          {t('workClose')}
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <section data-cona-work="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
+      <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>{t('workTitle')}</h4>
+      {draft === null ? (
+        <button type="button" data-cona-work-begin="1" onClick={() => { controller.beginWork(); }}>
+          {t('workBegin')}
+        </button>
+      ) : (
+        <>
+          <p style={rowStyle}>{t('workTargets', { count: String(draft.nodeIds.length) })}</p>
+          <label style={{ ...rowStyle, display: 'block' }}>{t('workSessionLabel')}</label>
+          <select
+            data-cona-work-session="1"
+            style={fieldStyle}
+            value={draft.sessionId}
+            onChange={(e) => controller.patchWorkDraft({ sessionId: e.target.value })}
+          >
+            <option value="">{t('workSessionNone')}</option>
+            {state.chats.sessions.map((session) => (
+              <option key={session.sessionId} value={session.sessionId}>
+                {session.sessionId.slice(0, 8)}{session.blank ? ` · ${t('chatSessionBlank')}` : ''}
+              </option>
+            ))}
+          </select>
+          <label style={{ ...rowStyle, display: 'block' }}>{t('workPurposeLabel')}</label>
+          <input
+            data-cona-work-purpose="1"
+            style={fieldStyle}
+            value={draft.purpose}
+            onChange={(e) => controller.patchWorkDraft({ purpose: e.target.value })}
+          />
+          <div data-cona-work-actions="1" style={rowStyle}>
+            {WORK_ACTION_OPTIONS.map((action) => (
+              <label key={action} style={{ marginRight: 8 }}>
+                <input
+                  type="checkbox"
+                  data-cona-work-action={action}
+                  checked={draft.actions.includes(action)}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...draft.actions, action]
+                      : draft.actions.filter((item) => item !== action);
+                    controller.patchWorkDraft({ actions: next });
+                  }}
+                />
+                {t(WORK_ACTION_KEY[action] ?? 'workActionUpdate')}
+              </label>
+            ))}
+          </div>
+          <label style={{ ...rowStyle, display: 'block' }}>{t('workReasonScopeLabel')}</label>
+          <select
+            data-cona-work-reason-scope="1"
+            style={fieldStyle}
+            value={draft.reasonScope}
+            onChange={(e) => controller.patchWorkDraft({ reasonScope: e.target.value === 'public' ? 'public' : 'local' })}
+          >
+            <option value="local">{t('workReasonScopeLocal')}</option>
+            <option value="public">{t('workReasonScopePublic')}</option>
+          </select>
+          <div style={{ marginTop: 6 }}>
+            <button
+              type="button"
+              data-cona-work-preview="1"
+              disabled={work.phase === 'previewing' || work.phase === 'preparing'}
+              onClick={() => { void controller.previewWork(); }}
+            >
+              {t('workPreview')}
+            </button>
+            <button
+              type="button"
+              data-cona-work-confirm="1"
+              disabled={work.preview === null || work.phase === 'preparing'}
+              onClick={() => { void controller.confirmWork(); }}
+            >
+              {t('workConfirm')}
+            </button>
+            <button type="button" onClick={() => { controller.cancelWork(); }}>
+              {t('workCancel')}
+            </button>
+          </div>
+        </>
+      )}
+      {work.preview !== null ? (
+        <div data-cona-work-preview-panel="1" style={{ marginTop: 8 }}>
+          <p style={rowStyle}>
+            {t('workBaseline', {
+              version: work.preview.baseline.planVersion.slice(0, 12),
+              revision: String(work.preview.baseline.planRevision),
+              epoch: String(work.preview.baseline.sourceEpoch),
+            })}
+          </p>
+          {work.preview.targets.map((target) => (
+            <div key={target.id} data-cona-work-target={target.id} style={rowStyle}>
+              <strong>{target.title ?? target.id}</strong>
+              {target.status !== undefined ? ` · ${target.status}` : ''}
+              {target.goal !== undefined ? <div>{t('workGoal', { text: target.goal })}</div> : null}
+              {target.completionCriteria !== undefined && target.completionCriteria.length > 0 ? (
+                <div>{t('workCriteria', { text: target.completionCriteria.join('；') })}</div>
+              ) : null}
+              {target.dependsOn.length > 0 ? (
+                <div>{t('workDependsOn', { text: target.dependsOn.map((dep) => dep.title ?? dep.id).join('、') })}</div>
+              ) : null}
+              {target.requiredBy.length > 0 ? (
+                <div>{t('workRequiredBy', { text: target.requiredBy.map((dep) => dep.title ?? dep.id).join('、') })}</div>
+              ) : null}
+            </div>
+          ))}
+          {work.preview.publicRecords.length > 0 ? (
+            <div style={rowStyle}>
+              {t('workRecords', { count: String(work.preview.publicRecords.length) })}
+              {work.preview.publicRecords.map((record) => (
+                <div key={record.id} style={{ fontSize: 12 }}>· {record.kind}：{record.summary}</div>
+              ))}
+            </div>
+          ) : null}
+          {work.preview.backgroundNodeIds.length > 0 ? (
+            <p data-cona-work-background="1" style={{ ...rowStyle, color: '#8a6d3b' }}>
+              {t('workBackground', { count: String(work.preview.backgroundNodeIds.length) })}
+            </p>
+          ) : null}
+          {work.preview.items.map((item) => (
+            <p
+              key={`${item.kind}:${item.source}`}
+              data-cona-work-item={item.kind}
+              style={{ ...rowStyle, color: item.kind === 'unverified' ? '#8a6d3b' : undefined }}
+            >
+              [{t(ITEM_KIND_KEY[item.kind] ?? 'workItemDecision')}] {item.text}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {work.notice !== null ? (
+        <p data-cona-work-notice="1" style={{ ...rowStyle, color: '#b3261e' }}>
+          {work.notice.code}{work.notice.message ? `: ${work.notice.message}` : ''}
         </p>
       ) : null}
     </section>

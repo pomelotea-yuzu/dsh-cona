@@ -21,6 +21,7 @@ import {
   type ResumeCardView,
   type CodeObservationView,
   type ChatMutationView,
+  type WorkPreviewView,
 } from './project-overview-controller.js'
 import type { PanelTransport } from './api.js'
 import type { ResumePayload } from '../domain/resume.js'
@@ -260,6 +261,32 @@ function chatRebindResume(request: {
   )
 }
 
+// ---------- 3.2：配置实例上的项目工作 ----------
+
+function workPreview(request: Parameters<NonNullable<import('./project-overview-controller.js').OverviewControllerDeps['workPreview']>>[0]): Promise<ChatMutationView<WorkPreviewView> | { status: 'rejected'; code: string; message: string }> {
+  return callOverview(
+    'workPreview',
+    { ...request },
+    (code, message) => ({ status: 'rejected' as const, code, message }),
+  )
+}
+
+function workPrepare(request: Parameters<NonNullable<import('./project-overview-controller.js').OverviewControllerDeps['workPrepare']>>[0]): Promise<ChatMutationView<{ workIntentId: string; reused: boolean }>> {
+  return callOverview(
+    'workPrepare',
+    { ...request },
+    (code, message) => ({ status: 'rejected' as const, code, message }),
+  )
+}
+
+function workStart(request: { instanceId: string; workIntentId: string; sessionId: string }): Promise<ChatMutationView<{ workIntentId: string; status: 'awaiting-message' }>> {
+  return callOverview(
+    'workStart',
+    { ...request },
+    (code, message) => ({ status: 'rejected' as const, code, message }),
+  )
+}
+
 /**
  * 迁移/登记的通用 POST（1.4/1.5）：结果形状是 `{ ok }` 或 `{ status }` 的并集，
  * 与 callOverview 的 status 约束不同。HTTP 失败／形状不合法／OwnerDenial null
@@ -361,6 +388,10 @@ export function apply(ctx: ClientContext): void {
     unlinkChat: (request) => chatUnlink(request.instanceId, request.operationId, request.linkId),
     resolveChatLinkTarget: chatTarget,
     rebindResumeChat: chatRebindResume,
+    // 3.2：配置实例上的项目工作（预览 → 登记意图 → 确认等待消息）。
+    workPreview,
+    workPrepare,
+    workStart,
     // 1.1 探针实证：fiber 注入 uiWorkspace 后 openSession(id) 落到指定 Session。
     // 宿主生成的类型不随插件分发，这里按探针实证的最小结构访问。
     openSession: (sessionId) => {

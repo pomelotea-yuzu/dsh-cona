@@ -35,6 +35,13 @@ import type {
 } from '../application/migration.js'
 import type { MigrationRecord } from '../application/local-state.js'
 import type { LocationKind } from '../application/location.js'
+import type {
+  WorkAction,
+  WorkBaseline,
+  WorkListView,
+  WorkOutcome,
+  WorkPreview,
+} from '../application/work.js'
 import type { LocalStateService } from '../application/local-state.js'
 import type {
   InstanceRuntimeRegistry,
@@ -219,6 +226,45 @@ export type RebindResumeChatResult =
     }
   | { status: 'rejected'; code: string; message: string }
   | OwnerDenial;
+
+// ---------- 3.2：配置实例上从接续摘要发起多节点工作 ----------
+
+/** 工作预览请求：会话须已由宿主核对属于本实例；预览只读，不建立绑定。 */
+export interface ConaOverviewWorkPreviewRequest {
+  instanceId: string;
+  sessionId: string;
+  nodeIds: string[];
+  allowedActions: WorkAction[];
+  reasonScope: 'public' | 'local';
+  purpose: string;
+  baseline: WorkBaseline;
+}
+
+/** 意图登记请求：预览通过后确认范围；workIntentId 用于幂等重试。 */
+export interface ConaOverviewWorkPrepareRequest {
+  instanceId: string;
+  workIntentId: string;
+  nodeIds: string[];
+  allowedActions: WorkAction[];
+  reasonScope: 'public' | 'local';
+  purpose: string;
+  baseline: WorkBaseline;
+}
+
+/**
+ * 开始工作：只接受已核对的会话身份，不预知宿主消息 rpcId——
+ * 确认后该会话的下一条用户消息在真实消费边界建立唯一绑定。
+ */
+export interface ConaOverviewWorkStartRequest {
+  instanceId: string;
+  workIntentId: string;
+  sessionId: string;
+}
+
+export type OverviewWorkPreviewResult = WorkOutcome<WorkPreview> | { status: 'rejected'; code: string; message: string };
+export type OverviewWorkPrepareResult = WorkOutcome<{ workIntentId: string; reused: boolean }> | { status: 'rejected'; code: string; message: string };
+export type OverviewWorkStartResult = WorkOutcome<{ workIntentId: string; status: 'awaiting-message' }> | { status: 'rejected'; code: string; message: string };
+export type OverviewWorkListResult = WorkOutcome<WorkListView> | { status: 'rejected'; code: string; message: string };
 
 export interface ConaResumeCandidateRequest {
   instanceId: string;
@@ -759,6 +805,125 @@ export class ConaOverviewService extends TypertRemoteService {
       return { status: 'rejected', code: pointer.code, message: pointer.message }
     }
     return { status: 'linked', recordId: request.recordId, linkId, sessionId, purpose, reusedLink }
+  }
+
+  // ---------- 3.2：配置实例上的项目工作（预览 → 确认 → 等待真实消息边界） ----------
+
+  /**
+   * 工作入口准入：必须是宿主启动配置实例（项目工具与宿主事件都装配在它身上）。
+   * 浏览实例只明确提示不可用，不静默回退到配置实例、也不建绑定。
+   */
+  private async requireWorkRuntime(instanceId: unknown): Promise<
+    | { denied: { status: 'rejected'; code: string; message: string } }
+    | { runtime: import('./project-service.js').ConaProjectRuntime }
+  > {
+    const badId = this.requireId(instanceId)
+    if (badId !== null) return { denied: { status: 'rejected', code: badId.code, message: badId.message } }
+    if (this.deps.registry.configuredInstanceId() !== instanceId) {
+      return {
+        denied: {
+          status: 'rejected',
+          code: 'work-entry-unavailable',
+          message: '项目工作入口只对启动配置实例可用；浏览实例只能编辑、保存接续与管理本机聊天',
+        },
+      }
+    }
+    const resolved = await this.resolveInstance(instanceId as string)
+    if ('denied' in resolved) return { denied: resolved.denied }
+    if (!resolved.runtime.ok) {
+      return { denied: { status: 'rejected', code: resolved.runtime.code, message: resolved.runtime.message } }
+    }
+    return { runtime: resolved.runtime.value }
+  }
+
+  /** 会话必须属于本实例工作区（目录按实例 cwd 过滤）且当前可见。 */
+  private async sessionBelongsTo(
+    runtime: import('./project-service.js').ConaProjectRuntime,
+    sessionId: string,
+  ): Promise<{ status: 'rejected'; code: string; message: string } | null> {
+    const sessions = await runtime.chats.listSessions()
+    if (sessions.status !== 'committed') {
+      return { status: 'rejected', code: 'session-directory-unavailable', message: '宿主会话目录不可读；不确认工作范围' }
+    }
+    if (!sessions.value.sessions.some((session) => session.sessionId === sessionId)) {
+      return {
+        status: 'rejected',
+        code: 'session-not-visible',
+        message: '该会话不在本实例工作区或已在宿主中删除；请重新选择',
+      }
+    }
+    return null
+  }
+
+  /** 预览上下文：目标条件、依赖、约束、基线、公开记录与本机聊天入口；只读。 */
+  @Remote('workPreview')
+  async workPreview(request: ConaOverviewWorkPreviewRequest): Promise<OverviewWorkPreviewResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.sessionId !== 'string' || request.sessionId === '') {
+      return { status: 'rejected', code: 'session-identity-missing', message: '缺少已核对的本机会话 id' }
+    }
+    const work = await this.requireWorkRuntime(request?.instanceId)
+    if ('denied' in work) return work.denied
+    const visible = await this.sessionBelongsTo(work.runtime, request.sessionId)
+    if (visible !== null) return visible
+    return work.runtime.work.previewWork({
+      sessionId: request.sessionId,
+      nodeIds: [...request.nodeIds],
+      allowedActions: [...request.allowedActions],
+      reasonScope: request.reasonScope,
+      purpose: request.purpose,
+      baseline: { ...request.baseline },
+    })
+  }
+
+  /** 登记意图（pending）：目标集合、动作与目的冻结；范围尚未生效。 */
+  @Remote('workPrepare')
+  async workPrepare(request: ConaOverviewWorkPrepareRequest): Promise<OverviewWorkPrepareResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const work = await this.requireWorkRuntime(request?.instanceId)
+    if ('denied' in work) return work.denied
+    return work.runtime.work.prepareWork({
+      workIntentId: request.workIntentId,
+      nodeIds: [...request.nodeIds],
+      allowedActions: [...request.allowedActions],
+      reasonScope: request.reasonScope,
+      purpose: request.purpose,
+      baseline: { ...request.baseline },
+      origin: 'panel',
+    })
+  }
+
+  /**
+   * 开始工作：确认范围并在指定会话等待下一条用户消息。
+   * 不预填 rpcId——绑定只在真实消费边界形成，确认动作本身不给任何写授权。
+   */
+  @Remote('workStart')
+  async workStart(request: ConaOverviewWorkStartRequest): Promise<OverviewWorkStartResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.workIntentId !== 'string' || request.workIntentId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 workIntentId' }
+    }
+    if (typeof request.sessionId !== 'string' || request.sessionId === '') {
+      return { status: 'rejected', code: 'session-identity-missing', message: '缺少已核对的会话 id' }
+    }
+    const work = await this.requireWorkRuntime(request?.instanceId)
+    if ('denied' in work) return work.denied
+    const visible = await this.sessionBelongsTo(work.runtime, request.sessionId)
+    if (visible !== null) return visible
+    return work.runtime.work.startWork({ workIntentId: request.workIntentId, sessionId: request.sessionId })
+  }
+
+  /** 工作意图与运行列表：确认后回读状态（awaiting-message／active／blocked 与接续历史）。 */
+  @Remote('workList')
+  async workList(request: { instanceId: string }): Promise<OverviewWorkListResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const work = await this.requireWorkRuntime(request?.instanceId)
+    if ('denied' in work) return work.denied
+    return work.runtime.work.listWork()
   }
 
   /** 聊天写入口的公共参数校验：实例、operationId、非空节点集合与非空用途。 */
