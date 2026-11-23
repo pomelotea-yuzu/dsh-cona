@@ -44,3 +44,21 @@ export { validateRelativePath } from './relative-path.js';
 export type { RelativePathError, RelativePathErrorCode, RelativePathResult } from './relative-path.js';
 export { updateNode, setNodeStatus, appendRecordIndex, applyPlanCommand } from './commands.js';
 export type { NodePatch, PlanCommand } from './commands.js';
+export {
+  PLAN_INVERSE_VERSION,
+  INVERSE_FIELDS,
+  buildPlanInverse,
+  validatePlanInverse,
+  checkInverseState,
+  applyPlanInverse,
+} from './inverse.js';
+export type {
+  InverseField,
+  InverseFieldValue,
+  InverseFieldChange,
+  InverseDependencyChange,
+  InverseReplacement,
+  InverseDirection,
+  InverseConflict,
+  PlanInverse,
+} from './inverse.js';

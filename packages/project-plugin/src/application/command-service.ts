@@ -5,7 +5,17 @@
 
 import { applyPlanCommand, appendRecordIndex, type NodePatch, type PlanCommand } from '../domain/commands.js';
 import type { GroupContent, MergeDependencyResolution } from '../domain/transforms.js';
-import { buildReplacementReplaceText, REPLACEMENT_SUMMARY_PREFIX } from '../domain/replacement.js';
+import { buildReplacementClearText, buildReplacementReplaceText, REPLACEMENT_SUMMARY_PREFIX } from '../domain/replacement.js';
+import { computePlanVersion } from '../domain/canonical/plan-fingerprint.js';
+import {
+  applyPlanInverse,
+  buildPlanInverse,
+  checkInverseState,
+  validatePlanInverse,
+  type InverseDirection,
+  type InverseReplacement,
+  type PlanInverse,
+} from '../domain/inverse.js';
 import {
   FEATURE_DEVELOPMENT_PRESET,
   validatePreset,
@@ -81,6 +91,13 @@ export interface InsertPresetCommand {
   beforeNodeId: string | null;
 }
 
+/** 撤销/重做：以原操作的 operationId 为目标，确认预览指纹后从私有历史重算候选。 */
+export interface UndoPlanEditCommand {
+  type: 'undo-plan-edit' | 'redo-plan-edit';
+  targetOperationId: string;
+  previewDigest: string;
+}
+
 export type Command =
   | { type: 'add-nodes'; nodes: NewNodeInput[] }
   | { type: 'update-node'; nodeId: string; patch: NodePatch }
@@ -104,10 +121,87 @@ export type Command =
   | { type: 'set-node-status'; nodeId: string; status: NodeStatus }
   | MoveNodeCommand
   | InsertPresetCommand
+  | UndoPlanEditCommand
   | AppendRecordCommand;
 
-/** 只能由 owner 发起的结构命令；agent-work 上下文直达须在准入阶段拒绝。 */
-const OWNER_ONLY_COMMANDS = new Set<string>(['move-node', 'insert-preset', 'group-nodes', 'merge-nodes', 'copy-subtree']);
+/** 只能由 owner 发起的结构与逆向命令；agent-work 上下文直达须在准入阶段拒绝。 */
+const OWNER_ONLY_COMMANDS = new Set<string>([
+  'move-node', 'insert-preset', 'group-nodes', 'merge-nodes', 'copy-subtree', 'undo-plan-edit', 'redo-plan-edit',
+]);
+
+/** 可撤销的规划编辑（append-record 与逆向命令自身不写入新的逆向信息）。 */
+const INVERTIBLE_COMMANDS = new Set<string>([
+  'add-nodes', 'update-node', 'split-node', 'group-nodes', 'merge-nodes', 'copy-subtree',
+  'set-dependencies', 'set-node-status', 'move-node', 'insert-preset',
+]);
+
+/** 逆向命令的方向与目标。 */
+function inverseCommandOf(command: Command): (UndoPlanEditCommand & { direction: InverseDirection }) | null {
+  if (command.type === 'undo-plan-edit' || command.type === 'redo-plan-edit') {
+    return { ...command, direction: command.type === 'undo-plan-edit' ? 'undo' : 'redo' };
+  }
+  return null;
+}
+
+/** 只读预览请求：不写任何文件，返回确认指纹、影响摘要与冲突对象。 */
+export interface InversePreviewRequest {
+  instanceId: string;
+  targetOperationId: string;
+  direction: InverseDirection;
+}
+
+export interface InverseConflictView {
+  code: string;
+  message: string;
+  kind?: string;
+  nodeId?: string;
+  field?: string;
+}
+
+export type InversePreviewResult =
+  | {
+      status: 'available';
+      previewDigest: string;
+      direction: InverseDirection;
+      target: { operationId: string; commandType: string; sourceEpoch: number; createdAt: string; afterPlanVersion: string };
+      inverse: {
+        affectedNodeIds: string[];
+        fieldCount: number;
+        generatedNodeCount: number;
+        removedNodeCount: number;
+        dependencyChangeCount: number;
+        replacement?: InverseReplacement;
+      };
+      current: CommandCurrent;
+    }
+  | { status: 'unavailable' | 'conflict' | 'not-found'; direction: InverseDirection; message: string; conflicts?: InverseConflictView[]; current?: CommandCurrent };
+
+/** 历史项：每条带逆向信息的已提交 owner 规划操作及其当前撤销/重做可用性。 */
+export interface UndoHistoryEntry {
+  operationId: string;
+  commandType: string;
+  createdAt: string;
+  sourceEpoch: number;
+  beforePlanVersion: string;
+  afterPlanVersion: string;
+  affectedNodeIds: string[];
+  canUndo: boolean;
+  canRedo: boolean;
+  reason?: string;
+}
+
+export type UndoHistoryResult =
+  | { status: 'committed'; instanceId: string; entries: UndoHistoryEntry[] }
+  | { status: 'rejected'; code: string; message: string };
+
+/** 提交时从私有历史解析出的逆向上下文（只在实例队列内构造，不进入公开资料）。 */
+interface InverseContext {
+  direction: InverseDirection;
+  targetOperationId: string;
+  inverse: PlanInverse;
+  /** 预览指纹：确认后基线或目标变化都会导致不匹配。 */
+  previewDigest: string;
+}
 
 /** 随包预设目录：按 ID 与版本精确匹配，未知 ID／不可用版本返回稳定诊断。 */
 export interface PresetCatalog {
@@ -354,6 +448,203 @@ export class ProjectCommandService {
       command: envelope.command,
     };
     return 'sha256:' + this.deps.sha256(new TextEncoder().encode(JSON.stringify(stableValue(payload))));
+  }
+
+  /**
+   * 确认预览指纹（tasks 2.3）：覆盖方向、目标操作、目标逆向信息与当前基线。
+   * 预览后若目标操作、资料版本或源代际变化，提交时的重算值即不匹配，拒绝执行。
+   */
+  private inversePreviewDigest(
+    request: { targetOperationId: string; direction: InverseDirection },
+    inverse: PlanInverse,
+    current: CommandCurrent,
+  ): string {
+    const payload = {
+      targetOperationId: request.targetOperationId,
+      direction: request.direction,
+      inverseSourceEpoch: inverse.sourceEpoch,
+      beforePlanVersion: inverse.beforePlanVersion,
+      afterPlanVersion: inverse.afterPlanVersion,
+      affectedNodeIds: inverse.affectedNodeIds,
+      current,
+    };
+    return 'sha256:' + this.deps.sha256(new TextEncoder().encode(JSON.stringify(stableValue(payload))));
+  }
+
+  /** 读取可撤销操作的已核对逆向信息；无逆向信息、归属不符或未提交都给出原因。 */
+  private inverseOfRecord(
+    record: OperationRecord | undefined,
+    origin: OperationOrigin,
+  ): { ok: true; inverse: PlanInverse; record: OperationRecord } | { ok: false; reason: string } {
+    if (record === undefined) return { ok: false, reason: '目标操作不存在' };
+    if (record.status !== 'committed' || record.result === undefined) {
+      return { ok: false, reason: '目标操作尚未提交成功，没有可核对的回执' };
+    }
+    if (!sameOrigin(record.origin, origin)) {
+      return { ok: false, reason: '目标操作属于其他调用归属，不提供逆向信息' };
+    }
+    const inverse = validatePlanInverse(record.inverse);
+    if (inverse === null) {
+      return { ok: false, reason: '旧操作没有逆向信息，不能撤销或重做' };
+    }
+    if (inverse.operationId !== record.operationId) {
+      return { ok: false, reason: '逆向信息的操作 id 与回执不一致' };
+    }
+    return { ok: true, inverse, record };
+  }
+
+  /** 只读安全核对：换源、字段/依赖变化、生成节点被引用、活动 WorkRun。 */
+  private inverseSafety(
+    inverse: PlanInverse,
+    direction: InverseDirection,
+    doc: ProjectDocument,
+    aggregate: InstanceAggregate,
+    sourceEpoch: number,
+  ): InverseConflictView[] {
+    const conflicts: InverseConflictView[] = [];
+    if (inverse.sourceEpoch !== sourceEpoch) {
+      conflicts.push({ code: 'source-changed', message: `原操作源代际 ${inverse.sourceEpoch} 与当前 ${sourceEpoch} 不同；换源后须重新核对` });
+    }
+    const state = checkInverseState(doc.plan, inverse, direction);
+    if (!state.ok) {
+      for (const item of state.conflicts) {
+        conflicts.push({ code: item.code, message: item.message, kind: item.kind, nodeId: item.nodeId, field: item.field });
+      }
+    }
+    // 撤销会移除原生成节点：若其已获得公开记录、聊天或依赖引用，属不可逆场景。
+    const touchedIds = new Set(inverse.affectedNodeIds);
+    if (direction === 'undo') {
+      const generated = new Set(inverse.generatedNodes.map((node) => node.id));
+      if (generated.size > 0) {
+        for (const record of doc.records) {
+          for (const id of record.subjectNodeIds) {
+            if (generated.has(id)) {
+              conflicts.push({ code: 'inverse-node-in-use', message: `节点 ${id} 已被公开记录 ${record.id} 引用`, kind: 'record', nodeId: id });
+            }
+          }
+        }
+        for (const link of aggregate.conversations.links) {
+          for (const id of link.nodeIds) {
+            if (generated.has(id)) {
+              conflicts.push({ code: 'inverse-node-in-use', message: `节点 ${id} 已关联本机聊天 ${link.linkId}`, kind: 'chat', nodeId: id });
+            }
+          }
+        }
+        // 原操作自己 added 的依赖会随撤销一起移除，不算「后来新增的引用」。
+        const ownEdges = new Set(inverse.dependencyChanges
+          .filter((item) => item.direction === 'added')
+          .map((item) => `${item.edge.nodeId}\u0000${item.edge.requiresNodeId}`));
+        for (const edge of doc.plan.dependencies) {
+          if (!generated.has(edge.nodeId) && !generated.has(edge.requiresNodeId)) continue;
+          if (ownEdges.has(`${edge.nodeId}\u0000${edge.requiresNodeId}`)) continue;
+          conflicts.push({ code: 'inverse-node-in-use', message: `节点已被新增依赖 ${edge.nodeId}→${edge.requiresNodeId} 引用`, kind: 'dependency', nodeId: edge.nodeId });
+        }
+      }
+    }
+    const activeRuns = aggregate.workRuns.filter((run) => run.status === 'active');
+    if (activeRuns.length > 0 && [...touchedIds].some((id) => activeRuns.some((run) => run.targets.includes(id)))) {
+      conflicts.push({ code: 'inverse-work-active', message: '存在活动 WorkRun 以受影响节点为目标；先结束该运行再撤销或重做' });
+    }
+    return conflicts;
+  }
+
+  /** 只读预览：列出可确认指纹、影响范围与冲突，不改变任何状态。 */
+  async previewInverse(ctx: TrustedContext | undefined, request: InversePreviewRequest): Promise<InversePreviewResult> {
+    const authorized = checkTrustedContext(ctx);
+    if (!authorized.ok) {
+      return { status: 'unavailable', direction: request.direction, message: authorized.message };
+    }
+    if (request.direction !== 'undo' && request.direction !== 'redo') {
+      return { status: 'unavailable', direction: request.direction, message: '方向必须是 undo 或 redo' };
+    }
+    const quarantine = await this.deps.store.readQuarantine(this.deps.localRoot, request.instanceId);
+    if (quarantine !== null) {
+      return { status: 'unavailable', direction: request.direction, message: `实例已隔离（${quarantine.reason}）` };
+    }
+    const registry = await this.deps.store.readRegistry(this.deps.localRoot);
+    const entry = registry.instances.find((item) => item.instanceId === request.instanceId);
+    if (entry === undefined) return { status: 'not-found', direction: request.direction, message: '本机注册表中没有该实例' };
+    const aggregate = await this.deps.store.readAggregate(this.deps.localRoot, request.instanceId);
+    if (aggregate === null) return { status: 'not-found', direction: request.direction, message: '实例聚合缺失' };
+    const origin = originOf(ctx as TrustedContext);
+    const found = this.inverseOfRecord(aggregate.operations.find((item) => item.operationId === request.targetOperationId), origin);
+    if (!found.ok) return { status: 'unavailable', direction: request.direction, message: found.reason };
+
+    const baseline = await readSourceBaseline(this.deps.files, entry.sourceRoot, this.deps.sha256, this.deps.clock);
+    if (!baseline.ok) {
+      return { status: 'unavailable', direction: request.direction, message: '当前资料不可读或不合法，无法预览' };
+    }
+    const current: CommandCurrent = {
+      planVersion: baseline.baseline.planVersion,
+      planRevision: aggregate.revisions.plan,
+      sourceEpoch: entry.sourceGeneration,
+    };
+    const conflicts = this.inverseSafety(found.inverse, request.direction, baseline.doc, aggregate, entry.sourceGeneration);
+    if (conflicts.length > 0) {
+      return { status: 'conflict', direction: request.direction, message: '当前存在不允许逆向的变化', conflicts, current };
+    }
+    const inverse = found.inverse;
+    return {
+      status: 'available',
+      previewDigest: this.inversePreviewDigest(request, inverse, current),
+      direction: request.direction,
+      target: {
+        operationId: found.record.operationId,
+        commandType: inverse.commandType,
+        sourceEpoch: inverse.sourceEpoch,
+        createdAt: found.record.createdAt,
+        afterPlanVersion: inverse.afterPlanVersion,
+      },
+      inverse: {
+        affectedNodeIds: [...inverse.affectedNodeIds],
+        fieldCount: inverse.fieldChanges.length,
+        generatedNodeCount: inverse.generatedNodes.length,
+        removedNodeCount: inverse.removedNodes.length,
+        dependencyChangeCount: inverse.dependencyChanges.length,
+        ...(inverse.replacement === undefined ? {} : { replacement: inverse.replacement }),
+      },
+      current,
+    };
+  }
+
+  /** 历史查询：列出带逆向信息的已提交 owner 规划操作及其当前可用性。 */
+  async undoHistory(ctx: TrustedContext | undefined, request: { instanceId: string }): Promise<UndoHistoryResult> {
+    const authorized = checkTrustedContext(ctx);
+    if (!authorized.ok) return { status: 'rejected', code: authorized.code, message: authorized.message };
+    const quarantine = await this.deps.store.readQuarantine(this.deps.localRoot, request.instanceId);
+    if (quarantine !== null) {
+      return { status: 'rejected', code: 'unknown-state', message: `实例已隔离（${quarantine.reason}）` };
+    }
+    const registry = await this.deps.store.readRegistry(this.deps.localRoot);
+    const entry = registry.instances.find((item) => item.instanceId === request.instanceId);
+    if (entry === undefined) return { status: 'rejected', code: 'binding-expired', message: '本机注册表中没有该实例' };
+    const aggregate = await this.deps.store.readAggregate(this.deps.localRoot, request.instanceId);
+    if (aggregate === null) return { status: 'rejected', code: 'binding-expired', message: '实例聚合缺失' };
+    const baseline = await readSourceBaseline(this.deps.files, entry.sourceRoot, this.deps.sha256, this.deps.clock);
+    if (!baseline.ok) return { status: 'rejected', code: 'invalid-project', message: '当前资料不可读或不合法' };
+    const origin = originOf(ctx as TrustedContext);
+    const entries: UndoHistoryEntry[] = [];
+    for (const record of aggregate.operations) {
+      const inverse = validatePlanInverse(record.inverse);
+      if (inverse === null || record.status !== 'committed' || !sameOrigin(record.origin, origin)) continue;
+      const undoConflicts = this.inverseSafety(inverse, 'undo', baseline.doc, aggregate, entry.sourceGeneration);
+      const redoConflicts = this.inverseSafety(inverse, 'redo', baseline.doc, aggregate, entry.sourceGeneration);
+      entries.push({
+        operationId: record.operationId,
+        commandType: inverse.commandType,
+        createdAt: record.createdAt,
+        sourceEpoch: inverse.sourceEpoch,
+        beforePlanVersion: inverse.beforePlanVersion,
+        afterPlanVersion: inverse.afterPlanVersion,
+        affectedNodeIds: [...inverse.affectedNodeIds],
+        canUndo: undoConflicts.length === 0,
+        canRedo: redoConflicts.length === 0,
+        ...(undoConflicts.length > 0 || redoConflicts.length > 0
+          ? { reason: [...undoConflicts, ...redoConflicts].map((item) => item.code).join(',') }
+          : {}),
+      });
+    }
+    return { status: 'committed', instanceId: request.instanceId, entries };
   }
 
   /**
@@ -829,9 +1120,51 @@ export class ProjectCommandService {
       resolvedPreset = resolved.preset;
     }
 
+    // 逆向命令：从已核对的私有历史与当前基线重算候选。确认指纹与安全条件都在发布前核对。
+    let inverseContext: InverseContext | undefined;
+    const inverseCommand = inverseCommandOf(envelope.command);
+    if (inverseCommand !== null) {
+      const current: CommandCurrent = {
+        planVersion: baseline.baseline.planVersion,
+        planRevision: aggregate.revisions.plan,
+        sourceEpoch: entry.sourceGeneration,
+      };
+      const found = this.inverseOfRecord(
+        aggregate.operations.find((item) => item.operationId === inverseCommand.targetOperationId), origin,
+      );
+      if (!found.ok) {
+        return { status: 'rejected', code: 'inverse-unavailable', message: found.reason };
+      }
+      if (inverseCommand.previewDigest !== this.inversePreviewDigest(inverseCommand, found.inverse, current)) {
+        return {
+          status: 'rejected', code: 'preview-mismatch',
+          message: '确认预览已过期：目标逆向信息或当前基线在预览后发生变化；重新预览后再提交',
+          current,
+        };
+      }
+      const conflicts = this.inverseSafety(found.inverse, inverseCommand.direction, baseline.doc, aggregate, entry.sourceGeneration);
+      if (conflicts.length > 0) {
+        return {
+          status: 'rejected', code: conflicts[0]?.code ?? 'inverse-conflict',
+          message: conflicts[0]?.message ?? '当前状态不允许逆向', issues: conflicts.map((item) => ({
+            code: item.code, path: '', message: item.message,
+          })),
+          current,
+        };
+      }
+      inverseContext = {
+        direction: inverseCommand.direction,
+        targetOperationId: inverseCommand.targetOperationId,
+        inverse: found.inverse,
+        previewDigest: inverseCommand.previewDigest,
+      };
+    }
+
     // 稳定生成 id：先落意图，重启或核对时复用同一批 id，不重复创建。
-    const generated = this.allocateIds(envelope.command, baseline.doc, resolvedPreset);
-    const candidate = this.buildCandidate(envelope.command, baseline.doc, baseline.baseline.records, generated, resolvedPreset);
+    const generated = this.allocateIds(envelope.command, baseline.doc, resolvedPreset, inverseContext);
+    const candidate = this.buildCandidate(
+      envelope.command, baseline.doc, baseline.baseline.records, generated, resolvedPreset, inverseContext,
+    );
     if ('rejected' in candidate) return candidate.rejected;
 
     const planning = envelope.command.type !== 'append-record';
@@ -849,6 +1182,43 @@ export class ProjectCommandService {
       ...(candidate.recordId === undefined ? {} : { recordId: candidate.recordId }),
       ...(candidate.recordPath === undefined ? {} : { recordPath: candidate.recordPath }),
     };
+
+    // 逆向信息只写本机聚合：owner 规划编辑与逆向命令都保存前后值与生成身份，随原回执保留。
+    let inverse: PlanInverse | undefined;
+    const inverseCommandType = envelope.command.type;
+    // replacement 只标记原 merge 操作：撤销/重做都以原操作为目标，撤销追加 clear、重做追加新 replace。
+    const inverseReplacement: InverseReplacement | undefined =
+      inverseContext === undefined && envelope.command.type === 'merge-nodes' && candidate.recordId !== undefined
+        ? {
+            recordId: candidate.recordId,
+            sourceNodeIds: [...envelope.command.sourceNodeIds],
+            replacementNodeId: envelope.command.keepNodeId,
+          }
+        : undefined;
+    if (ctx.kind === 'remote-owner' && INVERTIBLE_COMMANDS.has(envelope.command.type)) {
+      inverse = buildPlanInverse({
+        operationId: envelope.operationId,
+        commandType: inverseCommandType,
+        sourceEpoch: entry.sourceGeneration,
+        before: baseline.doc.plan,
+        after: candidate.doc.plan,
+        beforePlanVersion: baseline.baseline.planVersion,
+        afterPlanVersion: candidate.doc.planVersion,
+        ...(inverseReplacement === undefined ? {} : { replacement: inverseReplacement }),
+      });
+    } else if (ctx.kind === 'remote-owner' && inverseContext !== undefined) {
+      // 逆向命令本身也保存逆向信息：撤销后再重做、连续撤销都可从历史核对。
+      inverse = buildPlanInverse({
+        operationId: envelope.operationId,
+        commandType: inverseCommandType,
+        sourceEpoch: entry.sourceGeneration,
+        before: baseline.doc.plan,
+        after: candidate.doc.plan,
+        beforePlanVersion: baseline.baseline.planVersion,
+        afterPlanVersion: candidate.doc.planVersion,
+        ...(inverseReplacement === undefined ? {} : { replacement: inverseReplacement }),
+      });
+    }
     const now = this.deps.clock();
     const record: OperationRecord = {
       operationId: envelope.operationId,
@@ -875,6 +1245,7 @@ export class ProjectCommandService {
         result,
         writeHead: !noBusinessChange,
       },
+      ...(inverse === undefined ? {} : { inverse }),
     };
 
     // 阶段 1：prepared（候选头与正文清单先持久化；失败则不发布任何内容）。
@@ -1074,6 +1445,7 @@ export class ProjectCommandService {
     baselineRecords: { path: string; contentHash: string; observedHash: string }[],
     generated: { recordId?: string; nodeIds?: string[] },
     resolvedPreset?: PresetDescriptor,
+    inverseContext?: InverseContext,
   ):
     | {
         doc: ProjectDocument;
@@ -1083,6 +1455,10 @@ export class ProjectCommandService {
         recordPath?: string;
       }
     | { rejected: RejectedCommand } {
+    // 撤销/重做：在当前资料上按方向应用逆向前值/后值；重算指纹并完整校验。
+    if (inverseContext !== undefined) {
+      return this.buildInverseCandidate(doc, baselineRecords, generated, inverseContext);
+    }
     if (command.type !== 'append-record') {
       const applied = applyPlanCommand(doc, this.materialize(command, generated.nodeIds ?? [], resolvedPreset), this.deps.sha256);
       if (!applied.ok) {
@@ -1186,7 +1562,102 @@ export class ProjectCommandService {
     };
   }
 
-  private allocateIds(command: Command, doc: ProjectDocument, preset?: PresetDescriptor): { recordId?: string; nodeIds?: string[] } {
+  /**
+   * 撤销/重做候选：在当前资料上应用逆向或正向变换，重算指纹并校验。
+   * 合并的撤销在同一权威头追加 clear 记录；重做产生新的 replace 记录，旧历史保持可查。
+   */
+  private buildInverseCandidate(
+    doc: ProjectDocument,
+    baselineRecords: { path: string; contentHash: string; observedHash: string }[],
+    generated: { recordId?: string; nodeIds?: string[] },
+    context: InverseContext,
+  ):
+    | {
+        doc: ProjectDocument;
+        records: typeof baselineRecords;
+        bodies: { recordId: string; contentHash: string; path: string; bytes: number; bytesData: Uint8Array }[];
+        recordId?: string;
+        recordPath?: string;
+      }
+    | { rejected: RejectedCommand } {
+    const applied = applyPlanInverse(doc.plan, context.inverse, context.direction);
+    if (!applied.ok) {
+      return {
+        rejected: {
+          status: 'rejected',
+          code: applied.issues[0]?.code ?? 'inverse-conflict',
+          message: applied.issues[0]?.message ?? '逆向变换未通过领域校验',
+          issues: applied.issues,
+        },
+      };
+    }
+    const draft: ProjectDocument = {
+      schemaVersion: doc.schemaVersion,
+      project: doc.project,
+      plan: applied.value,
+      planVersion: computePlanVersion({ ...doc, plan: applied.value, planVersion: '' }, this.deps.sha256).planVersion,
+      records: doc.records,
+    };
+    let validated = validateProjectDocument(draft, { sha256: this.deps.sha256 });
+    if (!validated.ok) {
+      return { rejected: { status: 'rejected', code: 'invalid-project', message: '逆向候选未通过领域校验', issues: validated.issues } };
+    }
+    if (context.inverse.replacement === undefined) {
+      return { doc: validated.doc, records: baselineRecords, bodies: [] };
+    }
+
+    // 合并的结构化替代：撤销追加 clear、重做追加新 replace；同一权威头发布，正文内容寻址。
+    const recordId = generated.recordId ?? this.deps.newRecordId();
+    const replacement = context.inverse.replacement;
+    const bodyText = context.direction === 'undo'
+      ? buildReplacementClearText({ version: 1, kind: 'clear', clearsRecordId: replacement.recordId })
+      : buildReplacementReplaceText({
+          version: 1, kind: 'replace',
+          sourceNodeIds: [...replacement.sourceNodeIds],
+          replacementNodeId: replacement.replacementNodeId,
+        });
+    const bytesData = new TextEncoder().encode(bodyText);
+    const contentHash = 'sha256:' + this.deps.sha256(bytesData);
+    const recordPath = `records/${recordId}/${contentHash.slice('sha256:'.length)}.md`;
+    const summary = context.direction === 'undo'
+      ? `${REPLACEMENT_SUMMARY_PREFIX}解除替代关系 ${replacement.recordId}`
+      : `${REPLACEMENT_SUMMARY_PREFIX}重建 ${replacement.sourceNodeIds.length} 个来源到 ${replacement.replacementNodeId}`;
+    const appended = appendRecordIndex(validated.doc.records, {
+      id: recordId,
+      kind: 'plan-change',
+      subjectNodeIds: [...new Set([replacement.replacementNodeId, ...replacement.sourceNodeIds])],
+      path: recordPath,
+      contentHash,
+      summary,
+      sources: [],
+    });
+    if (!appended.ok) {
+      return { rejected: { status: 'rejected', code: 'invalid-project', message: '逆向替代记录追加失败', issues: appended.issues } };
+    }
+    validated = validateProjectDocument({ ...validated.doc, records: appended.value }, { sha256: this.deps.sha256 });
+    if (!validated.ok) {
+      return { rejected: { status: 'rejected', code: 'invalid-project', message: '逆向替代候选未通过领域校验', issues: validated.issues } };
+    }
+    return {
+      doc: validated.doc,
+      records: [...baselineRecords, { path: recordPath, contentHash, observedHash: contentHash }],
+      bodies: [{ recordId, contentHash, path: recordPath, bytes: bytesData.length, bytesData }],
+      recordId,
+      recordPath,
+    };
+  }
+
+  private allocateIds(
+    command: Command,
+    doc: ProjectDocument,
+    preset?: PresetDescriptor,
+    inverseContext?: InverseContext,
+  ): { recordId?: string; nodeIds?: string[] } {
+    // 撤销/重做生成节点已在原操作回执的 inverse 中固定身份，不重新分配；
+    // 合并的逆向需要一条新的结构化记录（clear 或新 replace），分配一个记录 id。
+    if (inverseContext !== undefined) {
+      return inverseContext.inverse.replacement === undefined ? {} : { recordId: this.deps.newRecordId() };
+    }
     if (command.type === 'append-record') return { recordId: this.deps.newRecordId() };
     if (command.type === 'add-nodes') return { nodeIds: command.nodes.map(() => this.deps.newNodeId()) };
     if (command.type === 'split-node') return { nodeIds: command.children.map(() => this.deps.newNodeId()) };
@@ -1261,6 +1732,10 @@ export class ProjectCommandService {
           parentId: command.parentId,
           beforeNodeId: command.beforeNodeId,
         };
+      case 'undo-plan-edit':
+      case 'redo-plan-edit':
+        // 逆向命令在 buildCandidate 的 inverseContext 分支处理，不物化为领域 PlanCommand。
+        throw new Error('撤销/重做命令不能物化为普通规划命令');
       default:
         return command;
     }

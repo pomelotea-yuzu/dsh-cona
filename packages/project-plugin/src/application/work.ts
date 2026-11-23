@@ -207,6 +207,10 @@ export function commandAction(command: Command): WorkAction {
       return 'update';
     case 'insert-preset':
       return 'add';
+    // 撤销/重做是 owner-only（命令服务入口拒绝 agent 直达）；保守映射，实际不走工作绑定。
+    case 'undo-plan-edit':
+    case 'redo-plan-edit':
+      return 'update';
   }
 }
 
@@ -240,6 +244,10 @@ export function commandTargets(command: Command): string[] {
       return command.targetParentId === null ? [] : [command.targetParentId];
     case 'insert-preset':
       return command.parentId === null ? [] : [command.parentId];
+    // 目标由命令服务从私有历史的 inverse.affectedNodeIds 解析；此处静态映射返回空。
+    case 'undo-plan-edit':
+    case 'redo-plan-edit':
+      return [];
   }
 }
 

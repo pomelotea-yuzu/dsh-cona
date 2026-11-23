@@ -6,6 +6,7 @@ import type { BaselineResult, SourceBaseline } from './baseline.js';
 import type { LocationKind } from './location.js';
 import type { LocalIssue, LocalStateStorePort, LocalRootResolverPort, GitPrivateRootPort } from './ports.js';
 import type { Sha256Fn } from '../domain/types.js';
+import type { PlanInverse } from '../domain/inverse.js';
 
 /** DSH 数据目录下本机运行数据的相对分段（design §2）；显式 localDataRoot 时不再追加。 */
 export const LOCAL_DATA_SEGMENTS: readonly string[] = ['data', 'dsh-cona', 'local'];
@@ -226,6 +227,11 @@ export interface OperationRecord {
   rejection?: { code: string; message: string };
   /** true 表示回执由恢复核对补齐，不证明作者或文件外动作。 */
   recovered?: boolean;
+  /**
+   * owner 规划编辑的可核查逆向信息（tasks 2.3）：前后值、生成 ID、引用与范围。
+   * 只写本机聚合，不进入公开资料；旧回执缺字段时按「无逆向信息」处理。
+   */
+  inverse?: PlanInverse;
 }
 
 /**

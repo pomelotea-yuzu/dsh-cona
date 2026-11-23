@@ -27,6 +27,8 @@ function usage(): string {
     '                [--trusted remote-owner|agent-work] [--work-run <id>] [--binding-version <n>] [--operation <uuid>]',
     '  command.js receipt --local-root <dir> --instance <id> --operation <uuid> [--trusted …]',
     '  command.js recover --local-root <dir> --instance <id> --operation <uuid> [--trusted …]',
+    '  command.js preview-undo --local-root <dir> --instance <id> --target-operation <uuid> --direction undo|redo [--trusted …]',
+    '  command.js undo-history --local-root <dir> --instance <id> [--trusted …]',
   ].join('\n') + '\n';
 }
 
@@ -45,10 +47,12 @@ async function main(): Promise<number> {
       'work-run': { type: 'string' },
       'binding-version': { type: 'string' },
       operation: { type: 'string' },
+      'target-operation': { type: 'string' },
+      direction: { type: 'string' },
     },
   });
   const commandName = positionals[0];
-  if (commandName !== 'run' && commandName !== 'receipt' && commandName !== 'recover') {
+  if (!['run', 'receipt', 'recover', 'preview-undo', 'undo-history'].includes(commandName ?? '')) {
     process.stderr.write(usage());
     return 2;
   }
@@ -76,6 +80,35 @@ async function main(): Promise<number> {
     newNodeId: () => randomUUID(),
     newRecordId: () => randomUUID(),
   });
+
+  const readonlyTrusted: TrustedContext =
+    values['trusted'] === 'agent-work'
+      ? {
+          kind: 'agent-work',
+          workRunId: typeof values['work-run'] === 'string' ? values['work-run'] : '',
+          bindingVersion: typeof values['binding-version'] === 'string' ? Number(values['binding-version']) : 0,
+          instanceId,
+        }
+      : { kind: 'remote-owner' };
+
+  if (commandName === 'undo-history') {
+    const result = await service.undoHistory(readonlyTrusted, { instanceId });
+    process.stdout.write(JSON.stringify({ command: commandName, ...result }) + '\n');
+    return result.status === 'committed' ? 0 : 1;
+  }
+  if (commandName === 'preview-undo') {
+    if (typeof values['target-operation'] !== 'string' || (values['direction'] !== 'undo' && values['direction'] !== 'redo')) {
+      process.stderr.write('preview-undo 需要 --target-operation 与 --direction undo|redo\n' + usage());
+      return 2;
+    }
+    const result = await service.previewInverse(readonlyTrusted, {
+      instanceId,
+      targetOperationId: values['target-operation'],
+      direction: values['direction'],
+    });
+    process.stdout.write(JSON.stringify({ command: commandName, ...result }) + '\n');
+    return result.status === 'available' ? 0 : 1;
+  }
 
   if (commandName === 'receipt' || commandName === 'recover') {
     if (typeof values['operation'] !== 'string') {
