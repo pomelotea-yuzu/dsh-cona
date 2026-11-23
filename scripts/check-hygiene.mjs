@@ -43,6 +43,9 @@ const FORBIDDEN_EXT = new Set([
 // 许可证、构建入口、hook 脚本。其余一律要求改名到正式目录或登记豁免理由。
 const EXTENSIONLESS_ALLOWED = new Set(['LICENSE', 'NOTICE', 'Makefile', 'Dockerfile', 'Procfile', 'pre-commit']);
 
+// 编辑器备份（Vim／Emacs）与 git merge 残留：带后缀，`git add` 会静默收下，必须按后缀拦。
+const RESIDUE_EXT = new Set(['.orig', '.rej', '.swp', '.swo']);
+
 const SECRET_RULES = [
   ['私钥块', /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/],
   ['OpenAI 形态 key', /\bsk-[A-Za-z0-9_-]{16,}\b/],
@@ -189,6 +192,8 @@ function main() {
       else if (FORBIDDEN_EXT.has(ext)) add(fails, '二进制/归档后缀', file, `${ext} 不入历史；先登记 .git-hygiene-allowlist 理由再 add -f`);
       else if (ext === '' && !base.startsWith('.') && !EXTENSIONLESS_ALLOWED.has(base) && !file.includes('/fixtures/')) {
         add(fails, '无扩展名散落文件', file, '临时/探测文件不入库；确属构建入口或脚本需在 .git-hygiene-allowlist 登记理由');
+      } else if (RESIDUE_EXT.has(ext) || base.endsWith('~')) {
+        add(fails, '编辑器/合并残留', file, '编辑器备份与合并残留（~、.orig、.rej、.swp）不入库；确认内容后删除，别用 add -f 绕过');
       }
     }
 
@@ -338,6 +343,10 @@ function selftest() {
       setup: ({ stage }) => stage('straytmp', 'blat') },
     { name: '白名单无扩展名文件放行',
       setup: ({ stage }) => stage('LICENSE', safe) },
+    { name: '编辑器备份后缀反例', file: 'notes.ts~', rule: '编辑器/合并残留',
+      setup: ({ stage }) => stage('notes.ts~', safe) },
+    { name: '合并残留后缀反例', file: 'merge.ts.orig', rule: '编辑器/合并残留',
+      setup: ({ stage }) => stage('merge.ts.orig', safe) },
     { name: '索引中豁免无理由反例', file: '.git-hygiene-allowlist', rule: '豁免无理由',
       setup: ({ stage, write }) => {
         stage('.git-hygiene-allowlist', 'sample.txt\n');
