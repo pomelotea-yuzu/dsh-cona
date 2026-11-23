@@ -223,7 +223,7 @@ test('刷新：正文哈希不符拒绝，不把被改写的正文当成基线',
   writeFileSync(path.join(ctx.source, ...recordPath.split('/')), '# 被改写\n');
   const result = refresh(ctx);
   assert.equal(result.status, 1);
-  assert.deepEqual(codes(result.json), ['body-hash-mismatch']);
+  assert.deepEqual(codes(result.json), ['source-body-hash-mismatch']);
 });
 
 test('刷新：同一路径项目身份变化拒绝，注册表与基线不变', () => {

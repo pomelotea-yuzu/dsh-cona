@@ -317,7 +317,7 @@ test('混合资料：正文被改写或 schema 未知时拒绝返回半截快照
 
   const mixed = await snapshots(ctx).read(OWNER, { instanceId: ctx.instanceId, connectionGeneration: 1 });
   assert.equal(mixed.status, 'rejected', JSON.stringify(mixed));
-  assert.equal(mixed.status === 'rejected' ? mixed.code : '', 'body-hash-mismatch');
+  assert.equal(mixed.status === 'rejected' ? mixed.code : '', 'source-body-hash-mismatch');
 
   // 恢复正文后改为未知 schema：仍拒绝，且码为 unsupported-format。
   writeFileSync(bodyFile, '# 原始正文\n');

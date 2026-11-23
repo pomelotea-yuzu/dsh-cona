@@ -7,6 +7,8 @@ import type { ProjectDocument, Sha256Fn } from '../domain/types.js';
 import type { SourceFilesPort } from './ports.js';
 
 export interface RecordBaseline {
+  /** 索引中的记录 id（公开身份）；用于跨刷新追踪「同 ID 改写」与「索引丢失」。 */
+  recordId: string;
   /** 协议路径 `records/<recordId>/<contentHash-hex>.md`。 */
   path: string;
   /** 索引声明的哈希。 */
@@ -16,12 +18,24 @@ export interface RecordBaseline {
   bytes: number;
 }
 
+/** Git 只读观察（1.2／1.3）：与资料字节一起进入候选比较；拿不到时用 unknown 表达。 */
+export interface GitObservation {
+  available: boolean;
+  repositoryRoot?: string;
+  headCommit?: string;
+  branch?: string;
+  unmerged: boolean | 'unknown';
+  dirty: boolean | 'unknown';
+}
+
 export interface SourceBaseline {
   projectId: string;
   planVersion: string;
   /** project.json 原始字节的哈希（排版变化也会改变它，与 planVersion 用途不同）。 */
   headHash: string;
   records: RecordBaseline[];
+  /** Git 只读观察；资料根不在仓库内时 available=false。 */
+  git?: GitObservation;
   observedAt: string;
 }
 
@@ -90,7 +104,7 @@ export async function readSourceBaseline(
       return {
         ok: false,
         issues: body.issues.map((issue) => ({
-          code: issue.code === 'scope-not-found' ? 'body-missing' : issue.code,
+          code: issue.code === 'scope-not-found' ? 'source-body-missing' : issue.code,
           message: issue.message ?? '引用正文不可读',
           path: record.path,
         })),
@@ -100,10 +114,10 @@ export async function readSourceBaseline(
     if (observedHash !== record.contentHash) {
       return {
         ok: false,
-        issues: [{ code: 'body-hash-mismatch', message: '正文实际字节哈希与索引不一致', path: record.path }],
+        issues: [{ code: 'source-body-hash-mismatch', message: '正文实际字节哈希与索引不一致', path: record.path }],
       };
     }
-    records.push({ path: record.path, contentHash: record.contentHash, observedHash, bytes: body.bytes.length });
+    records.push({ recordId: record.id, path: record.path, contentHash: record.contentHash, observedHash, bytes: body.bytes.length });
   }
 
   return {

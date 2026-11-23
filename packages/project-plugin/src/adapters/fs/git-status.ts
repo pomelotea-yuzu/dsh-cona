@@ -31,7 +31,7 @@ export function readGitStatus(root: string, options: GitStatusOptions = {}): Git
   if (!top.ok) {
     const reason =
       top.errorCode === 'ENOENT' ? 'git-unavailable' : top.errorCode === 'ETIMEDOUT' ? 'probe-failed' : 'not-a-repository';
-    return { available: false, trackState: 'unknown', dirty: 'unknown', reason };
+    return { available: false, trackState: 'unknown', dirty: 'unknown', unmerged: 'unknown', reason };
   }
   const repositoryRoot = top.stdout.trim();
   const repositoryRootDisplay = toDisplayPath(repositoryRoot, options.homeDir ?? os.homedir());
@@ -50,5 +50,18 @@ export function readGitStatus(root: string, options: GitStatusOptions = {}): Git
   const status = git(['status', '--porcelain', '--', '.']);
   if (status.ok) dirty = status.stdout.trim() !== '';
 
-  return { available: true, repositoryRoot, repositoryRootDisplay, trackState, dirty };
+  // 未合并条目（真实合并冲突遗留）：porcelain 的 UU/AA/DD/U 字段或 ls-files -u 非空。
+  let unmerged: boolean | 'unknown' = 'unknown';
+  const unmergedEntries = git(['ls-files', '-u']);
+  if (unmergedEntries.ok) unmerged = unmergedEntries.stdout.trim() !== '';
+  else if (status.ok) unmerged = /(^|\n)[UAD]{1,2} /.test(status.stdout);
+
+  // HEAD commit 与分支：detached HEAD 时 branch 缺省；空仓库或探测失败时都缺省。
+  const head = git(['rev-parse', 'HEAD']);
+  const headCommit = head.ok ? head.stdout.trim() : undefined;
+  const branchQuery = git(['rev-parse', '--abbrev-ref', 'HEAD']);
+  const branchRaw = branchQuery.ok ? branchQuery.stdout.trim() : '';
+  const branch = branchRaw !== '' && branchRaw !== 'HEAD' ? branchRaw : undefined;
+
+  return { available: true, repositoryRoot, repositoryRootDisplay, trackState, dirty, headCommit, branch, unmerged };
 }

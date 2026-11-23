@@ -179,6 +179,12 @@ export interface GitStateView {
   repositoryRootDisplay?: string;
   trackState: GitTrackState;
   dirty: boolean | 'unknown';
+  /** 当前 HEAD commit 全哈希；拿不到时缺省（detached／空仓库／探测失败）。 */
+  headCommit?: string;
+  /** 当前分支名；detached HEAD 或拿不到时缺省。 */
+  branch?: string;
+  /** 工作区是否存在未合并条目（真实 Git 合并冲突遗留）。 */
+  unmerged: boolean | 'unknown';
   reason?: 'git-unavailable' | 'not-a-repository' | 'probe-failed';
 }
 

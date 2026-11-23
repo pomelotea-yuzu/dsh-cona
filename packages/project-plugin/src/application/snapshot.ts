@@ -164,8 +164,8 @@ function rejection(code: string, message: string, issues?: ValidationIssue[]): S
     : { status: 'rejected', code, message, issues };
 }
 
-/** 基线失败里可直接透出的码：调用方需要区分“正文不符”与“结构非法”。 */
-const KEEP_BASELINE_CODES = new Set(['body-hash-mismatch', 'body-missing', 'source-conflict-markers']);
+/** 基线失败里可直接透出的码：调用方需要区分“正文不符”与“结构非法”（1.2 起码名带 source- 前缀）。 */
+const KEEP_BASELINE_CODES = new Set(['source-body-hash-mismatch', 'source-body-missing', 'source-conflict-markers']);
 
 /** 按父节点分组的深度优先排序；同级按 order、id 升序。数据已由领域校验保证无环，仍防重入。 */
 export function orderTree(nodes: readonly WorkNode[]): WorkNode[] {
