@@ -92,6 +92,20 @@ test('不同实例各自装配，A 的运行时不被 B 覆盖', async () => {
   }
 });
 
+test('3.1 实例行标注配置归属：只有启动配置实例 configured=true（含不可读行）', async () => {
+  const reg = new InstanceRuntimeRegistry({
+    listEntries: async () => [entry(A, '/projects/a'), entry(B, '/projects/b')],
+    open: async (input) => input.instanceId === B
+      ? { ok: false, code: 'invalid-project', message: '资料根不可读' }
+      : openedRuntime(A),
+    describeLocation: (r) => r,
+    configured: { instanceId: A, runtime: async () => openedRuntime(A) },
+  });
+  const rows = await reg.overviewRows();
+  assert.equal(rows.find((row) => row.instanceId === A)?.configured, true);
+  assert.equal(rows.find((row) => row.instanceId === B)?.configured, false, '不可读行也如实标注归属');
+});
+
 test('不可读实例保留诊断行，不隐藏条目', async () => {
   const reg = new InstanceRuntimeRegistry({
     listEntries: async () => [entry(A, '/projects/a'), entry(B, '/projects/b')],

@@ -68,6 +68,19 @@ export interface ChatsView {
   pendingIntents: Array<ConversationIntent & { candidates?: string[] }>;
 }
 
+/** 宿主可见会话（选择已有）：只读投影，不含 Agent 内容。 */
+export interface SessionChoice {
+  sessionId: string;
+  blank: boolean;
+  running: boolean;
+  updatedAt: number;
+  /** 本实例已有链接指向该会话（多用途时为多条链接）。 */
+  linked: boolean;
+}
+
+/** 会话目录视图：目录不可用时给稳定码，不冒充空列表。 */
+export type SessionsOutcome = ConversationOutcome<{ sessions: SessionChoice[] }>;
+
 export type ConversationOutcome<S> =
   | { status: 'committed'; value: S; stateRevision: number }
   | { status: 'rejected'; code: string; message: string }
@@ -302,6 +315,78 @@ export class ConversationService {
     });
     if ('outcome' in read) return read.outcome;
     return { status: 'committed', value: read.view, stateRevision: -1 };
+  }
+
+  /**
+   * 宿主可见会话（tasks 3.1「选择已有」）：只读列举，标注本实例是否已有链接。
+   * 目录不可用给稳定码，不返回空列表冒充「没有会话」。
+   */
+  async listSessions(): Promise<SessionsOutcome> {
+    type SessionsRead =
+      | { outcome: ConversationOutcome<never> }
+      | { sessions: SessionChoice[] };
+    const read = await this.deps.queue.run(this.mutationInstanceId(), async (): Promise<SessionsRead> => {
+      const current = await this.readAggregate();
+      if ('outcome' in current) return { outcome: current.outcome };
+      const state = conversationStateOf(current.aggregate.conversations);
+      const linked = new Set(state.links.map((link) => link.sessionId));
+      let directory: Awaited<ReturnType<SessionDirectoryPort['listSessions']>>;
+      try {
+        directory = await this.deps.directory.listSessions();
+      } catch (error) {
+        return {
+          outcome: { status: 'rejected' as const, code: 'session-directory-unavailable', message: (error as Error).message },
+        };
+      }
+      return {
+        sessions: directory.map((session) => ({
+          sessionId: session.sessionId,
+          blank: session.blank,
+          running: session.running,
+          updatedAt: session.updatedAt,
+          linked: linked.has(session.sessionId),
+        })),
+      };
+    });
+    if ('outcome' in read) return read.outcome;
+    return { status: 'committed', value: { sessions: read.sessions }, stateRevision: -1 };
+  }
+
+  /**
+   * 打开前复查（tasks 3.1「按实际 Session 打开」）：链接仍存在、宿主列表可见。
+   * 只验证身份；导航由 client 用宿主能力完成，不建立任何执行绑定。
+   */
+  async openTarget(request: { linkId: string }): Promise<ConversationOutcome<{ sessionId: string }>> {
+    if (typeof request?.linkId !== 'string' || request.linkId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 linkId' };
+    }
+    const read = await this.deps.queue.run(this.mutationInstanceId(), async () => {
+      const current = await this.readAggregate();
+      if ('outcome' in current) return current;
+      const state = conversationStateOf(current.aggregate.conversations);
+      const link = state.links.find((item) => item.linkId === request.linkId);
+      if (link === undefined) {
+        return {
+          outcome: { status: 'rejected' as const, code: 'resume-link-missing', message: '本机聊天链接不存在（可能已解除关联）' },
+        };
+      }
+      let directory: Awaited<ReturnType<SessionDirectoryPort['listSessions']>>;
+      try {
+        directory = await this.deps.directory.listSessions();
+      } catch (error) {
+        return {
+          outcome: { status: 'rejected' as const, code: 'session-directory-unavailable', message: (error as Error).message },
+        };
+      }
+      if (!directory.some((session) => session.sessionId === link.sessionId)) {
+        return {
+          outcome: { status: 'rejected' as const, code: 'session-not-visible', message: '该会话在宿主中不可见（可能已删除）' },
+        };
+      }
+      return { sessionId: link.sessionId };
+    });
+    if ('outcome' in read) return read.outcome;
+    return { status: 'committed', value: { sessionId: read.sessionId }, stateRevision: -1 };
   }
 
   // ---------- 内部 ----------

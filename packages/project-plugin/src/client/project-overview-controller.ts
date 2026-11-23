@@ -28,6 +28,7 @@ export type MigrationOpView = Exclude<MigrationOpResult, null>;
 export type MigrationPreviewOpView = Exclude<MigrationPreviewOpResult, null>;
 export type MigrationListView = Exclude<MigrationListOpResult, null>;
 import type { ResumeChatPointerView } from '../application/resume-chat.js';
+import type { ChatsView, ConversationOutcome, SessionChoice } from '../application/conversations.js';
 
 /** client 侧结果：OwnerDenial 的 null 已在传输层归一为 rejected，不再出现在控制器输入。 */
 type ResumeChatsView = Exclude<ResumeChatsResult, null>;
@@ -82,6 +83,78 @@ export interface ResumePartial {
   linkId: string;
 }
 
+/** 3.1 概览聊天行（本机链接投影）：用途为用户原文，不翻译。 */
+export interface ChatLinkRow {
+  linkId: string;
+  sessionId: string;
+  purpose: string;
+  nodeIds: string[];
+  /** 宿主列表可见性；null 表示目录不可用（未知，不冒充失效）。 */
+  visible: boolean | null;
+}
+
+/** 3.1 可选会话（选择已有）：目录只读投影。 */
+export interface ChatSessionRow {
+  sessionId: string;
+  blank: boolean;
+  running: boolean;
+  updatedAt: number;
+  linked: boolean;
+}
+
+/** 3.1 待核对意图：候选只供显式认领，不自动写入。 */
+export interface PendingChatRow {
+  operationId: string;
+  action: 'create' | 'claim';
+  nodeIds: string[];
+  purpose: string;
+  status: 'pending' | 'unknown';
+  createdAt: string;
+  detail?: string;
+  candidates?: string[];
+}
+
+/** 3.1 概览聊天区状态：列表、可选会话、待核对与最近一次操作诊断。 */
+export interface ChatsState {
+  phase: 'idle' | 'loading' | 'ready' | 'unavailable';
+  links: ChatLinkRow[];
+  sessions: ChatSessionRow[];
+  pending: PendingChatRow[];
+  reason: string | null;
+  notice: { code: string; message: string } | null;
+  /** 正在提交创建／关联／解绑（防重复点击）。 */
+  busy: boolean;
+}
+
+/** 重绑草稿：卡片的记录身份；下一次创建／关联成功后把指针指过去。 */
+export interface RebindDraft {
+  recordId: string;
+  contentHash: string;
+}
+
+const EMPTY_CHATS: ChatsState = {
+  phase: 'idle',
+  links: [],
+  sessions: [],
+  pending: [],
+  reason: null,
+  notice: null,
+  busy: false,
+};
+
+/** 聊天写入结果（与 ConversationOutcome 同形，client 只读投影）。 */
+export type ChatMutationView<S> =
+  | { status: 'committed'; value: S; stateRevision: number }
+  | { status: 'rejected'; code: string; message: string }
+  | { status: 'unknown-state'; code: string; message: string; stage: string };
+
+/** 概览聊天读取结果（chats）：与宿主 OverviewChatsResult 同形。 */
+export type OverviewChatsView = ChatMutationView<ChatsView> | { status: 'rejected'; code: string; message: string };
+
+export type RebindResumeView =
+  | { status: 'linked'; recordId: string; linkId: string; sessionId: string; purpose: string; reusedLink: boolean }
+  | { status: 'rejected'; code: string; message: string };
+
 const EMPTY_DRAFT: ResumeDraft = {
   stoppedAt: '',
   nextStep: '',
@@ -102,6 +175,8 @@ export interface OverviewRow {
   sourceEpoch?: number;
   code?: string;
   message?: string;
+  /** 3.1：是否为宿主启动配置实例；false 时界面提示项目工作入口不可用。 */
+  configured?: boolean;
 }
 
 export type OverviewListResult =
@@ -192,6 +267,33 @@ export interface OverviewControllerDeps {
   registerPreview?: (sourceRoot: string) => Promise<RegisterPreviewView>;
   /** 1.1：显式登记（conaOverview/registerSource；预览后由 owner 确认）。 */
   registerSource?: (request: { sourceRoot: string; sourceKind: LocationKind; projectId: string }) => Promise<RegisterSourceView>;
+  /** 3.1：按实例读取本机聊天链接与待核对意图（conaOverview/chats）。 */
+  listChats?: (instanceId: string) => Promise<ConversationOutcome<ChatsView> | { status: 'rejected'; code: string; message: string }>;
+  /** 3.1：可选会话（conaOverview/chatSessions；选择已有）。 */
+  listChatSessions?: (instanceId: string) => Promise<
+    ConversationOutcome<{ sessions: SessionChoice[] }> | { status: 'rejected'; code: string; message: string }
+  >;
+  /** 3.1：创建聊天（宿主可能复用空白会话）。 */
+  createChat?: (request: {
+    instanceId: string; operationId: string; nodeIds: string[]; purpose: string;
+  }) => Promise<ChatMutationView<{ sessionId: string; linkId: string; reusedBlank: boolean }>>;
+  /** 3.1：关联已有会话（核对宿主可见性）。 */
+  linkChat?: (request: {
+    instanceId: string; operationId: string; sessionId: string; nodeIds: string[]; purpose: string;
+  }) => Promise<ChatMutationView<{ linkId: string; reused: boolean }>>;
+  /** 3.1：认领待核对候选。 */
+  claimChat?: (request: {
+    instanceId: string; operationId: string; sessionId: string; nodeIds: string[]; purpose: string;
+  }) => Promise<ChatMutationView<{ linkId: string; reusedBlank: boolean }>>;
+  /** 3.1：解除关联（缺省整条）。 */
+  unlinkChat?: (request: { instanceId: string; operationId: string; linkId: string }) => Promise<ChatMutationView<{ removed: boolean }>>;
+  /** 3.1：打开前复查链接与宿主实际 Session。 */
+  resolveChatLinkTarget?: (instanceId: string, linkId: string) => Promise<ChatMutationView<{ sessionId: string }>>;
+  /** 3.1：接续卡片显式重绑（建立／复用链接后写指针）。 */
+  rebindResumeChat?: (request: {
+    instanceId: string; recordId: string; contentHash: string;
+    mode: 'create' | 'link'; sessionId?: string; purpose: string;
+  }) => Promise<RebindResumeView>;
 }
 
 export interface OverviewState {
@@ -214,6 +316,10 @@ export interface OverviewState {
   resumePartial: ResumePartial | null;
   /** 打开原聊天失败提示（稳定码）。 */
   chatNotice: { code: string; message: string } | null;
+  /** 3.1：本机聊天区（链接、可选会话、待核对与诊断）。 */
+  chats: ChatsState;
+  /** 3.1：重绑草稿（卡片记录身份）；下一次创建／关联成功后写指针。 */
+  rebindDraft: RebindDraft | null;
   /** 1.5：迁移操作状态（预览／确认／取消／恢复）。 */
   migration: MigrationState;
   /** 1.1：接入登记状态（预览与显式登记）。 */
@@ -233,6 +339,8 @@ const EMPTY: OverviewState = {
   resumeChats: { phase: 'idle', chats: [], reason: null },
   resumePartial: null,
   chatNotice: null,
+  chats: EMPTY_CHATS,
+  rebindDraft: null,
   migration: EMPTY_MIGRATION,
   register: EMPTY_REGISTER,
 };
@@ -284,6 +392,7 @@ export class ProjectOverviewController {
       resumeCard: selected === null ? null : this.state.selectedId === selected ? this.state.resumeCard : null,
     });
     if (selected !== null && !stillPresent) void this.loadResumeCard(selected);
+    if (selected !== null) void this.loadChats(selected);
   }
 
   /** 顶部按钮：展开/收起。首次展开时读取列表。 */
@@ -311,10 +420,13 @@ export class ProjectOverviewController {
       resumeChats: { phase: 'idle', chats: [], reason: null },
       resumePartial: null,
       chatNotice: null,
+      chats: EMPTY_CHATS,
+      rebindDraft: null,
       migration: EMPTY_MIGRATION,
       register: EMPTY_REGISTER,
     });
     void this.loadResumeCard(instanceId);
+    void this.loadChats(instanceId);
     return true;
   }
 
@@ -733,6 +845,315 @@ export class ProjectOverviewController {
       return;
     }
     this.patch({ chatNotice: { code: result.code, message: result.message } });
+  }
+
+  // ---------- 3.1：本机聊天（实例路由，浏览实例也能管理自己的聊天） ----------
+
+  /** 聊天依赖缺失（旧宿主）时给 unavailable，不猜测内容。 */
+  private chatsUnavailable(): boolean {
+    if (this.deps.listChats === undefined || this.deps.listChatSessions === undefined) {
+      this.patch({ chats: { ...EMPTY_CHATS, phase: 'unavailable', reason: 'chats-unavailable' } });
+      return true;
+    }
+    return false;
+  }
+
+  /** 读取所选实例的链接、可选会话与待核对意图；只读，丢弃切换后的迟到响应。 */
+  async loadChats(instanceId: string): Promise<void> {
+    if (this.chatsUnavailable()) return;
+    if (this.state.selectedId === instanceId) {
+      this.patch({ chats: { ...this.state.chats, phase: 'loading', reason: null } });
+    }
+    const noticeAtStart = this.state.chats.notice;
+    let linksView: Awaited<ReturnType<NonNullable<OverviewControllerDeps['listChats']>>>;
+    let sessionsView: Awaited<ReturnType<NonNullable<OverviewControllerDeps['listChatSessions']>>>;
+    try {
+      [linksView, sessionsView] = await Promise.all([
+        this.deps.listChats!(instanceId),
+        this.deps.listChatSessions!(instanceId),
+      ]);
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ chats: { ...EMPTY_CHATS, phase: 'unavailable', reason: `transport-failed: ${(error as Error).message}` } });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (linksView.status !== 'committed') {
+      this.patch({ chats: { ...EMPTY_CHATS, phase: 'unavailable', reason: `${linksView.code}: ${linksView.message}` } });
+      return;
+    }
+    const sessions = sessionsView.status === 'committed' ? sessionsView.value.sessions : [];
+    const sessionsNotice = sessionsView.status === 'committed'
+      ? null
+      : { code: sessionsView.code, message: sessionsView.message };
+    // 读取期间若有更新的操作诊断（失败提示），保留它，不被本轮刷新覆盖。
+    const notice = this.state.chats.notice !== noticeAtStart ? this.state.chats.notice : sessionsNotice;
+    this.patch({
+      chats: {
+        phase: 'ready',
+        links: linksView.value.links.map((link) => ({
+          linkId: link.linkId,
+          sessionId: link.sessionId,
+          purpose: link.purpose,
+          nodeIds: [...link.nodeIds],
+          visible: link.visible,
+        })),
+        sessions: sessions.map((session) => ({
+          sessionId: session.sessionId,
+          blank: session.blank,
+          running: session.running,
+          updatedAt: session.updatedAt,
+          linked: session.linked,
+        })),
+        pending: linksView.value.pendingIntents.map((intent) => ({
+          operationId: intent.operationId,
+          action: intent.action,
+          nodeIds: [...intent.nodeIds],
+          purpose: intent.purpose,
+          status: intent.status === 'linked' ? 'pending' : intent.status,
+          createdAt: intent.createdAt,
+          ...(intent.detail === undefined ? {} : { detail: intent.detail }),
+          ...(intent.candidates === undefined ? {} : { candidates: [...intent.candidates] }),
+        })),
+        reason: null,
+        notice,
+        // 刷新不改变“是否有写操作在途”。
+        busy: this.state.chats.busy,
+      },
+    });
+  }
+
+  /** 卡片上的显式重绑入口：记下记录身份，下一次创建／关联成功后写指针。 */
+  beginRebindResume(): boolean {
+    const card = this.state.resumeCard;
+    if (card === null || card.status !== 'card') return false;
+    this.patch({ rebindDraft: { recordId: card.recordId, contentHash: card.contentHash } });
+    return true;
+  }
+
+  cancelRebindResume(): void {
+    this.patch({ rebindDraft: null });
+  }
+
+  /** 聊天关联用的节点集合：面板多选优先，其次单选（用户必须明确选择）。 */
+  private chatNodeIds(instanceId: string): string[] {
+    const panel = this.panelController(instanceId).getState();
+    if (panel.selectedNodeIds.length > 0) return [...panel.selectedNodeIds];
+    return panel.selectedNodeId === null ? [] : [panel.selectedNodeId];
+  }
+
+  private chatFailure(code: string, message: string): void {
+    this.patch({ chats: { ...this.state.chats, busy: false, notice: { code, message } } });
+  }
+
+  /** 提交后的统一收尾：清重绑草稿与在途标记，再刷新链接、可选会话与卡片。 */
+  private afterChatWrite(instanceId: string): void {
+    this.patch({ rebindDraft: null, chats: { ...this.state.chats, busy: false, notice: null } });
+    void this.loadChats(instanceId);
+    void this.loadResumeCard(instanceId);
+  }
+
+  /** 创建聊天（宿主可能复用空白会话）；重绑草稿存在时改为写接续指针。 */
+  async createChat(purpose: string): Promise<'ok' | 'failed' | 'idle'> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null) return 'idle';
+    if (purpose.trim() === '') {
+      this.chatFailure('missing-purpose', '用途不能为空');
+      return 'failed';
+    }
+    const rebind = this.state.rebindDraft;
+    if (rebind !== null) {
+      const deps = this.deps.rebindResumeChat;
+      if (deps === undefined) {
+        this.chatFailure('chats-unavailable', '此宿主未提供聊天重绑入口');
+        return 'failed';
+      }
+      if (this.state.chats.busy) return 'idle';
+      this.patch({ chats: { ...this.state.chats, busy: true, notice: null } });
+      try {
+        const result = await deps({
+          instanceId, recordId: rebind.recordId, contentHash: rebind.contentHash,
+          mode: 'create', purpose: purpose.trim(),
+        });
+        if (this.state.selectedId !== instanceId) return 'ok';
+        if (result.status === 'linked') {
+          this.afterChatWrite(instanceId);
+          return 'ok';
+        }
+        this.chatFailure(result.code, result.message);
+        return 'failed';
+      } catch (error) {
+        if (this.state.selectedId === instanceId) this.chatFailure('transport-failed', (error as Error).message);
+        return 'failed';
+      }
+    }
+    const nodeIds = this.chatNodeIds(instanceId);
+    if (nodeIds.length === 0) {
+      this.chatFailure('no-node-selected', '先在树中选择要关联的节点');
+      return 'failed';
+    }
+    const create = this.deps.createChat;
+    if (create === undefined) {
+      this.chatFailure('chats-unavailable', '此宿主未提供聊天创建入口');
+      return 'failed';
+    }
+    if (this.state.chats.busy) return 'idle';
+    this.patch({ chats: { ...this.state.chats, busy: true, notice: null } });
+    try {
+      const result = await create({ instanceId, operationId: this.deps.newOperationId(), nodeIds, purpose: purpose.trim() });
+      if (this.state.selectedId !== instanceId) return 'ok';
+      if (result.status === 'committed') {
+        this.afterChatWrite(instanceId);
+        return 'ok';
+      }
+      this.chatFailure(result.code, result.message);
+      return 'failed';
+    } catch (error) {
+      if (this.state.selectedId === instanceId) this.chatFailure('transport-failed', (error as Error).message);
+      return 'failed';
+    }
+  }
+
+  /** 关联已有会话（宿主核对可见性）；重绑草稿存在时改为写接续指针。 */
+  async linkSession(sessionId: string, purpose: string): Promise<'ok' | 'failed' | 'idle'> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || sessionId === '') return 'idle';
+    if (purpose.trim() === '') {
+      this.chatFailure('missing-purpose', '用途不能为空');
+      return 'failed';
+    }
+    const rebind = this.state.rebindDraft;
+    if (rebind !== null) {
+      const deps = this.deps.rebindResumeChat;
+      if (deps === undefined) {
+        this.chatFailure('chats-unavailable', '此宿主未提供聊天重绑入口');
+        return 'failed';
+      }
+      if (this.state.chats.busy) return 'idle';
+      this.patch({ chats: { ...this.state.chats, busy: true, notice: null } });
+      try {
+        const result = await deps({
+          instanceId, recordId: rebind.recordId, contentHash: rebind.contentHash,
+          mode: 'link', sessionId, purpose: purpose.trim(),
+        });
+        if (this.state.selectedId !== instanceId) return 'ok';
+        if (result.status === 'linked') {
+          this.afterChatWrite(instanceId);
+          return 'ok';
+        }
+        this.chatFailure(result.code, result.message);
+        return 'failed';
+      } catch (error) {
+        if (this.state.selectedId === instanceId) this.chatFailure('transport-failed', (error as Error).message);
+        return 'failed';
+      }
+    }
+    const nodeIds = this.chatNodeIds(instanceId);
+    if (nodeIds.length === 0) {
+      this.chatFailure('no-node-selected', '先在树中选择要关联的节点');
+      return 'failed';
+    }
+    const link = this.deps.linkChat;
+    if (link === undefined) {
+      this.chatFailure('chats-unavailable', '此宿主未提供聊天关联入口');
+      return 'failed';
+    }
+    if (this.state.chats.busy) return 'idle';
+    this.patch({ chats: { ...this.state.chats, busy: true, notice: null } });
+    try {
+      const result = await link({ instanceId, operationId: this.deps.newOperationId(), sessionId, nodeIds, purpose: purpose.trim() });
+      if (this.state.selectedId !== instanceId) return 'ok';
+      if (result.status === 'committed') {
+        this.afterChatWrite(instanceId);
+        return 'ok';
+      }
+      this.chatFailure(result.code, result.message);
+      return 'failed';
+    } catch (error) {
+      if (this.state.selectedId === instanceId) this.chatFailure('transport-failed', (error as Error).message);
+      return 'failed';
+    }
+  }
+
+  /** 认领待核对候选：只对用户明确点击的候选写链接。 */
+  async claimPending(row: PendingChatRow, sessionId: string): Promise<'ok' | 'failed' | 'idle'> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || sessionId === '') return 'idle';
+    const claim = this.deps.claimChat;
+    if (claim === undefined) {
+      this.chatFailure('chats-unavailable', '此宿主未提供聊天认领入口');
+      return 'failed';
+    }
+    if (this.state.chats.busy) return 'idle';
+    this.patch({ chats: { ...this.state.chats, busy: true, notice: null } });
+    try {
+      const result = await claim({
+        instanceId, operationId: this.deps.newOperationId(), sessionId,
+        nodeIds: [...row.nodeIds], purpose: row.purpose,
+      });
+      if (this.state.selectedId !== instanceId) return 'ok';
+      if (result.status === 'committed') {
+        this.afterChatWrite(instanceId);
+        return 'ok';
+      }
+      this.chatFailure(result.code, result.message);
+      return 'failed';
+    } catch (error) {
+      if (this.state.selectedId === instanceId) this.chatFailure('transport-failed', (error as Error).message);
+      return 'failed';
+    }
+  }
+
+  /** 解除关联（整条）；只推进本机状态修订。 */
+  async unlinkChat(linkId: string): Promise<'ok' | 'failed' | 'idle'> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || linkId === '') return 'idle';
+    const unlink = this.deps.unlinkChat;
+    if (unlink === undefined) {
+      this.chatFailure('chats-unavailable', '此宿主未提供解绑入口');
+      return 'failed';
+    }
+    if (this.state.chats.busy) return 'idle';
+    this.patch({ chats: { ...this.state.chats, busy: true, notice: null } });
+    try {
+      const result = await unlink({ instanceId, operationId: this.deps.newOperationId(), linkId });
+      if (this.state.selectedId !== instanceId) return 'ok';
+      if (result.status === 'committed') {
+        this.afterChatWrite(instanceId);
+        return 'ok';
+      }
+      this.chatFailure(result.code, result.message);
+      return 'failed';
+    } catch (error) {
+      if (this.state.selectedId === instanceId) this.chatFailure('transport-failed', (error as Error).message);
+      return 'failed';
+    }
+  }
+
+  /**
+   * 打开所选聊天：Host 复查链接与宿主实际 Session，通过后只做 DSH 导航。
+   * 不发快照、不建绑定、不改 A 的目标与订阅。
+   */
+  async openChatLink(linkId: string): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || linkId === '') return;
+    const resolve = this.deps.resolveChatLinkTarget;
+    if (resolve === undefined) {
+      this.chatFailure('chats-unavailable', '此宿主未提供聊天打开入口');
+      return;
+    }
+    this.patch({ chats: { ...this.state.chats, notice: null } });
+    try {
+      const result = await resolve(instanceId, linkId);
+      if (this.state.selectedId !== instanceId) return;
+      if (result.status === 'committed') {
+        this.deps.openSession(result.value.sessionId);
+        return;
+      }
+      this.chatFailure(result.code, result.message);
+    } catch (error) {
+      if (this.state.selectedId === instanceId) this.chatFailure('transport-failed', (error as Error).message);
+    }
   }
 
   /** 取（或建）某实例的面板控制器；同实例复用，草稿/选择/代际保持。 */

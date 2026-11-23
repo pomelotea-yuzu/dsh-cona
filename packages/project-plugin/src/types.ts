@@ -41,6 +41,7 @@ export type {
   ConversationOutcome,
   ChatsView,
   LinkView,
+  SessionChoice,
 } from './application/conversations.js'
 export type {
   ConaCreateChatRequest,
@@ -88,6 +89,17 @@ export type {
   ConaLinkResumeRequest,
   ConaResumeChatTargetRequest,
   TreePresetsResult,
+} from './host/overview-service.js'
+// R2 收尾 3.1：按实例的本机聊天读写（conaOverview chats/chat* 边界类型）。
+export type {
+  OverviewChatsResult,
+  OverviewChatSessionsResult,
+  ConaChatCreateRequest,
+  ConaChatLinkRequest,
+  ConaChatUnlinkRequest,
+  ConaChatTargetRequest,
+  ConaRebindResumeChatRequest,
+  RebindResumeChatResult,
 } from './host/overview-service.js'
 // R2 收尾 1.4/1.5：位置迁移与接入登记（conaOverview migration*/register* 边界类型）。
 export type { LocationKind } from './application/location.js'

@@ -364,3 +364,66 @@ test('6.1 chats 视图类型与 reconcile 一致（防回归）', async () => {
   const view: ChatsView = { links: [], pendingIntents: [] };
   assert.deepEqual(view, { links: [], pendingIntents: [] });
 });
+
+test('3.1 listSessions：列出宿主可见会话并标注本实例是否已关联', async () => {
+  const directory = new FakeDirectory();
+  directory.sessions.push(
+    { sessionId: 'session-b', blank: true, running: false, updatedAt: 10, cwd: null },
+    { sessionId: 'session-c', blank: false, running: true, updatedAt: 20, cwd: null },
+  );
+  const { service } = makeService({ directory });
+  const empty = await service.listSessions();
+  assert.equal(empty.status, 'committed');
+  if (empty.status !== 'committed') return;
+  assert.deepEqual(
+    empty.value.sessions
+      .map((session) => [session.sessionId, session.blank, session.running, session.linked])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    [['session-a', true, false, false], ['session-b', true, false, false], ['session-c', false, true, false]],
+  );
+
+  const linked = await service.linkChat({ operationId: 'op-list', sessionId: 'session-c', nodeIds: [NODE_A], purpose: '实现' });
+  assert.equal(linked.status, 'committed');
+  const listed = await service.listSessions();
+  assert.equal(listed.status, 'committed');
+  if (listed.status !== 'committed') return;
+  assert.equal(listed.value.sessions.find((session) => session.sessionId === 'session-c')?.linked, true);
+  assert.equal(listed.value.sessions.find((session) => session.sessionId === 'session-a')?.linked, false);
+});
+
+test('3.1 listSessions：目录不可用给稳定码，不返回空列表冒充没有会话', async () => {
+  const failing: SessionDirectoryPort = {
+    async createSession() { throw new Error('upstream-down'); },
+    async listSessions() { throw new Error('upstream-down'); },
+  };
+  const { service } = makeService({ directory: failing });
+  const result = await service.listSessions();
+  assert.equal(result.status, 'rejected');
+  assert.equal((result as { code?: string }).code, 'session-directory-unavailable');
+});
+
+test('3.1 openTarget：链接存在且实际 Session 可见才返回；失效与不存在分别拒绝', async () => {
+  const directory = new FakeDirectory();
+  const { service } = makeService({ directory });
+  const linked = await service.linkChat({ operationId: 'op-open', sessionId: 'session-a', nodeIds: [NODE_A], purpose: '讨论' });
+  assert.equal(linked.status, 'committed');
+  if (linked.status !== 'committed') return;
+
+  const ok = await service.openTarget({ linkId: linked.value.linkId });
+  assert.equal(ok.status, 'committed');
+  assert.equal(ok.status === 'committed' ? ok.value.sessionId : '', 'session-a');
+
+  const missing = await service.openTarget({ linkId: 'link-ghost' });
+  assert.equal(missing.status, 'rejected');
+  assert.equal((missing as { code?: string }).code, 'resume-link-missing');
+
+  // 宿主里删掉会话后：不冒领，给 session-not-visible。
+  directory.sessions = directory.sessions.filter((session) => session.sessionId !== 'session-a');
+  const gone = await service.openTarget({ linkId: linked.value.linkId });
+  assert.equal(gone.status, 'rejected');
+  assert.equal((gone as { code?: string }).code, 'session-not-visible');
+
+  const empty = await service.openTarget({ linkId: '' });
+  assert.equal(empty.status, 'rejected');
+  assert.equal((empty as { code?: string }).code, 'operation-mismatch');
+});

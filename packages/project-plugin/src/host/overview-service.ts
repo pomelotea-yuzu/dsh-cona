@@ -9,6 +9,11 @@ import { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { BaselineResult } from '../application/baseline.js'
 import type {
+  ChatsView,
+  ConversationOutcome,
+  SessionChoice,
+} from '../application/conversations.js'
+import type {
   CommandEnvelope,
   CommandResult,
   InversePreviewRequest,
@@ -144,6 +149,74 @@ export interface ConaResumeChatTargetRequest {
 
 export type ResumeChatTargetResult =
   | { status: 'ok'; sessionId: string }
+  | { status: 'rejected'; code: string; message: string }
+  | OwnerDenial;
+
+// ---------- 3.1：概览按实例的本机聊天读写 ----------
+
+/** 概览聊天视图：链接（含失效可见性）与待核对意图；本机状态不可读给稳定码。 */
+export type OverviewChatsResult =
+  | ConversationOutcome<ChatsView>
+  | { status: 'rejected'; code: string; message: string };
+
+/** 宿主可见会话列表（选择已有）；目录不可用给稳定码，不冒充空列表。 */
+export type OverviewChatSessionsResult =
+  | ConversationOutcome<{ sessions: SessionChoice[] }>
+  | { status: 'rejected'; code: string; message: string };
+
+export interface ConaChatCreateRequest {
+  instanceId: string;
+  operationId: string;
+  nodeIds: string[];
+  purpose: string;
+  origin?: 'panel';
+}
+
+export interface ConaChatLinkRequest {
+  instanceId: string;
+  operationId: string;
+  sessionId: string;
+  nodeIds: string[];
+  purpose: string;
+  origin?: 'panel';
+}
+
+export interface ConaChatUnlinkRequest {
+  instanceId: string;
+  operationId: string;
+  linkId: string;
+  nodeIds?: string[];
+}
+
+export interface ConaChatTargetRequest {
+  instanceId: string;
+  linkId: string;
+}
+
+/**
+ * 接续卡片显式重绑：为记录建立／复用一个本机聊天链接，再把指针指过去。
+ * mode=create 由宿主创建（可能复用空白会话）；mode=link 必须给可见 sessionId。
+ * 两步都复用聊天服务的身份核对，指针仍只落本机聚合。
+ */
+export interface ConaRebindResumeChatRequest {
+  instanceId: string;
+  recordId: string;
+  contentHash: string;
+  mode: 'create' | 'link';
+  sessionId?: string;
+  purpose: string;
+}
+
+export type RebindResumeChatResult =
+  | {
+      status: 'linked';
+      recordId: string;
+      linkId: string;
+      sessionId: string;
+      purpose: string;
+      /** 复用既有链接（同会话同用途）时为 true。 */
+      reusedLink: boolean;
+    }
   | { status: 'rejected'; code: string; message: string }
   | OwnerDenial;
 
@@ -451,6 +524,263 @@ export class ConaOverviewService extends TypertRemoteService {
     })
     if (target.status === 'ok') return { status: 'ok', sessionId: target.sessionId }
     return { status: 'rejected', code: target.code, message: target.message }
+  }
+
+  // ---------- 3.1：按实例的本机聊天读写（实例路由） ----------
+  //
+  // 与 R1 `conaProject/*` 同一应用服务，只是按 instanceId 定向：浏览实例 B 时
+  // 创建／关联／解绑／打开都作用在 B 自己的聚合；不触达配置实例 A 的队列、目标与订阅。
+
+  /** 聊天链接与待核对意图；本机聚合缺失（干净 profile）给稳定拒绝码。 */
+  @Remote('chats')
+  async chats(request: { instanceId: string }): Promise<OverviewChatsResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.listChats()
+  }
+
+  /** 宿主可见会话（选择已有）：只读；标注本实例是否已有关联。 */
+  @Remote('chatSessions')
+  async chatSessions(request: { instanceId: string }): Promise<OverviewChatSessionsResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.listSessions()
+  }
+
+  /** 创建聊天：宿主可能复用同 cwd 的空白会话；实际返回身份经核对后才落链接。 */
+  @Remote('chatCreate')
+  async chatCreate(request: ConaChatCreateRequest): Promise<ConversationOutcome<{ sessionId: string; linkId: string; reusedBlank: boolean }> | { status: 'rejected'; code: string; message: string }> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const bad = this.requireChatWrite(request?.instanceId, request?.operationId, request?.nodeIds, request?.purpose)
+    if (bad !== null) return bad
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.createChat({
+      operationId: request.operationId,
+      nodeIds: [...request.nodeIds],
+      purpose: request.purpose,
+      origin: 'panel',
+    })
+  }
+
+  /** 关联已有会话：宿主列表中不可见的会话不静默认领（错实例／已删除都拒绝）。 */
+  @Remote('chatLink')
+  async chatLink(request: ConaChatLinkRequest): Promise<ConversationOutcome<{ linkId: string; reused: boolean }> | { status: 'rejected'; code: string; message: string }> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const bad = this.requireChatWrite(request?.instanceId, request?.operationId, request?.nodeIds, request?.purpose)
+    if (bad !== null) return bad
+    if (typeof request.sessionId !== 'string' || request.sessionId === '') {
+      return { status: 'rejected', code: 'session-identity-missing', message: 'Session 身份缺失或为空' }
+    }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.linkChat({
+      operationId: request.operationId,
+      sessionId: request.sessionId,
+      nodeIds: [...request.nodeIds],
+      purpose: request.purpose,
+      origin: 'panel',
+    })
+  }
+
+  /** 认领待核对候选（reconcile 之后由用户确认）；不自动重试创建。 */
+  @Remote('chatClaim')
+  async chatClaim(request: ConaChatLinkRequest): Promise<ConversationOutcome<{ linkId: string; reusedBlank: boolean }> | { status: 'rejected'; code: string; message: string }> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const bad = this.requireChatWrite(request?.instanceId, request?.operationId, request?.nodeIds, request?.purpose)
+    if (bad !== null) return bad
+    if (typeof request.sessionId !== 'string' || request.sessionId === '') {
+      return { status: 'rejected', code: 'session-identity-missing', message: 'Session 身份缺失或为空' }
+    }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.claimChat({
+      operationId: request.operationId,
+      sessionId: request.sessionId,
+      nodeIds: [...request.nodeIds],
+      purpose: request.purpose,
+      origin: 'panel',
+    })
+  }
+
+  /** 解除关联：缺省删除整条链接，给出 nodeIds 时只移除这些节点。 */
+  @Remote('chatUnlink')
+  async chatUnlink(request: ConaChatUnlinkRequest): Promise<ConversationOutcome<{ removed: boolean }> | { status: 'rejected'; code: string; message: string }> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    if (typeof request.operationId !== 'string' || request.operationId === ''
+      || typeof request.linkId !== 'string' || request.linkId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'operationId 与 linkId 必须是非空字符串' }
+    }
+    if (request.nodeIds !== undefined
+      && (!Array.isArray(request.nodeIds) || request.nodeIds.some((id) => typeof id !== 'string' || id === ''))) {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'nodeIds 必须是字符串数组' }
+    }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.unlinkChat({
+      operationId: request.operationId,
+      linkId: request.linkId,
+      ...(request.nodeIds === undefined ? {} : { nodeIds: [...request.nodeIds] }),
+    })
+  }
+
+  /** 待核对：只给候选，不写链接、不再创建。 */
+  @Remote('chatReconcile')
+  async chatReconcile(request: { instanceId: string }): Promise<OverviewChatsResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.reconcileChats()
+  }
+
+  /** 打开前复查：链接与宿主实际 Session；通过后由 client 只做导航。 */
+  @Remote('chatTarget')
+  async chatTarget(request: ConaChatTargetRequest): Promise<ConversationOutcome<{ sessionId: string }> | { status: 'rejected'; code: string; message: string }> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    if (typeof request.linkId !== 'string' || request.linkId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 linkId' }
+    }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.chats.openTarget({ linkId: request.linkId })
+  }
+
+  /**
+   * 接续卡片显式重绑：核对记录版本 → 为记录主语节点建立／复用本机链接 →
+   * 再写接续指针。任一步失败都保持原指针与公开资料；成功只推进状态修订。
+   */
+  @Remote('chatRebindResume')
+  async chatRebindResume(request: ConaRebindResumeChatRequest): Promise<RebindResumeChatResult> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return badId
+    if (typeof request.recordId !== 'string' || request.recordId === ''
+      || typeof request.contentHash !== 'string' || request.contentHash === ''
+      || typeof request.purpose !== 'string' || request.purpose.trim() === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'recordId、contentHash 与 purpose 必须非空' }
+    }
+    if (request.mode !== 'create' && request.mode !== 'link') {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'mode 必须是 create 或 link' }
+    }
+    if (request.mode === 'link' && (typeof request.sessionId !== 'string' || request.sessionId === '')) {
+      return { status: 'rejected', code: 'session-identity-missing', message: '选择已有会话时必须提供 sessionId' }
+    }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+
+    // 记录版本与主语节点来自当前已接纳快照；版本不符不写指针（与 resumeChatTarget 同口径）。
+    const snap = await runtime.value.snapshot.read(OWNER_CONTEXT, {
+      instanceId: request.instanceId,
+      connectionGeneration: 0,
+    })
+    if (snap.status === 'rejected') return { status: 'rejected', code: snap.code, message: snap.message }
+    if (snap.status === 'unsynced') {
+      return { status: 'rejected', code: 'resume-unsynced', message: `资料未同步：${snap.reason}` }
+    }
+    const record = snap.snapshot.records.find((item) => item.id === request.recordId)
+    if (record === undefined) {
+      return { status: 'rejected', code: 'record-not-found', message: '记录不在当前已接纳资料中；不写指针' }
+    }
+    if (record.contentHash !== request.contentHash) {
+      return { status: 'rejected', code: 'record-version-changed', message: '记录版本已变化；请刷新后重试' }
+    }
+    const nodeIds = record.subjectNodeIds.length > 0
+      ? [...record.subjectNodeIds]
+      : (snap.snapshot.tree[0] === undefined ? [] : [snap.snapshot.tree[0].id])
+    if (nodeIds.length === 0) {
+      return { status: 'rejected', code: 'record-has-no-subject-nodes', message: '记录没有可关联的节点，且当前规划为空' }
+    }
+
+    const purpose = request.purpose.trim()
+    let linkId: string
+    let sessionId: string
+    let reusedLink: boolean
+    if (request.mode === 'create') {
+      const created = await runtime.value.chats.createChat({ operationId: randomUUID(), nodeIds, purpose, origin: 'panel' })
+      if (created.status !== 'committed') return { status: 'rejected', code: created.code, message: created.message }
+      linkId = created.value.linkId
+      sessionId = created.value.sessionId
+      reusedLink = false
+    } else {
+      sessionId = request.sessionId as string
+      const linked = await runtime.value.chats.linkChat({
+        operationId: randomUUID(),
+        sessionId,
+        nodeIds,
+        purpose,
+        origin: 'panel',
+      })
+      if (linked.status !== 'committed') return { status: 'rejected', code: linked.code, message: linked.message }
+      linkId = linked.value.linkId
+      reusedLink = linked.value.reused
+    }
+
+    const pointer = await runtime.value.resumeChats.link({ recordId: request.recordId, linkId })
+    if (pointer.status !== 'committed') {
+      return { status: 'rejected', code: pointer.code, message: pointer.message }
+    }
+    return { status: 'linked', recordId: request.recordId, linkId, sessionId, purpose, reusedLink }
+  }
+
+  /** 聊天写入口的公共参数校验：实例、operationId、非空节点集合与非空用途。 */
+  private requireChatWrite(
+    instanceId: unknown,
+    operationId: unknown,
+    nodeIds: unknown,
+    purpose: unknown,
+  ): { status: 'rejected'; code: string; message: string } | null {
+    const badId = this.requireId(instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    if (typeof operationId !== 'string' || operationId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 operationId' }
+    }
+    if (!Array.isArray(nodeIds) || nodeIds.length === 0
+      || nodeIds.some((id) => typeof id !== 'string' || id === '')) {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'nodeIds 必须是非空字符串数组' }
+    }
+    if (typeof purpose !== 'string' || purpose.trim() === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '用途不能为空' }
+    }
+    return null
   }
 
   /** 按实例读完整快照；沿用 R1 的连接代际/源代际检查。 */

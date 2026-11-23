@@ -122,10 +122,16 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
                     {row.code ?? 'unreadable'}{row.message ? `: ${row.message}` : ''}
                   </div>
                 ) : null}
+                {row.configured === false ? (
+                  <div data-cona-work-unavailable={row.instanceId} style={{ fontSize: 12, color: '#8a6d3b', marginTop: 4 }}>
+                    {t(labelOf('workEntryUnavailable'))}
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
           <ResumeCardView state={state.resumeCard} chatNotice={state.chatNotice} controller={controller} t={t} />
+          <ChatSection controller={controller} state={state} t={t} />
           <ResumeSaveSection controller={controller} state={state} t={t} />
           <MigrationSection controller={controller} state={state} t={t} />
           <RegisterSection controller={controller} state={state} t={t} />
@@ -525,6 +531,7 @@ function ResumeChatLine(props: {
   t: TopTranslate;
 }): JSX.Element | null {
   const { chat, chatNotice, controller, t } = props;
+  const [, force] = useState(0);
   const lineStyle = { margin: '2px 0', fontSize: 12 } as const;
   if (chat.status === 'linked') {
     if (chat.visible === false) {
@@ -542,7 +549,162 @@ function ResumeChatLine(props: {
     );
   }
   if (chat.status === 'unlinked') {
-    return <p style={{ ...lineStyle, color: '#8a6d3b' }}>{t('resumeChatUnlinked')}</p>;
+    return (
+      <p style={lineStyle}>
+        <span style={{ color: '#8a6d3b' }}>{t('resumeChatUnlinked')}</span>
+        <button
+          type="button"
+          data-cona-resume-rebind="1"
+          onClick={() => { controller.beginRebindResume(); force((n) => n + 1); }}
+        >
+          {t('resumeChatRebind')}
+        </button>
+      </p>
+    );
   }
-  return <p style={{ ...lineStyle, color: '#8a6d3b' }}>{t('resumeChatUnavailable')}：{chat.reason}</p>;
+  return (
+    <p style={lineStyle}>
+      <span style={{ color: '#8a6d3b' }}>{t('resumeChatUnavailable')}：{chat.reason}</span>
+      <button
+        type="button"
+        data-cona-resume-rebind="1"
+        onClick={() => { controller.beginRebindResume(); force((n) => n + 1); }}
+      >
+        {t('resumeChatRebind')}
+      </button>
+    </p>
+  );
+}
+
+/**
+ * 3.1 本机聊天区：浏览实例也能创建、选择已有、关联、解绑与打开自己的聊天。
+ * 导航只调宿主 openSession；重绑草稿存在时创建／关联改写为卡片指针重绑。
+ */
+function ChatSection(props: {
+  controller: ProjectOverviewController;
+  state: OverviewState;
+  t: TopTranslate;
+}): JSX.Element | null {
+  const { controller, state, t } = props;
+  const [purpose, setPurpose] = useState('');
+  const [sessionId, setSessionId] = useState('');
+  const chats = state.chats;
+  if (state.selectedId === null) return null;
+  if (chats.phase === 'idle') return null;
+  if (chats.phase === 'loading') return <p style={rowStyle}>{t('loading')}</p>;
+  if (chats.phase === 'unavailable') {
+    return (
+      <section data-cona-chats="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
+        <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>{t('chatsTitle')}</h4>
+        <p style={{ ...rowStyle, color: '#8a6d3b' }}>{t('chatsUnavailable', { reason: chats.reason ?? 'unknown' })}</p>
+      </section>
+    );
+  }
+  const rebind = state.rebindDraft;
+  const busy = chats.busy;
+  return (
+    <section data-cona-chats="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
+      <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>{t('chatsTitle')}</h4>
+      {rebind !== null ? (
+        <p data-cona-chat-rebind-banner="1" style={{ ...rowStyle, color: '#1b5e20' }}>
+          {t('chatRebindActive')}
+          <button type="button" onClick={() => { controller.cancelRebindResume(); }}>
+            {t('chatRebindCancel')}
+          </button>
+        </p>
+      ) : null}
+      {chats.links.length === 0 ? <p style={rowStyle}>{t('chatNoLinks')}</p> : null}
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {chats.links.map((link) => (
+          <li key={link.linkId} data-cona-chat-link={link.linkId} style={rowStyle}>
+            <span>{link.purpose} · {link.sessionId.slice(0, 8)}</span>
+            {link.visible === false ? <span style={{ color: '#8a6d3b' }}>（{t('chatVisibleMissing')}）</span> : null}
+            <button
+              type="button"
+              data-cona-chat-open={link.linkId}
+              disabled={busy || link.visible === false}
+              onClick={() => { void controller.openChatLink(link.linkId); }}
+            >
+              {t('chatOpen')}
+            </button>
+            <button
+              type="button"
+              data-cona-chat-unlink={link.linkId}
+              disabled={busy}
+              onClick={() => { void controller.unlinkChat(link.linkId); }}
+            >
+              {t('chatUnlink')}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {chats.pending.length > 0 ? (
+        <div data-cona-chat-pending="1">
+          <p style={{ ...rowStyle, marginBottom: 2 }}>{t('chatPendingTitle')}</p>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {chats.pending.map((pending) => (
+              <li key={pending.operationId} style={rowStyle}>
+                <span>{pending.purpose} · {pending.status}</span>
+                {(pending.candidates ?? []).map((candidate) => (
+                  <button
+                    key={candidate}
+                    type="button"
+                    data-cona-chat-claim={candidate}
+                    disabled={busy}
+                    onClick={() => { void controller.claimPending(pending, candidate); }}
+                  >
+                    {t('chatClaimCandidate')} {candidate.slice(0, 8)}
+                  </button>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <label style={{ ...rowStyle, display: 'block' }}>{t('chatPurposeLabel')}</label>
+      <input
+        data-cona-chat-purpose="1"
+        style={fieldStyle}
+        value={purpose}
+        placeholder={t('chatPurposePlaceholder')}
+        onChange={(e) => setPurpose(e.target.value)}
+      />
+      <button
+        type="button"
+        data-cona-chat-create="1"
+        disabled={busy}
+        onClick={() => { void controller.createChat(purpose); }}
+      >
+        {t('chatCreate')}
+      </button>
+      <label style={{ ...rowStyle, display: 'block', marginTop: 8 }}>{t('chatSelectLabel')}</label>
+      {chats.sessions.length === 0 ? <p style={rowStyle}>{t('chatNoSessions')}</p> : null}
+      <select
+        data-cona-chat-session="1"
+        style={fieldStyle}
+        value={sessionId}
+        onChange={(e) => setSessionId(e.target.value)}
+      >
+        <option value="">{t('chatSessionNone')}</option>
+        {chats.sessions.map((session) => (
+          <option key={session.sessionId} value={session.sessionId}>
+            {session.sessionId.slice(0, 8)}{session.blank ? ` · ${t('chatSessionBlank')}` : ''}{session.linked ? ` · ${t('chatSessionLinked')}` : ''}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        data-cona-chat-link-selected="1"
+        disabled={busy || sessionId === ''}
+        onClick={() => { void controller.linkSession(sessionId, purpose); }}
+      >
+        {t('chatLinkSelected')}
+      </button>
+      {chats.notice !== null ? (
+        <p data-cona-chat-notice="1" style={{ ...rowStyle, color: '#b3261e' }}>
+          {chats.notice.code}{chats.notice.message ? `: ${chats.notice.message}` : ''}
+        </p>
+      ) : null}
+    </section>
+  );
 }

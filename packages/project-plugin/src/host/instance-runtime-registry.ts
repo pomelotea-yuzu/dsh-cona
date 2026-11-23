@@ -19,6 +19,8 @@ export type OverviewInstanceRow =
       /** 资料根显示路径（home 折叠），不暴露机器绝对路径。 */
       sourceDisplay: string;
       sourceEpoch: number;
+      /** 是否为宿主启动配置实例：只有它承载项目工具与宿主事件（design §3）。 */
+      configured: boolean;
     }
   | {
       instanceId: string;
@@ -26,6 +28,8 @@ export type OverviewInstanceRow =
       readable: false;
       code: string;
       message: string;
+      /** 不可读行的配置归属同样如实标注，供界面提示工作入口。 */
+      configured: boolean;
     };
 
 export interface OpenInstanceInput {
@@ -105,8 +109,10 @@ export class InstanceRuntimeRegistry {
    */
   async overviewRows(): Promise<OverviewInstanceRow[]> {
     const entries = await this.deps.listEntries();
+    const configuredId = this.deps.configured?.instanceId;
     const rows: OverviewInstanceRow[] = [];
     for (const entry of entries) {
+      const configured = configuredId === entry.instanceId;
       const result = await this.openEntry(entry);
       if (!result.ok) {
         rows.push({
@@ -115,6 +121,7 @@ export class InstanceRuntimeRegistry {
           readable: false,
           code: result.code,
           message: result.message,
+          configured,
         });
         continue;
       }
@@ -125,6 +132,7 @@ export class InstanceRuntimeRegistry {
         sourceKind: result.value.instance.sourceKind,
         sourceDisplay: this.deps.describeLocation(result.value.instance.sourceRoot),
         sourceEpoch: result.value.instance.sourceEpoch,
+        configured,
       });
     }
     return rows;

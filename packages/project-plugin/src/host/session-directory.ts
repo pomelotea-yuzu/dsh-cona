@@ -57,12 +57,16 @@ export function sessionDirectory(ctx: Context, cwd: string): SessionDirectoryRes
         for (const item of items) {
           const sessionId = item['sessionId'];
           if (typeof sessionId !== 'string' || sessionId === '') continue;
+          // 实例归属（3.1）：只列本实例工作区（cwd 与资料根一致）的会话，
+          // 使另一副本的会话不可见、不可被冒领；cwd 缺失的会话无法归属，不列出。
+          const itemCwd = typeof item['cwd'] === 'string' ? item['cwd'] : null;
+          if (itemCwd !== cwd) continue;
           out.push({
             sessionId,
             blank: item['blank'] === true,
             running: item['running'] === true,
             updatedAt: typeof item['updatedAt'] === 'number' ? (item['updatedAt'] as number) : 0,
-            cwd: typeof item['cwd'] === 'string' ? (item['cwd'] as string) : null,
+            cwd: itemCwd,
           });
         }
         return out;

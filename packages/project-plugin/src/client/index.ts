@@ -20,6 +20,7 @@ import {
   type OverviewListResult,
   type ResumeCardView,
   type CodeObservationView,
+  type ChatMutationView,
 } from './project-overview-controller.js'
 import type { PanelTransport } from './api.js'
 import type { ResumePayload } from '../domain/resume.js'
@@ -28,6 +29,9 @@ import type {
   ResumeChatTargetResult,
   ResumeChatsResult,
   ResumeLinkResult,
+  OverviewChatsResult,
+  OverviewChatSessionsResult,
+  RebindResumeChatResult,
 } from '../host/overview-service.js'
 
 import type {
@@ -191,6 +195,71 @@ function resolveChatTarget(instanceId: string, recordId: string, contentHash: st
   )
 }
 
+// ---------- 3.1：概览按实例的本机聊天读写 ----------
+
+type OverviewChatsView = Exclude<OverviewChatsResult, null>
+type OverviewChatSessionsView = Exclude<OverviewChatSessionsResult, null>
+type RebindResumeView = Exclude<RebindResumeChatResult, null>
+
+function overviewChats(instanceId: string): Promise<OverviewChatsView> {
+  return callOverview<OverviewChatsView>('chats', { instanceId }, (code, message) => ({ status: 'rejected', code, message }))
+}
+
+function overviewChatSessions(instanceId: string): Promise<OverviewChatSessionsView> {
+  return callOverview<OverviewChatSessionsView>('chatSessions', { instanceId }, (code, message) => ({ status: 'rejected', code, message }))
+}
+
+function chatCreate(instanceId: string, operationId: string, nodeIds: string[], purpose: string): Promise<ChatMutationView<{ sessionId: string; linkId: string; reusedBlank: boolean }>> {
+  return callOverview(
+    'chatCreate',
+    { instanceId, operationId, nodeIds, purpose },
+    (code, message) => ({ status: 'rejected' as const, code, message }),
+  )
+}
+
+function chatLink(instanceId: string, operationId: string, sessionId: string, nodeIds: string[], purpose: string): Promise<ChatMutationView<{ linkId: string; reused: boolean }>> {
+  return callOverview(
+    'chatLink',
+    { instanceId, operationId, sessionId, nodeIds, purpose },
+    (code, message) => ({ status: 'rejected' as const, code, message }),
+  )
+}
+
+function chatClaim(instanceId: string, operationId: string, sessionId: string, nodeIds: string[], purpose: string): Promise<ChatMutationView<{ linkId: string; reusedBlank: boolean }>> {
+  return callOverview(
+    'chatClaim',
+    { instanceId, operationId, sessionId, nodeIds, purpose },
+    (code, message) => ({ status: 'rejected' as const, code, message }),
+  )
+}
+
+function chatUnlink(instanceId: string, operationId: string, linkId: string): Promise<ChatMutationView<{ removed: boolean }>> {
+  return callOverview(
+    'chatUnlink',
+    { instanceId, operationId, linkId },
+    (code, message) => ({ status: 'rejected' as const, code, message }),
+  )
+}
+
+function chatTarget(instanceId: string, linkId: string): Promise<ChatMutationView<{ sessionId: string }>> {
+  return callOverview(
+    'chatTarget',
+    { instanceId, linkId },
+    (code, message) => ({ status: 'rejected' as const, code, message }),
+  )
+}
+
+function chatRebindResume(request: {
+  instanceId: string; recordId: string; contentHash: string;
+  mode: 'create' | 'link'; sessionId?: string; purpose: string;
+}): Promise<RebindResumeView> {
+  return callOverview<RebindResumeView>(
+    'chatRebindResume',
+    { ...request },
+    (code, message) => ({ status: 'rejected', code, message }),
+  )
+}
+
 /**
  * 迁移/登记的通用 POST（1.4/1.5）：结果形状是 `{ ok }` 或 `{ status }` 的并集，
  * 与 callOverview 的 status 约束不同。HTTP 失败／形状不合法／OwnerDenial null
@@ -283,6 +352,15 @@ export function apply(ctx: ClientContext): void {
     // 1.1：接入预览与显式登记。
     registerPreview,
     registerSource,
+    // 3.1：按实例的本机聊天读写（创建／关联／认领／解绑／打开／重绑）。
+    listChats: overviewChats,
+    listChatSessions: overviewChatSessions,
+    createChat: (request) => chatCreate(request.instanceId, request.operationId, request.nodeIds, request.purpose),
+    linkChat: (request) => chatLink(request.instanceId, request.operationId, request.sessionId, request.nodeIds, request.purpose),
+    claimChat: (request) => chatClaim(request.instanceId, request.operationId, request.sessionId, request.nodeIds, request.purpose),
+    unlinkChat: (request) => chatUnlink(request.instanceId, request.operationId, request.linkId),
+    resolveChatLinkTarget: chatTarget,
+    rebindResumeChat: chatRebindResume,
     // 1.1 探针实证：fiber 注入 uiWorkspace 后 openSession(id) 落到指定 Session。
     // 宿主生成的类型不随插件分发，这里按探针实证的最小结构访问。
     openSession: (sessionId) => {

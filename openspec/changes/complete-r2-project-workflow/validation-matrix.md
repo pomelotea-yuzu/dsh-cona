@@ -37,11 +37,11 @@
 
 | ID | [增量场景](specs/project-conversation-context/spec.md) | 层级与判据 | 状态 |
 |---|---|---|---|
-| W01 | 独立实例中的多个真实会话 | A＋H · B 两会话的实际导航、双向查询、错误关联拒绝、解绑及无执行副作用。中英与英文回退下保留用户填写的用途 | `untested` |
+| W01 | 独立实例中的多个真实会话 | A＋H · B 两会话的实际导航、双向查询、错误关联拒绝、解绑及无执行副作用。中英与英文回退下保留用户填写的用途 | `pass`（2026-11-23 A 层：概览九个 `conaOverview/chat*` 入口按 instanceId 定向到该实例聊天服务；会话目录按实例 cwd 过滤，另一副本的会话与无 cwd 会话不可见、不可冒领（`session-not-visible`）；同会话不同用途为多条链接、同用途合并节点（6.1 既有）；解绑支持整条与按节点裁剪；打开走 `openTarget` 复查后只调宿主导航，控制器用例断言快照与命令调用数为 0（无执行副作用）；用途按用户原文展示与提交，中英 key 一致（check:locale）。见 [3.1 记录](implementation/2026-11-23-3.1-instance-chats.md)。两会话真实导航与操作前后事实随 5.4 H 层补） |
 | W03 | 从接续摘要发起多节点新工作 | A＋H · 独立 profile 将 B 设为配置实例并重绑，比较准备、消费后的范围、来源和旧验证。确认另一个聊天、未选节点和迟到请求被拒 | `untested` |
 | W04 | 获准和越界的移动及插入 | A＋F＋H · 配置实例真实 Agent 使用 `move`／`insert`，检查缺动作、源／目标／同级越权、无根组许可的重排、精确版本、新 ID 和旧绑定拒绝。即使有根组重排和插入许可，两类 `parentId: null` 仍返回 `parent-not-found`，获准的现有父节点可正常插入 | `untested` |
-| W05 | [多个关联聊天时打开选定会话](specs/project-overview-resume/spec.md) | A＋H · B 卡片打开所选 Session，A 目标、队列及订阅原样。B 的项目工作入口仍不可用，未建立 A 可信绑定的工具请求被拒 | `untested` |
-| W06 | [原聊天已失效或从干净环境接入](specs/project-overview-resume/spec.md) | F＋H · 同名及失效会话、明确重绑和实际 Session 导航，中英／英文回退提示，接续原文、发送数及运行保持 | `untested` |
+| W05 | [多个关联聊天时打开选定会话](specs/project-overview-resume/spec.md) | A＋H · B 卡片打开所选 Session，A 目标、队列及订阅原样。B 的项目工作入口仍不可用，未建立 A 可信绑定的工具请求被拒 | `pass`（2026-11-23 A 层：卡片与聊天列表的打开都先经 Host 复查链接与宿主实际 Session，通过后只调 `uiWorkspace.openSession`；控制器用例断言该路径不读快照、不发命令，A 的运行目标／队列／订阅不参与；实例行 `configured` 只对启动配置实例为真，界面据此显示工作入口不可用；未建立 A 可信绑定的工具请求仍按 R1 绑定入口拒绝（既有 `project-tools` 用例）。见 [3.1 记录](implementation/2026-11-23-3.1-instance-chats.md)。真实宿主下 A 活动运行与独立订阅不变的观测随 5.4 补） |
+| W06 | [原聊天已失效或从干净环境接入](specs/project-overview-resume/spec.md) | F＋H · 同名及失效会话、明确重绑和实际 Session 导航，中英／英文回退提示，接续原文、发送数及运行保持 | `pass`（2026-11-23 A 层：指针缺失区分 `pointer-not-here` 与 `unlinked`，失效链接显示不可打开；卡片在 `unlinked`／不可用时给显式重绑按钮，`chatRebindResume` 先核对记录版本（不符 `record-version-changed`）再以记录主语节点建立／复用链接，链接身份经宿主会话列表核对后写指针，同名但属其他工作区的会话因 cwd 过滤不可认领；重绑与诊断文案中英齐备、用户用途原文保留。见 [3.1 记录](implementation/2026-11-23-3.1-instance-chats.md)。公开资料仅在干净 profile 的实测（接续原文、发送数与运行保持）随 5.4 补，F 层的 Git 传递随 5.2） |
 
 ## 项目路线图
 
