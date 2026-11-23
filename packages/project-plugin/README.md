@@ -114,6 +114,22 @@ node lib/cli/local.js release-lock --local-root <目录> (--force | --token <tok
 - **孤立正文**：正文写入但资料头未引用时，校验报 `orphan-body`，查询不当作已发布记录。
 - **断电限制**：以上只有“同目录临时文件 + rename + 回读”，没有目录 fsync，也不跨目录／跨介质成事务；进程被强杀或突然断电时的持久性未证明，不宣称断电安全。
 
+## 公开格式版本（4.1）
+
+- **v1**：`schemaVersion: 1`，`plan` 只含 `nodes` 与 `dependencies`；既有 schema、canonical 字节与向量保持不变。
+- **v2**：`schemaVersion: 2`，`plan` 增加 `roadmap`（里程碑与交付引用，可为空集合）。从 v1 启用 v2 会改变
+  `schemaVersion` 与投影，因此必然产生新指纹；原 v1 指纹只作为历史。
+- **随包工件**：`formats/v2/` 提供 `project-v2.schema.json`、`plan-canonicalization-v2.md`（跨语言规范化说明）、
+  `plan-vectors-v2.json`（主实现与独立第二实现都必须复算）与 `roadmap-protocol.md`（可读语义与正反例）。
+  它们随插件包分发，并在新建资料根时与 v1 工件一起落盘到 `schema/`、`protocol/`。
+- **分派与诊断**：读取先看 `schemaVersion`（1／2，其他拒绝）；v1 出现 `plan.roadmap` 按未知字段拒绝，
+  v2 缺 `roadmap` 按缺失字段拒绝。里程碑节点缺失、重复里程碑、重复交付、交付记录缺失或哈希不符、
+  伪造指纹都有稳定诊断码（`milestone-node-missing`／`duplicate-milestone`／`duplicate-milestone-delivery`／
+  `milestone-delivery-record-missing`／`milestone-delivery-hash-mismatch`／`plan-version-mismatch`）。
+- **普通编辑保留扩展**：结构命令与撤销重做原样保留未被编辑的 `roadmap`；里程碑的专门编辑与完成流程见 4.3。
+- **独立核对**：`node lib/cli/validate.js check-file <project.json>` 与 `check <资料根>` 对 v1／v2 都可用，
+  不依赖 DSH 或本机状态。
+
 ## 外部编辑与刷新
 
 外部（Git checkout、其他 Agent、手工编辑）改动资料后按固定顺序处理，不自动合并、不自动重放：

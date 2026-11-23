@@ -42,6 +42,24 @@ export interface DependencyEdge {
 export interface Plan {
   nodes: WorkNode[];
   dependencies: DependencyEdge[];
+  /** v2 扩展（schemaVersion 2 必填；v1 文档不得出现）。 */
+  roadmap?: Roadmap;
+}
+
+/** v2 交付引用：同项目节点，或哈希精确匹配的已发布成果记录。 */
+export type MilestoneDelivery =
+  | { kind: 'node'; refId: string }
+  | { kind: 'record'; refId: string; contentHash: Sha256Ref };
+
+/** v2 里程碑：以树中一个稳定节点及其自身完成条件为准，每节点至多一个。 */
+export interface Milestone {
+  nodeId: string;
+  deliveries: MilestoneDelivery[];
+}
+
+/** v2 路线图扩展：只含里程碑集合（可为空），不表达执行依赖或完成状态。 */
+export interface Roadmap {
+  milestones: Milestone[];
 }
 
 export interface ProjectMeta {

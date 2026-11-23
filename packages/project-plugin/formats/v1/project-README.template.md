@@ -8,6 +8,7 @@
 - `schema/project-v1.schema.json`：v1 结构说明（供阅读；权威校验以协议为准）。
 - `protocol/plan-canonicalization.md`：规划指纹字节协议（权威）。
 - `protocol/plan-vectors.json`：强制一致性向量（实现必须复算，不得由被测实现重新生成）。
+- `schema/project-v2.schema.json` 与 `protocol/plan-canonicalization-v2.md`：v2 格式说明（`plan.roadmap` 里程碑与交付引用）；`protocol/plan-vectors-v2.json` 为 v2 向量，`protocol/roadmap-protocol.md` 为可读语义与正反例。v1 资料保持原 schema 与指纹，不补扩展字段。
 - `records/`：不可变记录正文，路径 `records/<recordId>/<contentHash-hex>.md`。
 
 ## 如何编辑与校验

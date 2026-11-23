@@ -183,11 +183,11 @@ test('刷新：未知 schema、冲突标记与非法树都拒绝，且不改本�
   assert.equal(first.status, 0);
   const generation = first.json.aggregate?.source.generation;
 
-  // 未知 schema：schemaVersion 2。
+  // 未知 schema：schemaVersion 3（v2 已支持，不能再当未知版本用）。
   const doc = readDoc(ctx.source);
   writeFileSync(
     path.join(ctx.source, 'project.json'),
-    JSON.stringify({ ...doc, schemaVersion: 2 }, null, 2) + '\n',
+    JSON.stringify({ ...doc, schemaVersion: 3 }, null, 2) + '\n',
   );
   const unsupported = refresh(ctx);
   assert.equal(unsupported.status, 1);

@@ -319,10 +319,10 @@ test('混合资料：正文被改写或 schema 未知时拒绝返回半截快照
   assert.equal(mixed.status, 'rejected', JSON.stringify(mixed));
   assert.equal(mixed.status === 'rejected' ? mixed.code : '', 'source-body-hash-mismatch');
 
-  // 恢复正文后改为未知 schema：仍拒绝，且码为 unsupported-format。
+  // 恢复正文后改为未知 schema（v2 已支持，这里用 3）：仍拒绝，且码为 unsupported-format。
   writeFileSync(bodyFile, '# 原始正文\n');
   const head = JSON.parse(readFileSync(path.join(ctx.source, 'project.json'), 'utf8')) as Record<string, unknown>;
-  writeFileSync(path.join(ctx.source, 'project.json'), JSON.stringify({ ...head, schemaVersion: 2 }, null, 2));
+  writeFileSync(path.join(ctx.source, 'project.json'), JSON.stringify({ ...head, schemaVersion: 3 }, null, 2));
   const unsupported = await snapshots(ctx).read(OWNER, { instanceId: ctx.instanceId, connectionGeneration: 1 });
   assert.equal(unsupported.status, 'rejected', JSON.stringify(unsupported));
   assert.equal(unsupported.status === 'rejected' ? unsupported.code : '', 'unsupported-format');

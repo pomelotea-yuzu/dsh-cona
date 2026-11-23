@@ -101,10 +101,27 @@ export function planProjection(doc: ProjectDocument): { schemaVersion: number; p
   };
 }
 
-/** 三条白名单集合按协议 §2 排序（副本排序，不修改调用者输入）。 */
+/** v2 路线图排序：里程碑按 nodeId，里程碑内交付按 (kind, refId) 的 UTF-16 序。 */
+function sortRoadmap(roadmap: NonNullable<ProjectDocument['plan']['roadmap']>): NonNullable<ProjectDocument['plan']['roadmap']> {
+  return {
+    milestones: sortByPredicate(roadmap.milestones, (a, b) => utf16Compare(a.nodeId, b.nodeId)).map((milestone) => ({
+      nodeId: milestone.nodeId,
+      deliveries: sortByPredicate(milestone.deliveries, (a, b) => {
+        const byKind = utf16Compare(a.kind, b.kind);
+        if (byKind !== 0) return byKind;
+        return utf16Compare(a.refId, b.refId);
+      }).map((delivery) => (delivery.kind === 'record'
+        ? { kind: 'record' as const, refId: delivery.refId, contentHash: delivery.contentHash }
+        : { kind: 'node' as const, refId: delivery.refId })),
+    })),
+  };
+}
+
+/** 三条白名单集合按协议 §2 排序（副本排序，不修改调用者输入）；v2 另排 roadmap。 */
 export function sortProjectionWhitelists<
-  P extends { project: { repositories: { id: string }[] }; plan: { nodes: { id: string }[]; dependencies: { nodeId: string; requiresNodeId: string }[] } },
+  P extends { project: { repositories: { id: string }[] }; plan: { nodes: { id: string }[]; dependencies: { nodeId: string; requiresNodeId: string }[]; roadmap?: ProjectDocument['plan']['roadmap'] } },
 >(projection: P): P {
+  const roadmap = projection.plan.roadmap;
   return {
     ...projection,
     project: {
@@ -119,8 +136,9 @@ export function sortProjectionWhitelists<
         if (byNode !== 0) return byNode;
         return utf16Compare(a.requiresNodeId, b.requiresNodeId);
       }),
+      ...(roadmap === undefined ? {} : { roadmap: sortRoadmap(roadmap) }),
     },
-  };
+  } as P;
 }
 
 export interface PlanVersionComputation {

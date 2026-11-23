@@ -11,8 +11,11 @@ import { readInScope } from './path-scope.js';
 import { publishProjectDocument, writeBodyImmutable } from './publish.js';
 import { serializeProjectDocument } from './project-json.js';
 
-/** 随包格式资源在资料根内的相对落点（design §3）。 */
-export const FORMAT_ASSET_FILES: readonly { source: string; target: string }[] = [
+/**
+ * 随包格式资源在资料根内的相对落点（design §3）。
+ * `from` 为随包来源子目录：v1（默认）与 v2；v2 工件随包分发，便于外部编辑者按版本取用。
+ */
+export const FORMAT_ASSET_FILES: readonly { source: string; target: string; from?: 'v1' | 'v2' }[] = [
   { source: 'project-README.template.md', target: 'README.md' },
   { source: 'project-v1.schema.json', target: 'schema/project-v1.schema.json' },
   { source: 'plan-canonicalization.md', target: 'protocol/plan-canonicalization.md' },
@@ -23,6 +26,11 @@ export const FORMAT_ASSET_FILES: readonly { source: string; target: string }[] =
   // 2.4：用户模板的可移植工件（schema、协议说明含正反例）。
   { source: 'user-template-v1.schema.json', target: 'schema/user-template-v1.schema.json' },
   { source: 'user-template-protocol.md', target: 'protocol/user-template-protocol.md' },
+  // 4.1：v2 投影（schema、规范化说明、向量与路线图协议）。
+  { source: 'project-v2.schema.json', target: 'schema/project-v2.schema.json', from: 'v2' },
+  { source: 'plan-canonicalization-v2.md', target: 'protocol/plan-canonicalization-v2.md', from: 'v2' },
+  { source: 'plan-vectors-v2.json', target: 'protocol/plan-vectors-v2.json', from: 'v2' },
+  { source: 'roadmap-protocol.md', target: 'protocol/roadmap-protocol.md', from: 'v2' },
 ];
 
 /** 只描述磁盘现状：不判断项目是否合法，也不因存在其他文件就推断资料归属。 */
@@ -47,13 +55,16 @@ export async function inspectRoot(root: string): Promise<RootInspection> {
 
 /**
  * 放置格式资源并建立 records/。使用 COPYFILE_EXCL：目标已存在即失败，不静默覆盖别人的资料。
+ * `formatsDir` 指向随包 formats/v1；v2 来源解析为同级 formats/v2。
  */
 export async function copyFormatAssets(root: string, formatsDir: string): Promise<void> {
   await mkdir(path.join(root, 'records'), { recursive: true });
   await mkdir(path.join(root, 'schema'), { recursive: true });
   await mkdir(path.join(root, 'protocol'), { recursive: true });
+  const formatsRoot = path.dirname(formatsDir);
   for (const asset of FORMAT_ASSET_FILES) {
-    await copyFile(path.join(formatsDir, asset.source), path.join(root, ...asset.target.split('/')), constants.COPYFILE_EXCL);
+    const sourceDir = asset.from === 'v2' ? path.join(formatsRoot, 'v2') : formatsDir;
+    await copyFile(path.join(sourceDir, asset.source), path.join(root, ...asset.target.split('/')), constants.COPYFILE_EXCL);
   }
 }
 

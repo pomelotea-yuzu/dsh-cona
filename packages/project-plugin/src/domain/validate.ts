@@ -426,6 +426,99 @@ function checkRecordEntry(
   }
 }
 
+const MILESTONE_KEYS = ['deliveries', 'nodeId'] as const;
+const DELIVERY_NODE_KEYS = ['kind', 'refId'] as const;
+const DELIVERY_RECORD_KEYS = ['kind', 'refId', 'contentHash'] as const;
+
+/**
+ * v2 roadmap 校验（design §4）：里程碑只认树中存在的稳定节点，每节点至多一个；
+ * 交付项按 kind 区分形状，同里程碑内 (kind, refId) 不得重复。
+ * 交付引用必须指向同项目存在的节点或索引中哈希精确匹配的已发布成果。
+ */
+function checkRoadmap(
+  value: unknown,
+  nodeIds: ReadonlySet<string>,
+  recordHashes: ReadonlyMap<string, string>,
+  issues: ValidationIssue[],
+): void {
+  if (!checkKeys(value, ['milestones'], [], '/plan/roadmap', issues)) return;
+  const roadmap = value as { [key: string]: unknown };
+  const milestones = roadmap['milestones'];
+  if (!Array.isArray(milestones)) {
+    add(issues, 'invalid-type', '/plan/roadmap/milestones', '必须是数组');
+    return;
+  }
+  const seenMilestones = new Set<string>();
+  milestones.forEach((milestone, index) => {
+    const path = `/plan/roadmap/milestones/${index}`;
+    if (!checkKeys(milestone, MILESTONE_KEYS, [], path, issues)) return;
+    const item = milestone as { [key: string]: unknown };
+    const okNode = checkUuid(item['nodeId'], `${path}/nodeId`, issues);
+    if (okNode) {
+      const nodeId = item['nodeId'] as string;
+      if (seenMilestones.has(nodeId)) {
+        add(issues, 'duplicate-milestone', `${path}/nodeId`, `节点 ${nodeId} 已有里程碑条目`);
+      }
+      seenMilestones.add(nodeId);
+      if (!nodeIds.has(nodeId)) {
+        add(issues, 'milestone-node-missing', `${path}/nodeId`, `里程碑节点 ${nodeId} 不在当前树中`);
+      }
+    }
+    const deliveries = item['deliveries'];
+    if (!Array.isArray(deliveries)) {
+      add(issues, 'invalid-type', `${path}/deliveries`, '必须是数组');
+      return;
+    }
+    const seenDeliveries = new Set<string>();
+    deliveries.forEach((delivery, deliveryIndex) => {
+      const deliveryPath = `${path}/deliveries/${deliveryIndex}`;
+      if (!isRecord(delivery)) {
+        add(issues, 'invalid-type', deliveryPath, '必须是对象');
+        return;
+      }
+      const kind = delivery['kind'];
+      if (kind === 'node') {
+        if (!checkKeys(delivery, DELIVERY_NODE_KEYS, [], deliveryPath, issues)) return;
+        const okRef = checkUuid(delivery['refId'], `${deliveryPath}/refId`, issues);
+        if (okRef) {
+          const refId = delivery['refId'] as string;
+          if (item['nodeId'] === refId) {
+            add(issues, 'milestone-self-delivery', `${deliveryPath}/refId`, '里程碑不能把自身作为交付');
+          } else if (!nodeIds.has(refId)) {
+            add(issues, 'milestone-delivery-node-missing', `${deliveryPath}/refId`, `交付节点 ${refId} 不在当前树中`);
+          }
+          const key = `node\u0000${refId}`;
+          if (seenDeliveries.has(key)) {
+            add(issues, 'duplicate-milestone-delivery', `${deliveryPath}/refId`, '同一里程碑内交付项重复');
+          }
+          seenDeliveries.add(key);
+        }
+        return;
+      }
+      if (kind === 'record') {
+        if (!checkKeys(delivery, DELIVERY_RECORD_KEYS, [], deliveryPath, issues)) return;
+        const okRef = checkUuid(delivery['refId'], `${deliveryPath}/refId`, issues);
+        const okHash = checkSha256Ref(delivery['contentHash'], `${deliveryPath}/contentHash`, issues, 'invalid-delivery-hash');
+        if (!okRef) return;
+        const refId = delivery['refId'] as string;
+        const actual = recordHashes.get(refId);
+        if (actual === undefined) {
+          add(issues, 'milestone-delivery-record-missing', `${deliveryPath}/refId`, `交付记录 ${refId} 不在索引中`);
+        } else if (okHash && actual !== delivery['contentHash']) {
+          add(issues, 'milestone-delivery-hash-mismatch', `${deliveryPath}/contentHash`, '交付记录的正文哈希与索引不一致');
+        }
+        const key = `record\u0000${refId}`;
+        if (seenDeliveries.has(key)) {
+          add(issues, 'duplicate-milestone-delivery', `${deliveryPath}/refId`, '同一里程碑内交付项重复');
+        }
+        seenDeliveries.add(key);
+        return;
+      }
+      add(issues, 'invalid-delivery-kind', `${deliveryPath}/kind`, "kind 必须是 'node' 或 'record'");
+    });
+  });
+}
+
 /** 校验完整文档。传入 sha256 时额外比对 planVersion 与重算指纹。 */
 export function validateProjectDocument(value: unknown, options: { sha256?: Sha256Fn } = {}): ValidationResult {
   const issues: ValidationIssue[] = [];
@@ -433,13 +526,18 @@ export function validateProjectDocument(value: unknown, options: { sha256?: Sha2
     return { ok: false, issues };
   }
   const doc = value as { [key: string]: unknown };
-  if (doc['schemaVersion'] !== 1 || typeof doc['schemaVersion'] !== 'number' || !Number.isSafeInteger(doc['schemaVersion'])) {
-    add(issues, 'invalid-schema-version', '/schemaVersion', 'schemaVersion 必须是整数 1');
+  const schemaVersion = doc['schemaVersion'];
+  const supportedVersion = typeof schemaVersion === 'number'
+    && Number.isSafeInteger(schemaVersion)
+    && (schemaVersion === 1 || schemaVersion === 2);
+  if (!supportedVersion) {
+    add(issues, 'invalid-schema-version', '/schemaVersion', 'schemaVersion 必须是整数 1 或 2');
   }
   checkProject(doc['project'], '/project', issues);
 
-  // plan：先核对形状，再做结构校验。
-  if (!checkKeys(doc['plan'], PLAN_KEYS, [], '/plan', issues)) {
+  // plan：先核对形状，再做结构校验。v2 额外要求 roadmap；v1 出现 roadmap 按未知字段拒绝。
+  const planKeys = schemaVersion === 2 ? [...PLAN_KEYS, 'roadmap'] as const : PLAN_KEYS;
+  if (!checkKeys(doc['plan'], planKeys, [], '/plan', issues)) {
     return { ok: false, issues };
   }
   const plan = doc['plan'] as { [key: string]: unknown };
@@ -514,6 +612,18 @@ export function validateProjectDocument(value: unknown, options: { sha256?: Sha2
       add(issues, 'verification-subject-not-found', `/records/${index}/verification/subject/id`, `受检记录 ${subject.id} 不在索引中`);
     }
   });
+
+  // v2 路线图：在节点与记录索引都核对后验证引用（里程碑节点、交付节点、交付记录哈希）。
+  if (schemaVersion === 2 && plan['roadmap'] !== undefined) {
+    const recordHashes = new Map<string, string>();
+    for (const entry of doc['records']) {
+      const record = entry as { [key: string]: unknown };
+      if (typeof record['id'] === 'string' && typeof record['contentHash'] === 'string') {
+        recordHashes.set(record['id'], record['contentHash']);
+      }
+    }
+    checkRoadmap(plan['roadmap'], nodeIds, recordHashes, issues);
+  }
 
   // done 节点完成条件（1.4）：非空 criteria + 显式 pass 验证记录；不按子节点推导。
   const passVerifiedNodeIds = new Set<string>();

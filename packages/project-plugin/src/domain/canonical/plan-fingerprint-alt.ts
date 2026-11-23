@@ -170,11 +170,13 @@ interface ProjectionAlt {
   plan: {
     nodes: ProjectDocument['plan']['nodes'];
     dependencies: ProjectDocument['plan']['dependencies'];
+    roadmap?: ProjectDocument['plan']['roadmap'];
   };
 }
 
 /** 独立投影：显式重建全部字段（非深拷贝共享引用）。 */
 function projectionAlt(doc: ProjectDocument): ProjectionAlt {
+  const roadmap = doc.plan.roadmap;
   return {
     schemaVersion: doc.schemaVersion,
     project: {
@@ -198,6 +200,18 @@ function projectionAlt(doc: ProjectDocument): ProjectionAlt {
         nodeId: edge.nodeId,
         requiresNodeId: edge.requiresNodeId,
       })),
+      ...(roadmap === undefined
+        ? {}
+        : {
+            roadmap: {
+              milestones: roadmap.milestones.map((milestone) => ({
+                nodeId: milestone.nodeId,
+                deliveries: milestone.deliveries.map((delivery) => (delivery.kind === 'record'
+                  ? { kind: 'record' as const, refId: delivery.refId, contentHash: delivery.contentHash }
+                  : { kind: 'node' as const, refId: delivery.refId })),
+              })),
+            },
+          }),
     },
   };
 }
@@ -206,8 +220,24 @@ function sortByIdAlt<T extends { id: string }>(items: readonly T[]): T[] {
   return items.slice().sort((a, b) => utf16CompareAlt(a.id, b.id));
 }
 
-/** 独立白名单排序：repositories/nodes 按 id，dependencies 按二元组。 */
+/** 独立白名单排序：repositories/nodes 按 id，dependencies 按二元组，roadmap 按里程碑与交付键。 */
 function sortWhitelistsAlt(projection: ProjectionAlt): ProjectionAlt {
+  const roadmap = projection.plan.roadmap;
+  const sortedRoadmap = roadmap === undefined
+    ? undefined
+    : {
+        milestones: roadmap.milestones
+          .slice()
+          .sort((a, b) => utf16CompareAlt(a.nodeId, b.nodeId))
+          .map((milestone) => ({
+            nodeId: milestone.nodeId,
+            deliveries: milestone.deliveries.slice().sort((a, b) => {
+              const byKind = utf16CompareAlt(a.kind, b.kind);
+              if (byKind !== 0) return byKind;
+              return utf16CompareAlt(a.refId, b.refId);
+            }),
+          })),
+      };
   return {
     schemaVersion: projection.schemaVersion,
     project: {
@@ -222,6 +252,7 @@ function sortWhitelistsAlt(projection: ProjectionAlt): ProjectionAlt {
         if (first !== 0) return first;
         return utf16CompareAlt(a.requiresNodeId, b.requiresNodeId);
       }),
+      ...(sortedRoadmap === undefined ? {} : { roadmap: sortedRoadmap }),
     },
   };
 }

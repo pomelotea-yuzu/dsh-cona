@@ -1859,11 +1859,15 @@ export class ProjectCommandService {
         },
       };
     }
+    // v2 roadmap 不参与结构逆向：撤销/重做保留未被编辑的里程碑扩展。
+    const inversePlan = doc.plan.roadmap === undefined
+      ? applied.value
+      : { ...applied.value, roadmap: doc.plan.roadmap };
     const draft: ProjectDocument = {
       schemaVersion: doc.schemaVersion,
       project: doc.project,
-      plan: applied.value,
-      planVersion: computePlanVersion({ ...doc, plan: applied.value, planVersion: '' }, this.deps.sha256).planVersion,
+      plan: inversePlan,
+      planVersion: computePlanVersion({ ...doc, plan: inversePlan, planVersion: '' }, this.deps.sha256).planVersion,
       records: doc.records,
     };
     let validated = validateProjectDocument(draft, { sha256: this.deps.sha256 });

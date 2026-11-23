@@ -189,10 +189,15 @@ export function applyPlanCommand(
   }
   if (!result.ok) return { ok: false, issues: result.issues };
 
+  // v2 roadmap 不属于普通变换的目标：结构编辑原样保留未编辑的里程碑扩展
+  // （里程碑的增删改由专用命令处理；4.5 再逐命令补保留断言）。
+  const transformed: Plan = doc.plan.roadmap === undefined
+    ? result.value
+    : { ...result.value, roadmap: doc.plan.roadmap };
   const draft: ProjectDocument = {
     schemaVersion: doc.schemaVersion,
     project: doc.project,
-    plan: result.value,
+    plan: transformed,
     planVersion: '',
     records: doc.records,
   };
