@@ -52,6 +52,16 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
     void onEnterTree(row.instanceId).then(() => controller.collapse());
   };
 
+  /** 4.4：目标视图定位节点——只切换树面板选择，不写资料、不启动执行。 */
+  const locateNode = (nodeId: string): void => {
+    const selected = state.selectedId;
+    if (selected === null) return;
+    const row = state.instances.find((item) => item.instanceId === selected);
+    if (row === undefined || !row.readable) return;
+    if (!controller.locateMilestoneNode(nodeId)) return;
+    void onEnterTree(selected).then(() => controller.collapse());
+  };
+
   return (
     <div data-cona-top="1" style={{ position: 'fixed', left: 8, top: 6, zIndex: 1000 }}>
       <button
@@ -133,7 +143,7 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
           <ResumeCardView state={state.resumeCard} chatNotice={state.chatNotice} controller={controller} t={t} />
           <ChatSection controller={controller} state={state} t={t} />
           <WorkSection controller={controller} state={state} t={t} />
-          <RoadmapSection controller={controller} state={state} t={t} />
+          <RoadmapSection controller={controller} state={state} t={t} onLocate={locateNode} />
           <ResumeSaveSection controller={controller} state={state} t={t} />
           <MigrationSection controller={controller} state={state} t={t} />
           <RegisterSection controller={controller} state={state} t={t} />
@@ -905,8 +915,13 @@ const ROADMAP_NOTICE_KEY: Record<string, LocaleKey> = {
 };
 
 /** 4.2 路线图区：v1 空态给启用入口；启用预览展示版本、身份与历史验证影响，确认后显示已启用。 */
-function RoadmapSection(props: { controller: ProjectOverviewController; state: OverviewState; t: TopTranslate }): JSX.Element | null {
-  const { controller, state, t } = props;
+function RoadmapSection(props: {
+  controller: ProjectOverviewController;
+  state: OverviewState;
+  t: TopTranslate;
+  onLocate: (nodeId: string) => void;
+}): JSX.Element | null {
+  const { controller, state, t, onLocate } = props;
   const { roadmap } = state;
   if (state.selectedId === null) return null;
   const view = roadmap.view;
@@ -929,28 +944,125 @@ function RoadmapSection(props: { controller: ProjectOverviewController; state: O
         <>
           <p data-cona-roadmap-enabled="1" style={rowStyle}>{t('roadmapEnabled', { count: String(view.milestones.length) })}</p>
           {view.milestones.length === 0 ? <p style={rowStyle}>{t('roadmapEnabledEmpty')}</p> : null}
-          {view.milestones.map((milestone) => (
-            <div key={milestone.nodeId} data-cona-roadmap-milestone={milestone.nodeId} style={{ fontSize: 12 }}>
-              <div>
-                {milestone.title || milestone.nodeId} · {milestone.status} ·{' '}
-                {t('roadmapMilestoneCounts', {
-                  deliveries: String(milestone.deliveryCount),
-                  criteria: String(milestone.criterionCount),
-                })}
-              </div>
-              {milestone.diagnostics.length > 0 ? (
-                <div style={{ color: '#8a6d3b' }}>{milestone.diagnostics.join('、')}</div>
-              ) : null}
-              {milestone.completionRecordId !== null ? (
-                <div style={{ color: '#8a6d3b' }}>
-                  {t('roadmapCompletedBy', {
-                    record: milestone.completionRecordId.slice(0, 8),
-                    version: (milestone.completionSubjectVersion ?? '').slice(7, 19),
-                  })}
+          {view.milestones.map((milestone) => {
+            const chats = state.chats.links.filter(
+              (link) => link.nodeIds.includes(milestone.nodeId) && link.visible !== false,
+            );
+            const latest = milestone.progress[0];
+            const completion = milestone.completions[0];
+            const versionLabel = (value: string | null): string => (value ?? '').replace(/^sha256:/, '').slice(0, 12);
+            return (
+              <div
+                key={milestone.nodeId}
+                data-cona-roadmap-milestone={milestone.nodeId}
+                style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed var(--dsh-border, #eee)', fontSize: 12 }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <strong style={{ flex: 1 }}>{milestone.title || milestone.nodeId}</strong>
+                  <span style={{ opacity: 0.75 }}>{milestone.status}</span>
+                  <button type="button" data-cona-locate={milestone.nodeId} onClick={() => onLocate(milestone.nodeId)}>
+                    {t('roadmapLocate')}
+                  </button>
                 </div>
-              ) : null}
-            </div>
-          ))}
+                {milestone.goal !== '' ? <div>{t('roadmapGoal', { text: milestone.goal })}</div> : null}
+                <div>
+                  {milestone.completionCriteria.length === 0
+                    ? t('roadmapCriteriaNone')
+                    : t('roadmapCriteria', { text: milestone.completionCriteria.join('；') })}
+                </div>
+
+                <div style={{ marginTop: 4 }}><strong>{t('roadmapDeliveries')}</strong></div>
+                {milestone.deliveries.length === 0 ? <div>{t('roadmapDeliveryNone')}</div> : null}
+                {milestone.deliveries.map((delivery) => (
+                  <div
+                    key={`${delivery.kind}:${delivery.refId}`}
+                    data-cona-delivery={delivery.refId}
+                    style={{ color: delivery.diagnostic === null ? undefined : '#8a6d3b' }}
+                  >
+                    {delivery.kind === 'node'
+                      ? t('roadmapDeliveryNode', {
+                          title: delivery.title ?? delivery.refId,
+                          status: delivery.status ?? 'unknown',
+                        })
+                      : t('roadmapDeliveryRecord', {
+                          kind: delivery.recordKind ?? 'record',
+                          summary: delivery.summary ?? delivery.refId,
+                        })}
+                    {delivery.diagnostic === null
+                      ? null
+                      : ` · ${t('roadmapDeliveryUnresolved', { code: delivery.diagnostic })}`}
+                    {delivery.kind === 'record' && delivery.subjectNodeId !== null ? (
+                      <button
+                        type="button"
+                        data-cona-check-record={delivery.refId}
+                        onClick={() => onLocate(delivery.subjectNodeId as string)}
+                      >
+                        {t('roadmapCheckRecord')}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+
+                <div style={{ marginTop: 4 }}><strong>{t('roadmapDeps')}</strong></div>
+                {milestone.dependsOn.length === 0 && milestone.requiredBy.length === 0 ? (
+                  <div>{t('roadmapDepsNone')}</div>
+                ) : null}
+                {milestone.dependsOn.map((item) => (
+                  <div key={`dep-${item.id}`}>
+                    {t('roadmapDependsOn', { text: `${item.title || item.id}（${item.status}）` })}
+                  </div>
+                ))}
+                {milestone.requiredBy.map((item) => (
+                  <div key={`req-${item.id}`}>
+                    {t('roadmapRequiredBy', { text: `${item.title || item.id}（${item.status}）` })}
+                  </div>
+                ))}
+
+                <div style={{ marginTop: 4 }}><strong>{t('roadmapProgress')}</strong></div>
+                {latest === undefined ? <div>{t('roadmapProgressNone')}</div> : (
+                  <div data-cona-progress={latest.recordId}>
+                    <div>{t('roadmapStoppedAt', { text: latest.stoppedAt })}</div>
+                    {latest.outcome === null ? null : <div>{t('roadmapOutcome', { text: latest.outcome })}</div>}
+                    <div>
+                      {t('roadmapNextStep', {
+                        kind: t(latest.nextStepKind === 'confirmed' ? 'roadmapNextStepConfirmed' : 'roadmapNextStepSuggested'),
+                        text: latest.nextStep,
+                      })}
+                    </div>
+                    {latest.openIssues === null ? null : (
+                      <div style={{ color: '#8a6d3b' }}>{t('roadmapOpenIssues', { text: latest.openIssues })}</div>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ marginTop: 4 }}><strong>{t('roadmapCompletionState')}</strong></div>
+                {completion === undefined ? <div>{t('roadmapCompletionNone')}</div> : (
+                  <div style={{ color: completion.current ? undefined : '#8a6d3b' }}>
+                    {t('roadmapCompletionEntry', {
+                      record: completion.recordId.slice(0, 8),
+                      version: versionLabel(completion.subjectVersion),
+                    })}
+                    {completion.current ? null : ` · ${t('roadmapCompletionStale')}`}
+                  </div>
+                )}
+
+                <div style={{ marginTop: 4 }}><strong>{t('roadmapOpenChat')}</strong></div>
+                {chats.length === 0 ? <div>{t('roadmapChatNone')}</div> : null}
+                {chats.map((link) => (
+                  <div key={link.linkId} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span style={{ flex: 1 }}>{link.purpose}</span>
+                    <button
+                      type="button"
+                      data-cona-milestone-chat={link.linkId}
+                      onClick={() => { void controller.openChatLink(link.linkId); }}
+                    >
+                      {t('roadmapOpenChat')}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
         </>
       ) : null}
       {view !== null && !view.enabled ? (

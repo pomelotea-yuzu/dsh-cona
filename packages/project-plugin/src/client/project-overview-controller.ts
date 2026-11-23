@@ -1396,6 +1396,17 @@ export class ProjectOverviewController {
    * 打开所选聊天：Host 复查链接与宿主实际 Session，通过后只做 DSH 导航。
    * 不发快照、不建绑定、不改 A 的目标与订阅。
    */
+  /**
+   * 4.4：把目标视图里的里程碑节点定位到树面板（只切换选择，不写资料、不启动执行）。
+   * 返回 false 表示当前没有可选实例。
+   */
+  locateMilestoneNode(nodeId: string): boolean {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || nodeId === '') return false;
+    this.panelController(instanceId).select(nodeId);
+    return true;
+  }
+
   async openChatLink(linkId: string): Promise<void> {
     const instanceId = this.state.selectedId;
     if (instanceId === null || linkId === '') return;

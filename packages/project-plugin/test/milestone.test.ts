@@ -21,6 +21,7 @@ import { resolveLocalRoot, rootRelation } from '../src/adapters/fs/local-root.js
 import { inspectPrivateRoot } from '../src/adapters/fs/git-guard.js';
 import { computePlanVersion } from '../src/domain/canonical/plan-fingerprint.js';
 import { parseMilestoneCompletionText } from '../src/domain/milestone-completion.js';
+import { buildResume } from '../src/domain/resume.js';
 import { validateProjectDocument } from '../src/domain/validate.js';
 import type {
   MilestoneCompletionEvidence,
@@ -235,6 +236,14 @@ async function setup(schemaVersion = 2): Promise<Harness> {
 const owner: TrustedContext = { kind: 'remote-owner' };
 const rejectionCode = (result: { status: string; code?: string }): string =>
   result.status === 'rejected' ? result.code ?? '' : result.status;
+
+/** 从当前文档索引构造逐项证据（用于规划已变化后重新发布的验证记录）。 */
+const evidenceFromDoc = (h: Harness, items: [string, string][]): MilestoneCompletionEvidence[] =>
+  items.map(([recordId, criterionText], index) => {
+    const record = h.doc().records.find((entry) => entry.id === recordId);
+    assert.ok(record !== undefined, `记录 ${recordId} 应在索引中`);
+    return { criterionIndex: index, criterionText, recordId, contentHash: record?.contentHash ?? '' };
+  });
 
 const evidenceFor = (items: [string, string][]): MilestoneCompletionEvidence[] =>
   items.map(([recordId, criterionText], index) => {
@@ -564,4 +573,113 @@ test('4.3 独立校验 CLI：完成记录正例通过；证据正文被改后拒
     badResult.issues.some((issue) => issue.code === 'completion-evidence-body-hash-mismatch'),
     JSON.stringify(badResult.issues),
   );
+});
+
+test('4.4 目标视图：同源快照投影成果、依赖、接续进展、完成记录当前性', async () => {
+  const h = await setup();
+  // 先建一条直接依赖：里程碑依赖另一分支 C。
+  const deps = await h.service.execute(owner, h.envelope({
+    type: 'set-dependencies', dependencies: [{ nodeId: M, requiresNodeId: C }],
+  }));
+  assert.equal(deps.status, 'committed', JSON.stringify(deps));
+
+  // 发布一条关联里程碑的接续（实际进展／下一步／阻塞来源）。
+  const resume = buildResume({
+    stoppedAt: '完成交付 A 的初版',
+    nextStep: '补齐条件二的证据',
+    nextStepKind: 'confirmed',
+    savedAt: '2026-11-23T10:00:00.000Z',
+    outcome: 'A 初版可用',
+    openIssues: '条件二缺复测记录',
+  });
+  assert.equal(resume.ok, true, JSON.stringify(resume));
+  if (!resume.ok) return;
+  const appended = await h.service.execute(owner, h.envelope({
+    type: 'append-record', kind: 'execution-note', subjectNodeIds: [M],
+    summary: resume.summary, sources: [], body: resume.body,
+  }));
+  assert.equal(appended.status, 'committed', JSON.stringify(appended));
+
+  const view = await h.service.roadmapState(owner, { instanceId: h.instanceId });
+  assert.equal(view.status, 'ok');
+  if (view.status !== 'ok') return;
+  const milestone = view.roadmap.milestones[0];
+  assert.ok(milestone !== undefined);
+  assert.equal(milestone?.title, '里程碑');
+  assert.equal(milestone?.status, 'in-progress');
+  assert.deepEqual(milestone?.completionCriteria, ['条件一', '条件二']);
+  assert.deepEqual(milestone?.deliveries.map((item) => [item.kind, item.refId, item.title, item.status, item.diagnostic]), [
+    ['node', A, '交付 A', 'todo', null],
+  ]);
+  assert.deepEqual(milestone?.dependsOn.map((item) => [item.id, item.title, item.status]), [[C, '另一分支', 'todo']]);
+  assert.deepEqual(milestone?.progress.map((item) => [item.stoppedAt, item.nextStep, item.nextStepKind, item.openIssues]), [
+    ['完成交付 A 的初版', '补齐条件二的证据', 'confirmed', '条件二缺复测记录'],
+  ]);
+  assert.equal(milestone?.completions.length, 0);
+  assert.equal(milestone?.completionCurrent, false);
+  assert.deepEqual(milestone?.diagnostics, []);
+
+  // 上面的依赖与接续改动了规划指纹：按当前版本重新发布两条验证记录，再用它们完成。
+  const freshRecords: string[] = [];
+  for (const label of ['条件一复测', '条件二复测']) {
+    const appendedVerification = await h.service.execute(owner, h.envelope({
+      type: 'append-record', kind: 'verification', subjectNodeIds: [M],
+      summary: `验证 ${label}`, sources: [], body: `# ${label}\n`,
+      verification: { status: 'pass', subject: { kind: 'node', id: M }, subjectVersion: h.doc().planVersion, scope: '本轮复测' },
+    }));
+    assert.equal(appendedVerification.status, 'committed', JSON.stringify(appendedVerification));
+    if (appendedVerification.status !== 'committed' || appendedVerification.recordId === undefined) {
+      throw new Error('验证记录未发布');
+    }
+    freshRecords.push(appendedVerification.recordId);
+  }
+  const completed = await h.service.execute(owner, h.envelope({
+    type: 'complete-milestone', nodeId: M,
+    evidence: evidenceFromDoc(h, [[freshRecords[0]!, '条件一'], [freshRecords[1]!, '条件二']]),
+  }));
+  assert.equal(completed.status, 'committed', JSON.stringify(completed));
+  const afterComplete = await h.service.roadmapState(owner, { instanceId: h.instanceId });
+  assert.equal(afterComplete.status, 'ok');
+  if (afterComplete.status !== 'ok') return;
+  assert.equal(afterComplete.roadmap.milestones[0]?.completionCurrent, true);
+  assert.equal(afterComplete.roadmap.milestones[0]?.status, 'done');
+
+  await h.service.execute(owner, h.envelope({ type: 'set-node-status', nodeId: M, status: 'in-progress' }));
+  await h.service.execute(owner, h.envelope({
+    type: 'update-node', nodeId: M, patch: { completionCriteria: ['条件一（改）', '条件二'] },
+  }));
+  const afterEdit = await h.service.roadmapState(owner, { instanceId: h.instanceId });
+  assert.equal(afterEdit.status, 'ok');
+  if (afterEdit.status !== 'ok') return;
+  const edited = afterEdit.roadmap.milestones[0];
+  assert.equal(edited?.completionCurrent, false, '旧完成记录按历史保留');
+  assert.ok(edited?.diagnostics.includes('milestone-completion-stale'));
+  assert.equal(edited?.completions.length, 1);
+});
+
+test('4.4 目标视图：交付来源失效时标待核对，不隐藏条目', async () => {
+  const h = await setup();
+  const withRecord = await h.service.execute(owner, h.envelope({
+    type: 'set-milestone', nodeId: M,
+    deliveries: [{
+      kind: 'record', refId: DELIVERY_RECORD,
+      contentHash: fixtureDoc().records.find((entry) => entry.id === DELIVERY_RECORD)?.contentHash ?? '',
+    }],
+  }));
+  assert.equal(withRecord.status, 'committed', JSON.stringify(withRecord));
+  const doc = h.doc();
+  writeFileSync(path.join(h.source, 'project.json'), JSON.stringify({
+    ...doc,
+    records: doc.records.filter((entry) => entry.id !== DELIVERY_RECORD),
+  }, null, 2) + '\n');
+
+  const view = await h.service.roadmapState(owner, { instanceId: h.instanceId });
+  assert.equal(view.status, 'ok');
+  if (view.status !== 'ok') return;
+  const delivery = view.roadmap.milestones[0]?.deliveries[0];
+  assert.equal(delivery?.kind, 'record');
+  assert.equal(delivery?.refId, DELIVERY_RECORD, '原 ID 保留');
+  assert.equal(delivery?.summary, null);
+  assert.equal(delivery?.diagnostic, 'milestone-delivery-record-missing');
+  assert.deepEqual(view.roadmap.milestones[0]?.diagnostics, ['milestone-delivery-record-missing']);
 });

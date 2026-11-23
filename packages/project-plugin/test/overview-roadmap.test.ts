@@ -211,3 +211,69 @@ test('4.2 拒绝：清预览并展示稳定码（已启用时不再提示重试�
   assert.equal(state.notice?.code, 'roadmap-already-enabled');
   assert.equal(calls.executed.length, 1);
 });
+
+test('4.4 定位节点：只切换树面板选择，不发命令', async () => {
+  const { controller, calls } = harness();
+  await controller.load();
+  await settle();
+  const milestone = '33333333-3333-4333-8333-333333333333';
+  assert.equal(controller.locateMilestoneNode(milestone), true);
+  assert.equal(controller.panelController(A).getState().selectedNodeId, milestone);
+  assert.equal(calls.executed.length, 0, '导航不写资料、不启动执行');
+});
+
+test('4.4 浏览切换：A 的迟到目标视图被丢弃，B 保持自身快照', async () => {
+  const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const A_MILESTONE = '44444444-4444-4444-8444-444444444444';
+  const B_MILESTONE = '55555555-5555-4555-8555-555555555555';
+  const gate: { release: ((value: RoadmapStateResult) => void) | null } = { release: null };
+  const pendingA = new Promise<RoadmapStateResult>((resolve) => { gate.release = resolve; });
+  const viewOf = (milestone: string): RoadmapStateResult => ({
+    status: 'ok',
+    roadmap: {
+      schemaVersion: 2, planVersion: `pv-${milestone}`, planRevision: 1, sourceEpoch: 1, enabled: true,
+      milestones: [{
+        nodeId: milestone, title: milestone, status: 'todo', goal: '', completionCriteria: [],
+        deliveries: [], dependsOn: [], requiredBy: [], progress: [], completions: [], diagnostics: [],
+        deliveryCount: 0, criterionCount: 0, completionRecordId: null, completionSubjectVersion: null, completionCurrent: false,
+      }],
+    },
+  });
+  const controller = new ProjectOverviewController({
+    listInstances: async () => ({
+      status: 'listed',
+      instances: [
+        { instanceId: A, projectId: 'p', readable: true, sourceDisplay: '~/a', configured: true },
+        { instanceId: B, projectId: 'p', readable: true, sourceDisplay: '~/b', configured: true },
+      ],
+    }),
+    readResumeCard: async () => ({ status: 'empty' }),
+    listResumeChats: async () => ({ status: 'unavailable', reason: 'stub' }),
+    linkResume: async () => ({ status: 'rejected', code: 'stub', message: 'stub' }),
+    resolveChatTarget: async () => ({ status: 'rejected', code: 'stub', message: 'stub' }),
+    openSession: () => undefined,
+    transportFor: () => ({ status: async () => ({ configured: true, instanceId: A, projectId: 'p', sourceKind: 'custom', sourceDisplay: '/x', localRootDisplay: '/l', created: false, error: null }), snapshot: async () => ({ status: 'unsynced', reason: 'stub', attempts: 0, detail: 'stub' } as never), execute: async () => ({ status: 'rejected', code: 'stub', message: 'stub' }) }),
+    newOperationId: () => 'op-1',
+    readRoadmap: async (instanceId) => (instanceId === A ? pendingA : viewOf(B_MILESTONE)),
+  });
+  await controller.load();
+  await settle();
+  // 自动选中 A：其读取挂起。
+  assert.equal(controller.getState().selectedId, A);
+  assert.equal(controller.getState().roadmap.phase, 'loading');
+
+  controller.select(B);
+  await settle();
+  assert.equal(controller.getState().selectedId, B);
+  assert.deepEqual(controller.getState().roadmap.view?.milestones.map((item) => item.nodeId), [B_MILESTONE]);
+
+  assert.ok(gate.release !== null);
+  gate.release?.(viewOf(A_MILESTONE));
+  await settle();
+  assert.equal(controller.getState().selectedId, B);
+  assert.deepEqual(
+    controller.getState().roadmap.view?.milestones.map((item) => item.nodeId),
+    [B_MILESTONE],
+    'A 的迟到结果不写入 B',
+  );
+});

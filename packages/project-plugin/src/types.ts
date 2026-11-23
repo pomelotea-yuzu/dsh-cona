@@ -29,8 +29,12 @@ export type {
   UndoHistoryEntry,
   UserTemplateDescriptor,
   UserTemplateListResult,
-  // 4.2 路线图只读状态与启用预览。
+  // 4.2／4.4 路线图只读状态、目标视图与启用预览。
   RoadmapStateView,
+  MilestoneView,
+  MilestoneDeliveryView,
+  MilestoneProgressView,
+  MilestoneCompletionView,
   RoadmapStateResult,
   RoadmapEnableImpact,
   RoadmapEnablePreviewResult,

@@ -53,6 +53,7 @@ import {
 } from '../domain/milestone-completion.js';
 import { UUID_RE } from '../domain/validate-constants.js';
 import { readSourceBaseline, type SourceBaseline } from './baseline.js';
+import { hasResumePrefix, parseResumeBody } from '../domain/resume.js';
 import { InstanceCommandQueue } from './command-queue.js';
 import type {
   InstanceAggregate,
@@ -240,26 +241,71 @@ export type InversePreviewResult =
     }
   | { status: 'unavailable' | 'conflict' | 'not-found'; direction: InverseDirection; message: string; conflicts?: InverseConflictView[]; current?: CommandCurrent };
 
-/** 路线图只读状态：v1 为“未启用”，v2 给出里程碑节点、条件、诊断与最近完成证据定位。 */
+/** 目标视图的单个交付项：节点或已发布记录；`diagnostic` 非空表示待核对。 */
+export interface MilestoneDeliveryView {
+  kind: 'node' | 'record';
+  refId: string;
+  /** 节点交付：标题与状态；记录交付为 null。 */
+  title: string | null;
+  status: string | null;
+  /** 记录交付：记录类型、摘要、正文哈希与可定位的主体节点。 */
+  recordKind: string | null;
+  summary: string | null;
+  contentHash: string | null;
+  subjectNodeId: string | null;
+  /** `milestone-delivery-*` 诊断码；null 表示当前可核对。 */
+  diagnostic: string | null;
+}
+
+/** 已发布接续摘要（目标视图的“实际进展／下一步／阻塞”来源）。 */
+export interface MilestoneProgressView {
+  recordId: string;
+  savedAt: string;
+  stoppedAt: string;
+  nextStep: string;
+  nextStepKind: 'suggested' | 'confirmed';
+  outcome: string | null;
+  openIssues: string | null;
+}
+
+/** 完成记录定位：`current` 为假表示与当前规划指纹不同（历史／已过期）。 */
+export interface MilestoneCompletionView {
+  recordId: string;
+  subjectVersion: string;
+  current: boolean;
+}
+
+/** 目标视图中的一个里程碑：取节点原值，不复制成第二套真源。 */
+export interface MilestoneView {
+  nodeId: string;
+  title: string;
+  status: string;
+  goal: string;
+  completionCriteria: string[];
+  deliveries: MilestoneDeliveryView[];
+  dependsOn: { id: string; title: string; status: string }[];
+  requiredBy: { id: string; title: string; status: string }[];
+  /** 最近接续（索引倒序，最多 3 条）：实际进展、下一步与未解决问题。 */
+  progress: MilestoneProgressView[];
+  /** 全部完成记录（索引倒序）；第一条即最近一次。 */
+  completions: MilestoneCompletionView[];
+  /** 交付待核对与完成记录过期的汇总诊断码。 */
+  diagnostics: string[];
+  deliveryCount: number;
+  criterionCount: number;
+  completionRecordId: string | null;
+  completionSubjectVersion: string | null;
+  completionCurrent: boolean;
+}
+
+/** 路线图只读状态：v1 为“未启用”，v2 给出里程碑目标视图（同源快照投影）。 */
 export interface RoadmapStateView {
   schemaVersion: number;
   planVersion: string;
   planRevision: number;
   sourceEpoch: number;
   enabled: boolean;
-  milestones: {
-    nodeId: string;
-    /** 取节点原值，不复制成第二套真源。 */
-    title: string;
-    status: string;
-    deliveryCount: number;
-    criterionCount: number;
-    /** 交付引用当前不可核对/已取消的诊断码（顺序同交付项，空表示可核对）。 */
-    diagnostics: string[];
-    /** 最近一条完成记录（按索引顺序）与它记录的受检版本；没有则为 null。 */
-    completionRecordId: string | null;
-    completionSubjectVersion: string | null;
-  }[];
+  milestones: MilestoneView[];
 }
 
 export type RoadmapStateResult =
@@ -545,48 +591,6 @@ function originOf(ctx: TrustedContext): OperationOrigin {
   return ctx.kind === 'remote-owner' ? { kind: 'remote-owner' } : { kind: 'agent-work', workRunId: ctx.workRunId };
 }
 
-/** 路线图只读投影：v1 没有 roadmap 字段，按“未启用 + 空里程碑”表达。 */
-function roadmapStateOf(doc: ProjectDocument, sourceEpoch: number, planRevision: number): RoadmapStateView {
-  const milestones = doc.plan.roadmap?.milestones ?? [];
-  const nodeById = new Map(doc.plan.nodes.map((node) => [node.id, node] as const));
-  return {
-    schemaVersion: doc.schemaVersion,
-    planVersion: doc.planVersion,
-    planRevision,
-    sourceEpoch,
-    enabled: doc.schemaVersion === 2,
-    milestones: milestones.map((milestone) => {
-      const node = nodeById.get(milestone.nodeId);
-      const diagnostics: string[] = [];
-      for (const delivery of milestone.deliveries) {
-        if (delivery.kind === 'node') {
-          const target = nodeById.get(delivery.refId);
-          if (target === undefined) diagnostics.push('milestone-delivery-node-missing');
-          else if (target.status === 'canceled') diagnostics.push('milestone-delivery-node-canceled');
-          continue;
-        }
-        const record = doc.records.find((item) => item.id === delivery.refId);
-        if (record === undefined) diagnostics.push('milestone-delivery-record-missing');
-        else if (record.contentHash !== delivery.contentHash) diagnostics.push('milestone-delivery-hash-mismatch');
-      }
-      const completion = [...doc.records]
-        .reverse()
-        .find((record) => record.kind === 'verification'
-          && record.summary.startsWith(MILESTONE_COMPLETION_SUMMARY_PREFIX)
-          && record.subjectNodeIds.includes(milestone.nodeId));
-      return {
-        nodeId: milestone.nodeId,
-        title: node?.title ?? '',
-        status: node?.status ?? 'unknown',
-        deliveryCount: milestone.deliveries.length,
-        criterionCount: node?.completionCriteria.length ?? 0,
-        diagnostics,
-        completionRecordId: completion?.id ?? null,
-        completionSubjectVersion: completion?.verification?.subjectVersion ?? null,
-      };
-    }),
-  };
-}
 
 function sameOrigin(a: OperationOrigin, b: OperationOrigin): boolean {
   if (a.kind !== b.kind) return false;
@@ -860,8 +864,7 @@ export class ProjectCommandService {
     if (!authorized.ok) return { status: 'rejected', code: authorized.code, message: authorized.message };
     const read = await this.readInstanceSource(request?.instanceId);
     if (!read.ok) return { status: 'rejected', code: read.code, message: read.message };
-    const roadmap = roadmapStateOf(read.doc, read.sourceEpoch, read.planRevision);
-    return { status: 'ok', roadmap };
+    return { status: 'ok', roadmap: await this.buildRoadmapView(read) };
   }
 
   /**
@@ -918,9 +921,140 @@ export class ProjectCommandService {
     };
   }
 
+  /**
+   * 目标视图（tasks 4.4）：从与树／Agent 读取同源的完整快照投影。里程碑取节点原值，
+   * 交付按当前索引解析（失效只标诊断），进展／下一步取关联该节点的已发布接续，
+   * 完成记录按受检版本区分当前与历史。只读；不写资料、不启动执行。
+   */
+  private async buildRoadmapView(
+    read: { doc: ProjectDocument; sourceRoot: string; sourceEpoch: number; planRevision: number },
+  ): Promise<RoadmapStateView> {
+    const { doc } = read;
+    const nodeById = new Map(doc.plan.nodes.map((node) => [node.id, node] as const));
+    const milestones: MilestoneView[] = [];
+    for (const milestone of doc.plan.roadmap?.milestones ?? []) {
+      const node = nodeById.get(milestone.nodeId);
+      const diagnostics: string[] = [];
+      const deliveries: MilestoneDeliveryView[] = milestone.deliveries.map((delivery) => {
+        if (delivery.kind === 'node') {
+          const target = nodeById.get(delivery.refId);
+          const diagnostic = target === undefined
+            ? 'milestone-delivery-node-missing'
+            : target.status === 'canceled'
+              ? 'milestone-delivery-node-canceled'
+              : null;
+          if (diagnostic !== null) diagnostics.push(diagnostic);
+          return {
+            kind: 'node', refId: delivery.refId,
+            title: target?.title ?? null, status: target?.status ?? null,
+            recordKind: null, summary: null, contentHash: null, subjectNodeId: null,
+            diagnostic,
+          };
+        }
+        const record = doc.records.find((item) => item.id === delivery.refId);
+        const diagnostic = record === undefined
+          ? 'milestone-delivery-record-missing'
+          : record.contentHash !== delivery.contentHash
+            ? 'milestone-delivery-hash-mismatch'
+            : null;
+        if (diagnostic !== null) diagnostics.push(diagnostic);
+        return {
+          kind: 'record', refId: delivery.refId,
+          title: null, status: null,
+          recordKind: record?.kind ?? null, summary: record?.summary ?? null,
+          contentHash: record?.contentHash ?? delivery.contentHash,
+          subjectNodeId: record?.subjectNodeIds[0] ?? null,
+          diagnostic,
+        };
+      });
+
+      const dependsOn = doc.plan.dependencies
+        .filter((edge) => edge.nodeId === milestone.nodeId)
+        .map((edge) => {
+          const target = nodeById.get(edge.requiresNodeId);
+          return { id: edge.requiresNodeId, title: target?.title ?? '', status: target?.status ?? 'unknown' };
+        });
+      const requiredBy = doc.plan.dependencies
+        .filter((edge) => edge.requiresNodeId === milestone.nodeId)
+        .map((edge) => {
+          const source = nodeById.get(edge.nodeId);
+          return { id: edge.nodeId, title: source?.title ?? '', status: source?.status ?? 'unknown' };
+        });
+
+      const completions: MilestoneCompletionView[] = [];
+      for (const record of doc.records) {
+        if (record.kind !== 'verification' || !record.summary.startsWith(MILESTONE_COMPLETION_SUMMARY_PREFIX)) continue;
+        if (!record.subjectNodeIds.includes(milestone.nodeId)) continue;
+        const subjectVersion = record.verification?.subjectVersion ?? '';
+        completions.push({ recordId: record.id, subjectVersion, current: subjectVersion === doc.planVersion });
+      }
+      completions.reverse();
+      if (completions[0] !== undefined && !completions[0].current) diagnostics.push('milestone-completion-stale');
+
+      milestones.push({
+        nodeId: milestone.nodeId,
+        title: node?.title ?? '',
+        status: node?.status ?? 'unknown',
+        goal: node?.goal ?? '',
+        completionCriteria: node === undefined ? [] : [...node.completionCriteria],
+        deliveries,
+        dependsOn,
+        requiredBy,
+        progress: await this.readMilestoneProgress(read.sourceRoot, doc, milestone.nodeId),
+        completions,
+        diagnostics,
+        deliveryCount: milestone.deliveries.length,
+        criterionCount: node?.completionCriteria.length ?? 0,
+        completionRecordId: completions[0]?.recordId ?? null,
+        completionSubjectVersion: completions[0]?.subjectVersion ?? null,
+        completionCurrent: completions[0]?.current ?? false,
+      });
+    }
+    return {
+      schemaVersion: doc.schemaVersion,
+      planVersion: doc.planVersion,
+      planRevision: read.planRevision,
+      sourceEpoch: read.sourceEpoch,
+      enabled: doc.schemaVersion === 2,
+      milestones,
+    };
+  }
+
+  /** 最近 3 条关联该节点的已发布接续（正文不可读或格式无效的条目跳过，不阻断视图）。 */
+  private async readMilestoneProgress(
+    sourceRoot: string,
+    doc: ProjectDocument,
+    nodeId: string,
+  ): Promise<MilestoneProgressView[]> {
+    const candidates = doc.records
+      .filter((record) => record.kind === 'execution-note'
+        && hasResumePrefix(record.summary)
+        && record.subjectNodeIds.includes(nodeId))
+      .slice(-3)
+      .reverse();
+    const out: MilestoneProgressView[] = [];
+    for (const record of candidates) {
+      const body = await this.deps.files.readScopedFile(sourceRoot, record.path);
+      if (!body.ok) continue;
+      const parsed = parseResumeBody(new TextDecoder().decode(body.bytes));
+      if (!parsed.ok) continue;
+      const payload = parsed.payload;
+      out.push({
+        recordId: record.id,
+        savedAt: payload.savedAt,
+        stoppedAt: payload.stoppedAt,
+        nextStep: payload.nextStep,
+        nextStepKind: payload.nextStepKind,
+        outcome: payload.outcome ?? null,
+        openIssues: payload.openIssues ?? null,
+      });
+    }
+    return out;
+  }
+
   /** 只读读路：隔离、注册表、聚合与完整基线一次核对；任何失败都返回稳定码。 */
   private async readInstanceSource(instanceId: unknown): Promise<
-    | { ok: true; doc: ProjectDocument; baseline: SourceBaseline; sourceEpoch: number; planRevision: number }
+    | { ok: true; doc: ProjectDocument; baseline: SourceBaseline; sourceRoot: string; sourceEpoch: number; planRevision: number }
     | { ok: false; code: string; message: string }
   > {
     if (typeof instanceId !== 'string' || instanceId === '') {
@@ -948,6 +1082,7 @@ export class ProjectCommandService {
       ok: true,
       doc: baseline.doc,
       baseline: baseline.baseline,
+      sourceRoot: entry.sourceRoot,
       sourceEpoch: entry.sourceGeneration,
       planRevision: aggregate.revisions.plan,
     };
