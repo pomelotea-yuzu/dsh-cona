@@ -271,7 +271,7 @@ test('2.4 owner 可保存模板，agent 直达与错误子树根被拒', async (
   assert.equal(invalid.status, 'committed', '空白标题以外字段合法');
   // 空标题在预览层即被拒（正文构造校验）。
   const preview = await fx.service.previewUserTemplate(OWNER, {
-    type: 'save-user-template', templateId: randomUUID(), title: '  ', bodyLanguage: 'zh-CN',
+    templateId: randomUUID(), title: '  ', bodyLanguage: 'zh-CN',
     rootNodeId: ROOT_NODE, instanceId: fx.instanceId,
   });
   assert.equal(preview.status, 'rejected');

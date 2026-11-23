@@ -551,7 +551,7 @@ export class ProjectCommandService {
   /** 只读预览所选子树的模板正文与摘要（不发布、不改文件）。 */
   async previewUserTemplate(
     ctx: TrustedContext | undefined,
-    request: SaveUserTemplateCommand & { instanceId: string },
+    request: { instanceId: string; templateId: string; title: string; bodyLanguage: string; rootNodeId: string },
   ): Promise<
     | { status: 'available'; body: UserTemplateBody; text: string; summary: string }
     | { status: 'rejected'; code: string; message: string }

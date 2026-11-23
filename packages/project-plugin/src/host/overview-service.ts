@@ -8,7 +8,14 @@ import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { BaselineResult } from '../application/baseline.js'
-import type { CommandEnvelope, CommandResult } from '../application/command-service.js'
+import type {
+  CommandEnvelope,
+  CommandResult,
+  InversePreviewRequest,
+  InversePreviewResult,
+  UndoHistoryResult,
+  UserTemplateListResult,
+} from '../application/command-service.js'
 import type { PresetDescriptor } from '../domain/presets.js'
 import type { SnapshotResult } from '../application/snapshot.js'
 import { denyNonOwner, OWNER_CONTEXT, type OwnerDenial } from './owner-admission.js'
@@ -523,6 +530,71 @@ export class ConaOverviewService extends TypertRemoteService {
     const runtime = resolved.runtime
     if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
     return { status: 'listed', presets: [...runtime.value.command.treePresets()] }
+  }
+
+  // ---------- 2.6：统一树编辑器的只读回读（撤销历史、用户模板目录与预览） ----------
+
+  /** 撤销/重做历史：owner + 实例准入后从私有回执读取，不含公开资料之外的内容。 */
+  @Remote('undoHistory')
+  async undoHistory(request: { instanceId: string }): Promise<UndoHistoryResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.command.undoHistory(OWNER_CONTEXT, { instanceId: request.instanceId })
+  }
+
+  /** 用户模板目录：按实例读取已发布且正文有效的版本。 */
+  @Remote('userTemplates')
+  async userTemplates(request: { instanceId: string }): Promise<UserTemplateListResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.command.listUserTemplates(OWNER_CONTEXT, { instanceId: request.instanceId })
+  }
+
+  /** 撤销/重做预览：确认指纹与冲突对象由命令服务按当前基线重算。 */
+  @Remote('previewUndo')
+  async previewUndo(request: InversePreviewRequest): Promise<InversePreviewResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'unavailable', direction: request?.direction ?? 'undo', message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'unavailable', direction: request.direction, message: badId.message }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return { status: 'unavailable', direction: request.direction, message: resolved.denied.message }
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'unavailable', direction: request.direction, message: runtime.message }
+    return runtime.value.command.previewInverse(OWNER_CONTEXT, request)
+  }
+
+  /** 用户模板保存预览：从所选子树构造正文，不落盘。 */
+  @Remote('previewUserTemplate')
+  async previewUserTemplate(request: {
+    instanceId: string; templateId: string; title: string; bodyLanguage: string; rootNodeId: string;
+  }): Promise<
+    | { status: 'available'; text: string; summary: string; nodeCount: number }
+    | { status: 'rejected'; code: string; message: string }
+  > {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return resolved.denied
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    const result = await runtime.value.command.previewUserTemplate(OWNER_CONTEXT, request)
+    if (result.status !== 'available') return { status: 'rejected', code: result.code, message: result.message }
+    return { status: 'available', text: result.text, summary: result.summary, nodeCount: result.body.nodes.length }
   }
 
   // ---------- 1.1：接入预览与显式登记 ----------

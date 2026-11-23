@@ -11,6 +11,7 @@
 
 import type {
   CommandResult, ConaProjectStatus, ExecuteRequest, FollowEventBatch, FollowHandle, PanelTransport, SnapshotResult, TreePresetsResult,
+  InversePreviewRequest, InversePreviewResult, UndoHistoryResult, UserTemplateListResult,
 } from './api.js';
 
 interface ServerResponse<T> {
@@ -106,6 +107,13 @@ export function createHttpTransport(options: HttpTransportOptions = {}): PanelTr
     snapshot: (request) => call<SnapshotResult>(method('snapshot'), { request: { ...request, ...bound } }),
     execute: (request: ExecuteRequest) => call<CommandResult>(method('execute'), { request: { ...request, ...bound } }),
     treePresets: () => call<TreePresetsResult>(method('treePresets'), treePresetsArgs),
+    undoHistory: (request) => call<UndoHistoryResult>(method('undoHistory'), { request: { ...request, ...bound } }),
+    userTemplates: (request) => call<UserTemplateListResult>(method('userTemplates'), { request: { ...request, ...bound } }),
+    previewUndo: (request: InversePreviewRequest) => call<InversePreviewResult>(method('previewUndo'), { request: { ...request, ...bound } }),
+    previewUserTemplate: (request) => call<
+      | { status: 'available'; text: string; summary: string; nodeCount: number }
+      | { status: 'rejected'; code: string; message: string }
+    >(method('previewUserTemplate'), { request: { ...request, ...bound } }),
     follow: (request) => call<{ status: 'following'; value: FollowHandle } | { status: 'rejected'; code: string; message: string }>(method('follow'), { request: { ...request, ...bound } }),
     followEvents: (request) => call<FollowEventBatch>(method('followEvents'), { request }),
     followClose: (request) => call<{ closed: boolean }>(method('followClose'), { request }),

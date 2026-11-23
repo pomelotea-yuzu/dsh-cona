@@ -27,6 +27,22 @@ const SAVE_LABEL: Record<SaveStatus, LocaleKey> = {
   'committed-pending-sync': 'saveStatusCommittedPendingSync',
 };
 
+/** 结构预览标题：每种草稿对应一条字典文案，稳定码/原文不进字典。 */
+const PREVIEW_TITLE: Record<
+  'move' | 'insert' | 'group' | 'merge' | 'copy' | 'undo' | 'redo' | 'save-template' | 'insert-user-template',
+  LocaleKey
+> = {
+  move: 'treeMoveNode',
+  insert: 'treeInsertPreset',
+  group: 'treeGroupTitle',
+  merge: 'treeMergeTitle',
+  copy: 'treeCopyTitle',
+  undo: 'treeUndoTitle',
+  redo: 'treeRedoTitle',
+  'save-template': 'treeSaveTemplateTitle',
+  'insert-user-template': 'treeInsertUserTemplateTitle',
+};
+
 /** 面板根组件：订阅控制器状态。 */
 export function ProjectPanel(props: ProjectPanelProps): JSX.Element {
   const { controller, t } = props;
@@ -80,6 +96,7 @@ export function ProjectPanel(props: ProjectPanelProps): JSX.Element {
             <StructurePreviewView controller={controller} state={state} t={t} />
           ) : null}
           <PresetPanel controller={controller} state={state} t={t} />
+          <TreeActions controller={controller} state={state} t={t} />
           {selected === undefined ? (
             <p>{t('noNodes')}</p>
           ) : (
@@ -119,7 +136,11 @@ function TreeNav(props: {
             data-cona-node={node.id}
             draggable
             aria-label={`${node.title} · ${t('treeDragHandle')}`}
-            onClick={() => controller.select(node.id)}
+            onClick={(event) => {
+              // Ctrl/Cmd 或 Shift 点击加入/移出多选；普通点击单选（保留焦点语义）。
+              if (event.ctrlKey || event.metaKey || event.shiftKey) controller.toggleSelect(node.id);
+              else controller.select(node.id);
+            }}
             onDragStart={(event) => {
               setDragId(node.id);
               event.dataTransfer.setData('text/plain', node.id);
@@ -142,7 +163,8 @@ function TreeNav(props: {
             style={{
               display: 'block', width: '100%', textAlign: 'left',
               padding: '6px 12px', paddingLeft: 12 + (depths.get(node.id) ?? 0) * 14,
-              background: node.id === state.selectedNodeId ? 'var(--dsh-bg-selected, #eef2f7)' : 'transparent',
+              background: state.selectedNodeIds.includes(node.id) || node.id === state.selectedNodeId
+                ? 'var(--dsh-bg-selected, #eef2f7)' : 'transparent',
               border: 'none', cursor: 'grab', fontSize: 13, color: 'inherit',
             }}
           >
@@ -205,9 +227,7 @@ function StructurePreviewView(props: {
   const noChange = preview.noChange;
   return (
     <section aria-label={t('ariaTreePreview')} style={{ border: '1px solid var(--dsh-border, #e5e5e5)', padding: 12, marginBottom: 16 }}>
-      <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>
-        {preview.kind === 'move' ? t('treeMoveNode') : t('treeInsertPreset')}
-      </h4>
+      <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>{t(PREVIEW_TITLE[preview.kind])}</h4>
       <ul style={{ margin: '0 0 8px 12px', padding: 0, fontSize: 12 }}>
         {preview.lines.map((line, index) => (
           <li key={index} style={{ marginLeft: line.depth * 14 }}>{line.title}</li>
@@ -220,6 +240,25 @@ function StructurePreviewView(props: {
           <p style={{ margin: '2px 0' }}>{t('treePresetLocales', { locales: preview.preset.locales.join(', '), locale: preview.preset.contentLocale })}</p>
           <p style={{ margin: '2px 0' }}>{t('treePresetDeps', { deps: preview.preset.dependencies.map((d) => `${d.from} ← ${d.to}`).join(', ') })}</p>
         </div>
+      )}
+      {preview.sources === undefined ? null : (
+        <p style={{ fontSize: 12 }}>
+          {t('treeAffectedSources', { nodes: preview.sources.join('、') })}
+        </p>
+      )}
+      {preview.externalDependencies === undefined ? null : (
+        <p style={{ fontSize: 12 }}>
+          {t('treeCopyExternalDeps', { deps: preview.externalDependencies.map((d) => `${d.from} ← ${d.to}`).join('、') })}
+        </p>
+      )}
+      {preview.templateSource === undefined ? null : (
+        <p style={{ fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>
+          {t('treeTemplateSource', {
+            id: preview.templateSource.templateId,
+            version: preview.templateSource.versionRecordId,
+            language: preview.templateSource.bodyLanguage ?? 'und',
+          })}
+        </p>
       )}
       {noChange ? <p style={{ fontSize: 12, color: '#8a6d00' }}>{t('treeNoChange')}</p> : null}
       {preview.workNotice ? <p style={{ fontSize: 12, color: '#8a6d00' }}>{t('treeWorkNotice')}</p> : null}
@@ -295,6 +334,109 @@ function PresetRow(props: {
         {t('treePresetUse')}
       </button>
     </li>
+  );
+}
+
+/** 2.1–2.5 统一树编辑工具条：多选分组/合并、复制、撤销重做、用户模板目录与保存。 */
+function TreeActions(props: {
+  controller: IPanelController;
+  state: PanelState;
+  t: Translate;
+}): JSX.Element {
+  const { controller, state, t } = props;
+  const [groupTitle, setGroupTitle] = useState('');
+  const [templateTitle, setTemplateTitle] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const selectedIds = state.selectedNodeIds;
+  const parentId = state.selectedNodeId ?? state.snapshot?.tree[0]?.id ?? null;
+
+  useEffect(() => {
+    if (state.undoHistory.status === 'idle') void controller.loadUndoHistory();
+    if (state.userTemplates.status === 'idle') void controller.loadUserTemplates();
+  }, [controller, state.undoHistory.status, state.userTemplates.status]);
+
+  const beginGroup = (): void => {
+    setActionError(null);
+    if (selectedIds.length < 2) { setActionError(t('treeNeedMultiSelect')); return; }
+    controller.beginGroup({ title: groupTitle || t('treeDefaultGroupTitle'), goal: '', completionCriteria: [] }, null);
+  };
+  const beginMerge = (): void => {
+    setActionError(null);
+    if (selectedIds.length < 2) { setActionError(t('treeNeedMultiSelect')); return; }
+    controller.beginMerge(selectedIds[0]!, { goal: '', completionCriteria: [] }, []);
+  };
+  const beginCopy = (): void => {
+    setActionError(null);
+    if (parentId === null) { setActionError(t('treeNeedParent')); return; }
+    controller.beginCopy(parentId, null, []);
+  };
+  const doUndo = async (operationId: string, direction: 'undo' | 'redo'): Promise<void> => {
+    setActionError(null);
+    const preview = await controller.previewUndoAction(operationId, direction);
+    if (!preview.ok) { setActionError(`${preview.code}: ${preview.message}`); return; }
+    controller.beginUndo(operationId, preview.previewDigest, direction);
+  };
+  const beginSaveTemplate = (): void => {
+    setActionError(null);
+    if (parentId === null) { setActionError(t('treeNeedParent')); return; }
+    controller.beginSaveUserTemplate(crypto.randomUUID(), templateTitle || t('treeDefaultTemplateTitle'), 'und', parentId);
+  };
+
+  return (
+    <section aria-label={t('treeActionsTitle')} style={{ border: '1px solid var(--dsh-border, #e5e5e5)', padding: 12, marginBottom: 16 }}>
+      <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>{t('treeActionsTitle')}</h4>
+      <p style={{ fontSize: 12, color: 'var(--dsh-text-secondary, #777)' }}>
+        {t('treeSelectedCount', { count: selectedIds.length })}
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} placeholder={t('treeDefaultGroupTitle')} aria-label={t('treeDefaultGroupTitle')} />
+        <button type="button" onClick={beginGroup}>{t('treeGroupTitle')}</button>
+        <button type="button" onClick={beginMerge}>{t('treeMergeTitle')}</button>
+        <button type="button" onClick={beginCopy}>{t('treeCopyTitle')}</button>
+        <input value={templateTitle} onChange={(e) => setTemplateTitle(e.target.value)} placeholder={t('treeDefaultTemplateTitle')} aria-label={t('treeDefaultTemplateTitle')} />
+        <button type="button" onClick={beginSaveTemplate}>{t('treeSaveTemplateTitle')}</button>
+      </div>
+      {actionError === null ? null : <p style={{ fontSize: 12, color: '#b3261e' }}>{actionError}</p>}
+      <h5 style={{ margin: '12px 0 4px', fontSize: 12 }}>{t('treeUndoHistoryTitle')}</h5>
+      {state.undoHistory.status === 'rejected' ? (
+        <p style={{ fontSize: 12, color: '#b3261e' }}>
+          {t('treeUndoHistoryError', { code: state.undoHistory.code ?? 'unknown' })}
+        </p>
+      ) : (
+        <ul style={{ margin: 0, padding: 0, listStyle: 'none', fontSize: 12 }}>
+          {state.undoHistory.entries.map((entry) => (
+            <li key={entry.operationId} style={{ padding: '2px 0' }}>
+              <span>{entry.commandType}</span>
+              <button type="button" disabled={!entry.canUndo} onClick={() => void doUndo(entry.operationId, 'undo')}>
+                {t('treeUndoTitle')}
+              </button>
+              <button type="button" disabled={!entry.canRedo} onClick={() => void doUndo(entry.operationId, 'redo')}>
+                {t('treeRedoTitle')}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <h5 style={{ margin: '12px 0 4px', fontSize: 12 }}>{t('treeUserTemplatesTitle')}</h5>
+      {state.userTemplates.status === 'rejected' ? (
+        <p style={{ fontSize: 12, color: '#b3261e' }}>
+          {t('treeUserTemplatesError', { code: state.userTemplates.code ?? 'unknown' })}
+        </p>
+      ) : (
+        <ul style={{ margin: 0, padding: 0, listStyle: 'none', fontSize: 12 }}>
+          {state.userTemplates.templates.map((template) => (
+            <li key={`${template.templateId}@${template.versionRecordId}`} style={{ padding: '2px 0' }}>
+              <span>{template.title}</span>
+              <button type="button" disabled={parentId === null} onClick={() => {
+                if (parentId !== null) controller.beginInsertUserTemplate(template, parentId, null);
+              }}>
+                {t('treePresetUse')}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

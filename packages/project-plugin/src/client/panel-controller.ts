@@ -24,9 +24,19 @@ export interface DraftBaseline {
   sourceEpoch: number;
 }
 
-/** 一份草稿：目标编辑、新增节点、结构移动或预设插入。同一时间只保留一份。 */
+/** 合并/复制依赖处置：与领域 MergeDependencyResolution 同形（仅传输原始终端码）。 */
+export interface MergeResolutionView {
+  edge: { nodeId: string; requiresNodeId: string };
+  action: 'keep' | 'reattach' | 'drop';
+}
+
+/** 一份草稿：目标编辑、新增节点、结构移动/预设插入，以及 2.1–2.5 的批量树编辑。同一时间只保留一份。 */
 export interface PanelDraft {
-  kind: 'update-goal' | 'add-node' | 'move' | 'insert-preset';
+  kind:
+    | 'update-goal' | 'add-node' | 'move' | 'insert-preset'
+    | 'group-nodes' | 'merge-nodes' | 'copy-subtree'
+    | 'undo-plan-edit' | 'redo-plan-edit'
+    | 'save-user-template' | 'insert-user-template';
   /** 目标编辑的节点 id；新增节点时为父节点 id；移动时为被移动节点 id。 */
   nodeId: string;
   goal: string;
@@ -43,15 +53,30 @@ export interface PanelDraft {
   templateVersion?: number;
   contentLocale?: string;
   preset?: PresetView;
+  /** 分组/合并/复制：多选节点；合并的保留节点、依赖处置；复制的外部依赖。 */
+  nodeIds?: string[];
+  keepNodeId?: string;
+  resolutions?: MergeResolutionView[];
+  externalDependencies?: { nodeId: string; requiresNodeId: string }[];
+  /** 撤销/重做：目标操作与确认预览指纹（进入草稿时冻结）。 */
+  targetOperationId?: string;
+  previewDigest?: string;
+  /** 用户模板保存：正文语言、子树根；插入：版本三元组。 */
+  bodyLanguage?: string;
+  rootNodeId?: string;
+  versionRecordId?: string;
+  contentHash?: string;
   /** 进入草稿时的权威基线（保存时作为 expected* 提交，不随刷新变化）。 */
   baseline: DraftBaseline;
   /** 已发出的 operationId：重试复用同一个，避免结果未知时重复应用。 */
   operationId: string | null;
 }
 
-/** 结构操作的统一预览：拖放与键盘菜单生成同一形状。 */
+/** 结构操作的统一预览：拖放、键盘菜单与批量编辑生成同一形状。 */
 export interface StructurePreview {
-  kind: 'move' | 'insert';
+  kind:
+    | 'move' | 'insert' | 'group' | 'merge' | 'copy'
+    | 'undo' | 'redo' | 'save-template' | 'insert-user-template';
   /** 层级化展示行（缩进 depth 由调用方渲染）。 */
   lines: { depth: number; title: string }[];
   targetParentId: string | null;
@@ -69,6 +94,12 @@ export interface StructurePreview {
     description: string;
     dependencies: { from: string; to: string }[];
   };
+  /** 合并来源/复制来源/撤销目标的标题（原文，非 key），供界面明确显示影响范围。 */
+  sources?: string[];
+  /** 复制的外部依赖（标题对，供界面确认）。 */
+  externalDependencies?: { from: string; to: string }[];
+  /** 用户模板来源与版本三元组（原文，非 key）。 */
+  templateSource?: { templateId: string; versionRecordId: string; contentHash: string; bodyLanguage?: string };
   /** 当前实例存在活动工作时为真；界面据此显示条件句提示。 */
   workNotice: boolean;
 }
@@ -88,6 +119,8 @@ export interface PanelState {
   status: ConaProjectStatus | null;
   snapshot: PanelSnapshot | null;
   selectedNodeId: string | null;
+  /** 键盘/点击多选（分组、合并的来源）；单选时与 selectedNodeId 一致。 */
+  selectedNodeIds: string[];
   draft: PanelDraft | null;
   /** 变更原因：随本次保存追加一条 plan-change 记录。 */
   reason: string;
@@ -102,6 +135,29 @@ export interface PanelState {
   structurePreview: StructurePreview | null;
   /** 已提交待同步时保存的回执基线；retryRead 只有回读覆盖它才转 saved。 */
   pendingReceipt: DraftBaseline | null;
+  /** 用户模板目录（异步读取）+ 撤销历史（异步读取）；仅 UI 展示，不构成授权。 */
+  userTemplates: { status: 'idle' | 'loading' | 'listed' | 'rejected'; templates: UserTemplateView[]; code: string | null; message: string | null };
+  undoHistory: { status: 'idle' | 'loading' | 'listed' | 'rejected'; entries: UndoHistoryView[]; code: string | null; message: string | null };
+}
+
+/** 用户模板目录项的 UI 视图（只含原文与身份，来自宿主只读查询）。 */
+export interface UserTemplateView {
+  source: 'user';
+  templateId: string;
+  versionRecordId: string;
+  contentHash: string;
+  bodyLanguage: string;
+  title: string;
+}
+
+/** 撤销历史项的 UI 视图。 */
+export interface UndoHistoryView {
+  operationId: string;
+  commandType: string;
+  createdAt: string;
+  canUndo: boolean;
+  canRedo: boolean;
+  reason?: string;
 }
 
 export interface PanelControllerDeps {
@@ -115,6 +171,7 @@ const EMPTY: PanelState = {
   status: null,
   snapshot: null,
   selectedNodeId: null,
+  selectedNodeIds: [],
   draft: null,
   reason: '',
   save: { status: 'idle', code: null, message: null },
@@ -124,6 +181,8 @@ const EMPTY: PanelState = {
   presetsError: null,
   structurePreview: null,
   pendingReceipt: null,
+  userTemplates: { status: 'idle', templates: [], code: null, message: null },
+  undoHistory: { status: 'idle', entries: [], code: null, message: null },
 };
 
 /** 一次读取的结论：是否被采纳、是否因代际／修订过旧被丢弃。 */
@@ -141,6 +200,9 @@ export interface IPanelController {
   markOffline(reason: string): void;
   poll(): Promise<IngestOutcome>;
   select(nodeId: string): void;
+  /** 切换多选成员（键盘 Space/点击）；单选节点仍由 select 决定焦点。 */
+  toggleSelect(nodeId: string): void;
+  clearSelection(): void;
   editGoal(nodeId: string, goal: string): void;
   beginAddNode(parentId?: string): void;
   /** 进入移动草稿（拖放与键盘菜单共用）。noChange 由位置是否等于原位置判定。 */
@@ -149,7 +211,19 @@ export interface IPanelController {
   loadPresets(): Promise<void>;
   /** 进入预设插入草稿；contentLocale 进入时冻结，语言切换不改变。 */
   beginInsertPreset(preset: PresetView, contentLocale: string, parentId: string, beforeNodeId: string | null): void;
-  /** 当前结构草稿的预览（拖放/键盘/插入统一形状）。 */
+  /** 2.1–2.5 批量树编辑与逆向/模板草稿。 */
+  beginGroup(group: { title: string; goal: string; completionCriteria: string[] }, anchorId: string | null): void;
+  beginMerge(keepNodeId: string, patch: { title?: string; goal?: string; completionCriteria?: string[] }, resolutions: MergeResolutionView[]): void;
+  beginCopy(parentId: string | null, beforeNodeId: string | null, externalDependencies: { nodeId: string; requiresNodeId: string }[]): void;
+  beginUndo(targetOperationId: string, previewDigest: string, direction: 'undo' | 'redo'): void;
+  beginSaveUserTemplate(templateId: string, title: string, bodyLanguage: string, rootNodeId: string): void;
+  beginInsertUserTemplate(template: UserTemplateView, parentId: string, beforeNodeId: string | null): void;
+  /** 异步只读目录：用户模板版本、撤销历史（未挂载宿主时给明确诊断）。 */
+  loadUserTemplates(): Promise<void>;
+  loadUndoHistory(): Promise<void>;
+  /** 撤销/重做只读预览：返回确认指纹或冲突原因，不写盘。 */
+  previewUndoAction(targetOperationId: string, direction: 'undo' | 'redo'): Promise<{ ok: true; previewDigest: string } | { ok: false; code: string; message: string }>;
+  /** 当前结构草稿的预览（拖放/键盘/插入/批量统一形状）。 */
   preview(): StructurePreview | null;
   /** 已提交待同步：只重读快照，不重提已成功的变更。 */
   retryRead(): Promise<SaveStatus>;
@@ -302,7 +376,17 @@ export class PanelController implements IPanelController {
   }
 
   select(nodeId: string): void {
-    this.patch({ selectedNodeId: nodeId });
+    this.patch({ selectedNodeId: nodeId, selectedNodeIds: [nodeId] });
+  }
+
+  toggleSelect(nodeId: string): void {
+    const current = this.state.selectedNodeIds;
+    const next = current.includes(nodeId) ? current.filter((id) => id !== nodeId) : [...current, nodeId];
+    this.patch({ selectedNodeId: nodeId, selectedNodeIds: next });
+  }
+
+  clearSelection(): void {
+    this.patch({ selectedNodeIds: [] });
   }
 
   /** 进入目标编辑草稿；基线取当前快照（之后刷新不改变这份草稿的期望版本）。 */
@@ -405,6 +489,182 @@ export class PanelController implements IPanelController {
       structurePreview: null,
     });
     this.refreshPreview();
+  }
+
+  /** 分组：以多选节点为来源；组标题/目标/条件由调用方表单给出。 */
+  beginGroup(group: { title: string; goal: string; completionCriteria: string[] }, anchorId: string | null): void {
+    const snapshot = this.state.snapshot;
+    if (snapshot === null) return;
+    const ids = [...this.state.selectedNodeIds];
+    if (ids.length < 2 || ids.some((id) => !snapshot.tree.some((node) => node.id === id))) return;
+    if (anchorId !== null && !snapshot.tree.some((node) => node.id === anchorId)) return;
+    this.patch({
+      draft: {
+        kind: 'group-nodes', nodeId: ids[0]!, nodeIds: ids, goal: group.goal,
+        title: group.title, criteria: [...group.completionCriteria],
+        parentId: null, beforeNodeId: anchorId,
+        baseline: baselineOf(snapshot), operationId: null,
+      },
+      save: { status: 'idle', code: null, message: null }, structurePreview: null,
+    });
+    this.refreshPreview();
+  }
+
+  /** 合并：以多选节点为来源，keepNodeId 必须为其中之一；依赖处置逐条确认。 */
+  beginMerge(keepNodeId: string, patch: { title?: string; goal?: string; completionCriteria?: string[] }, resolutions: MergeResolutionView[]): void {
+    const snapshot = this.state.snapshot;
+    if (snapshot === null) return;
+    const ids = [...this.state.selectedNodeIds];
+    if (ids.length < 2 || !ids.includes(keepNodeId)) return;
+    if (ids.some((id) => !snapshot.tree.some((node) => node.id === id))) return;
+    this.patch({
+      draft: {
+        kind: 'merge-nodes', nodeId: keepNodeId, nodeIds: ids, keepNodeId,
+        goal: patch.goal ?? '', title: patch.title, criteria: patch.completionCriteria === undefined ? undefined : [...patch.completionCriteria],
+        resolutions: resolutions.map((item) => ({ edge: { ...item.edge }, action: item.action })),
+        baseline: baselineOf(snapshot), operationId: null,
+      },
+      save: { status: 'idle', code: null, message: null }, structurePreview: null,
+    });
+    this.refreshPreview();
+  }
+
+  /** 复制：以当前单选节点为源，位置与显式外部依赖由调用方给出。 */
+  beginCopy(parentId: string | null, beforeNodeId: string | null, externalDependencies: { nodeId: string; requiresNodeId: string }[]): void {
+    const snapshot = this.state.snapshot;
+    if (snapshot === null) return;
+    const source = snapshot.tree.find((node) => node.id === this.state.selectedNodeId);
+    if (source === undefined) return;
+    if (parentId !== null && !snapshot.tree.some((node) => node.id === parentId)) return;
+    if (beforeNodeId !== null && !snapshot.tree.some((node) => node.id === beforeNodeId && node.parentId === parentId)) return;
+    this.patch({
+      draft: {
+        kind: 'copy-subtree', nodeId: source.id, goal: source.goal, parentId, beforeNodeId,
+        externalDependencies: externalDependencies.map((edge) => ({ ...edge })),
+        baseline: baselineOf(snapshot), operationId: null,
+      },
+      save: { status: 'idle', code: null, message: null }, structurePreview: null,
+    });
+    this.refreshPreview();
+  }
+
+  /** 撤销/重做：确认指纹来自只读预览，进入草稿时冻结。 */
+  beginUndo(targetOperationId: string, previewDigest: string, direction: 'undo' | 'redo'): void {
+    const snapshot = this.state.snapshot;
+    if (snapshot === null) return;
+    this.patch({
+      draft: {
+        kind: direction === 'undo' ? 'undo-plan-edit' : 'redo-plan-edit',
+        nodeId: this.state.selectedNodeId ?? snapshot.tree[0]?.id ?? '', goal: '',
+        targetOperationId, previewDigest,
+        baseline: baselineOf(snapshot), operationId: null,
+      },
+      save: { status: 'idle', code: null, message: null }, structurePreview: null,
+    });
+    this.refreshPreview();
+  }
+
+  /** 保存用户模板：从所选子树（当前单选节点）抽取正文，语言为作者原文。 */
+  beginSaveUserTemplate(templateId: string, title: string, bodyLanguage: string, rootNodeId: string): void {
+    const snapshot = this.state.snapshot;
+    if (snapshot === null) return;
+    if (!snapshot.tree.some((node) => node.id === rootNodeId)) return;
+    this.patch({
+      draft: {
+        kind: 'save-user-template', nodeId: rootNodeId, rootNodeId, goal: '',
+        templateId, title, bodyLanguage,
+        baseline: baselineOf(snapshot), operationId: null,
+      },
+      save: { status: 'idle', code: null, message: null }, structurePreview: null,
+    });
+    this.refreshPreview();
+  }
+
+  /** 插入用户模板：三元组来自异步目录/正文，位置必须是现有父节点。 */
+  beginInsertUserTemplate(template: UserTemplateView, parentId: string, beforeNodeId: string | null): void {
+    const snapshot = this.state.snapshot;
+    if (snapshot === null) return;
+    if (!snapshot.tree.some((node) => node.id === parentId)) return;
+    if (beforeNodeId !== null && !snapshot.tree.some((node) => node.id === beforeNodeId && node.parentId === parentId)) return;
+    this.patch({
+      draft: {
+        kind: 'insert-user-template', nodeId: parentId, goal: '', parentId, beforeNodeId,
+        templateId: template.templateId, versionRecordId: template.versionRecordId,
+        contentHash: template.contentHash, bodyLanguage: template.bodyLanguage, title: template.title,
+        baseline: baselineOf(snapshot), operationId: null,
+      },
+      save: { status: 'idle', code: null, message: null }, structurePreview: null,
+    });
+    this.refreshPreview();
+  }
+
+  /** 独立只读回读：用户模板目录；宿主未挂载时给明确诊断，不猜测内容。 */
+  async loadUserTemplates(): Promise<void> {
+    const instanceId = this.state.snapshot?.instanceId;
+    if (instanceId === undefined) return;
+    if (this.deps.transport.userTemplates === undefined) {
+      this.patch({ userTemplates: { status: 'rejected', templates: [], code: 'unsupported', message: '宿主不支持模板目录' } });
+      return;
+    }
+    this.patch({ userTemplates: { status: 'loading', templates: [], code: null, message: null } });
+    try {
+      const result = await this.deps.transport.userTemplates({ instanceId });
+      if (result.status === 'committed') {
+        this.patch({ userTemplates: { status: 'listed', templates: result.templates.map((item) => ({
+          source: 'user' as const, templateId: item.templateId, versionRecordId: item.versionRecordId,
+          contentHash: item.contentHash, bodyLanguage: item.bodyLanguage, title: item.title,
+        })), code: null, message: null } });
+      } else {
+        this.patch({ userTemplates: { status: 'rejected', templates: [], code: result.code, message: result.message } });
+      }
+    } catch (error) {
+      this.patch({ userTemplates: { status: 'rejected', templates: [], code: 'transport-failed', message: (error as Error).message } });
+    }
+  }
+
+  /** 独立只读回读：撤销历史；宿主未挂载时给明确诊断。 */
+  async loadUndoHistory(): Promise<void> {
+    const instanceId = this.state.snapshot?.instanceId;
+    if (instanceId === undefined) return;
+    if (this.deps.transport.undoHistory === undefined) {
+      this.patch({ undoHistory: { status: 'rejected', entries: [], code: 'unsupported', message: '宿主不支持撤销历史' } });
+      return;
+    }
+    this.patch({ undoHistory: { status: 'loading', entries: [], code: null, message: null } });
+    try {
+      const result = await this.deps.transport.undoHistory({ instanceId });
+      if (result.status === 'committed') {
+        this.patch({ undoHistory: { status: 'listed', entries: result.entries.map((item) => ({
+          operationId: item.operationId, commandType: item.commandType, createdAt: item.createdAt,
+          canUndo: item.canUndo, canRedo: item.canRedo, reason: item.reason,
+        })), code: null, message: null } });
+      } else {
+        this.patch({ undoHistory: { status: 'rejected', entries: [], code: result.code, message: result.message } });
+      }
+    } catch (error) {
+      this.patch({ undoHistory: { status: 'rejected', entries: [], code: 'transport-failed', message: (error as Error).message } });
+    }
+  }
+
+  /**
+   * 撤销/重做的只读预览：取回确认指纹与冲突对象，不写盘。
+   * 预览成功只返回指纹，由界面显式确认后调用 beginUndo 进入草稿。
+   */
+  async previewUndoAction(
+    targetOperationId: string, direction: 'undo' | 'redo',
+  ): Promise<{ ok: true; previewDigest: string } | { ok: false; code: string; message: string }> {
+    const instanceId = this.state.snapshot?.instanceId;
+    if (instanceId === undefined) return { ok: false, code: 'unsupported', message: '未打开实例' };
+    if (this.deps.transport.previewUndo === undefined) {
+      return { ok: false, code: 'unsupported', message: '宿主不支持撤销预览' };
+    }
+    try {
+      const result = await this.deps.transport.previewUndo({ instanceId, targetOperationId, direction });
+      if (result.status === 'available') return { ok: true, previewDigest: result.previewDigest };
+      return { ok: false, code: result.status === 'conflict' ? (result.conflicts?.[0]?.code ?? 'inverse-conflict') : result.status, message: result.message };
+    } catch (error) {
+      return { ok: false, code: 'transport-failed', message: (error as Error).message };
+    }
   }
 
   /** 当前结构草稿的统一预览；内容与权威快照同步重算，取消时随草稿清空。 */
@@ -690,11 +950,76 @@ export class PanelController implements IPanelController {
   private refreshPreview(): void {
     const draft = this.state.draft;
     const snapshot = this.state.snapshot;
-    if (draft === null || snapshot === null || (draft.kind !== 'move' && draft.kind !== 'insert-preset')) {
+    if (draft === null || snapshot === null) {
       this.patch({ structurePreview: null });
       return;
     }
     const workNotice = (snapshot.local.workRunCount ?? 0) > 0;
+    const titleOf = (id: string): string => snapshot.tree.find((node) => node.id === id)?.title ?? id;
+    // 2.1–2.5：分组/合并/复制/撤销/模板的本地预览；来源与依赖以原文展示，不落盘。
+    if (draft.kind !== 'move' && draft.kind !== 'insert-preset') {
+      const base = {
+        targetParentId: draft.parentId ?? null,
+        beforeNodeId: draft.beforeNodeId ?? null,
+        noChange: false,
+        workNotice,
+      };
+      if (draft.kind === 'group-nodes') {
+        this.patch({ structurePreview: {
+          ...base, kind: 'group', sources: (draft.nodeIds ?? []).map(titleOf),
+          lines: (draft.nodeIds ?? []).map((id) => ({ depth: 1, title: titleOf(id) })),
+        } });
+        return;
+      }
+      if (draft.kind === 'merge-nodes') {
+        this.patch({ structurePreview: {
+          ...base, kind: 'merge',
+          sources: (draft.nodeIds ?? []).filter((id) => id !== draft.keepNodeId).map(titleOf),
+          lines: [{ depth: 0, title: `保留：${titleOf(draft.keepNodeId ?? draft.nodeId)}` }],
+        } });
+        return;
+      }
+      if (draft.kind === 'copy-subtree') {
+        this.patch({ structurePreview: {
+          ...base, kind: 'copy', sources: [titleOf(draft.nodeId)],
+          lines: [{ depth: 0, title: `复制：${titleOf(draft.nodeId)}` }],
+          externalDependencies: (draft.externalDependencies ?? []).map((edge) => ({ from: titleOf(edge.nodeId), to: titleOf(edge.requiresNodeId) })),
+        } });
+        return;
+      }
+      if (draft.kind === 'undo-plan-edit' || draft.kind === 'redo-plan-edit') {
+        this.patch({ structurePreview: {
+          ...base, kind: draft.kind === 'undo-plan-edit' ? 'undo' : 'redo',
+          sources: [draft.targetOperationId ?? ''],
+          lines: [{ depth: 0, title: draft.targetOperationId ?? '' }],
+        } });
+        return;
+      }
+      if (draft.kind === 'save-user-template') {
+        this.patch({ structurePreview: {
+          ...base, kind: 'save-template', sources: [titleOf(draft.rootNodeId ?? draft.nodeId)],
+          lines: [{ depth: 0, title: titleOf(draft.rootNodeId ?? draft.nodeId) }],
+          templateSource: {
+            templateId: draft.templateId ?? '', versionRecordId: '', contentHash: '',
+            bodyLanguage: draft.bodyLanguage,
+          },
+        } });
+        return;
+      }
+      if (draft.kind === 'insert-user-template') {
+        this.patch({ structurePreview: {
+          ...base, kind: 'insert-user-template',
+          lines: [{ depth: 0, title: `插入：${draft.title ?? ''}` }],
+          templateSource: {
+            templateId: draft.templateId ?? '', versionRecordId: draft.versionRecordId ?? '',
+            contentHash: draft.contentHash ?? '', bodyLanguage: draft.bodyLanguage,
+          },
+        } });
+        return;
+      }
+      this.patch({ structurePreview: null });
+      return;
+    }
     if (draft.kind === 'move') {
       const node = snapshot.tree.find((item) => item.id === draft.nodeId);
       const parent = draft.parentId === null ? null : snapshot.tree.find((item) => item.id === draft.parentId);
@@ -807,6 +1132,54 @@ function commandOf(draft: PanelDraft, snapshot: PanelSnapshot): Command {
       contentLocale: (draft.contentLocale ?? 'en') as 'zh-CN' | 'en',
       parentId: draft.parentId ?? null,
       beforeNodeId: draft.beforeNodeId ?? null,
+    };
+  }
+  if (draft.kind === 'group-nodes') {
+    return {
+      type: 'group-nodes',
+      nodeIds: [...(draft.nodeIds ?? [])],
+      group: { title: draft.title ?? '', goal: draft.goal, completionCriteria: [...(draft.criteria ?? [])] },
+      anchorId: draft.beforeNodeId ?? null,
+    };
+  }
+  if (draft.kind === 'merge-nodes') {
+    return {
+      type: 'merge-nodes',
+      keepNodeId: draft.keepNodeId ?? draft.nodeId,
+      sourceNodeIds: [...(draft.nodeIds ?? [])],
+      ...(draft.title === undefined && draft.criteria === undefined
+        ? {}
+        : { patch: {
+            ...(draft.title === undefined ? {} : { title: draft.title }),
+            ...(draft.goal === '' ? {} : { goal: draft.goal }),
+            ...(draft.criteria === undefined ? {} : { completionCriteria: [...draft.criteria] }),
+          } }),
+      resolutions: [...(draft.resolutions ?? [])],
+    };
+  }
+  if (draft.kind === 'copy-subtree') {
+    return {
+      type: 'copy-subtree', nodeId: draft.nodeId,
+      targetParentId: draft.parentId ?? null, anchorId: draft.beforeNodeId ?? null,
+      externalDependencies: [...(draft.externalDependencies ?? [])],
+    };
+  }
+  if (draft.kind === 'undo-plan-edit' || draft.kind === 'redo-plan-edit') {
+    return {
+      type: draft.kind, targetOperationId: draft.targetOperationId ?? '', previewDigest: draft.previewDigest ?? '',
+    };
+  }
+  if (draft.kind === 'save-user-template') {
+    return {
+      type: 'save-user-template', templateId: draft.templateId ?? '', title: draft.title ?? '',
+      bodyLanguage: draft.bodyLanguage ?? 'und', rootNodeId: draft.rootNodeId ?? draft.nodeId,
+    };
+  }
+  if (draft.kind === 'insert-user-template') {
+    return {
+      type: 'insert-user-template', templateId: draft.templateId ?? '',
+      versionRecordId: draft.versionRecordId ?? '', contentHash: draft.contentHash ?? '',
+      parentId: draft.parentId ?? null, beforeNodeId: draft.beforeNodeId ?? null,
     };
   }
   const siblings = snapshot.tree.filter((node) => node.parentId === draft.nodeId).map((node) => node.order);

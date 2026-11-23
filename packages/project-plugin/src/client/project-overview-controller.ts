@@ -2,7 +2,10 @@
 // 以及按实例隔离的 PanelController（草稿/选择/连接代际各自独立）。
 // 不依赖 DOM/React，可脱离浏览器测试；渲染层只读状态、调方法。
 
-import { PanelController, type IPanelController, type IngestOutcome, type PanelDraft, type PanelState, type SaveStatus, type StructurePreview } from './panel-controller.js';
+import {
+  PanelController, type IPanelController, type IngestOutcome, type PanelDraft, type PanelState,
+  type SaveStatus, type StructurePreview, type MergeResolutionView, type UserTemplateView,
+} from './panel-controller.js';
 import type { PanelTransport, PresetView } from './api.js';
 import { buildResume, type NextStepKind, type ResumePayload } from '../domain/resume.js';
 import type {
@@ -802,10 +805,12 @@ export class DelegatingPanelController implements IPanelController {
     return active === null
       ? {
           phase: 'idle', message: null, status: null, snapshot: null,
-          selectedNodeId: null, draft: null, reason: '',
+          selectedNodeId: null, selectedNodeIds: [], draft: null, reason: '',
           save: { status: 'idle', code: null, message: null },
           connection: { generation: 1, status: 'connected', error: null },
           presets: [], presetsStatus: 'idle', presetsError: null, structurePreview: null, pendingReceipt: null,
+          userTemplates: { status: 'idle', templates: [], code: null, message: null },
+          undoHistory: { status: 'idle', entries: [], code: null, message: null },
         }
       : active.getState();
   }
@@ -821,12 +826,37 @@ export class DelegatingPanelController implements IPanelController {
   markOffline(reason: string): void { this.current().markOffline(reason); }
   poll(): Promise<IngestOutcome> { return this.current().poll(); }
   select(nodeId: string): void { this.current().select(nodeId); }
+  toggleSelect(nodeId: string): void { this.current().toggleSelect(nodeId); }
+  clearSelection(): void { this.current().clearSelection(); }
   editGoal(nodeId: string, goal: string): void { this.current().editGoal(nodeId, goal); }
   beginAddNode(parentId?: string): void { this.current().beginAddNode(parentId); }
   beginMove(nodeId: string, parentId: string | null, beforeNodeId: string | null): void { this.current().beginMove(nodeId, parentId, beforeNodeId); }
   loadPresets(): Promise<void> { return this.current().loadPresets(); }
   beginInsertPreset(preset: PresetView, contentLocale: string, parentId: string, beforeNodeId: string | null): void {
     this.current().beginInsertPreset(preset, contentLocale, parentId, beforeNodeId);
+  }
+  beginGroup(group: { title: string; goal: string; completionCriteria: string[] }, anchorId: string | null): void {
+    this.current().beginGroup(group, anchorId);
+  }
+  beginMerge(keepNodeId: string, patch: { title?: string; goal?: string; completionCriteria?: string[] }, resolutions: MergeResolutionView[]): void {
+    this.current().beginMerge(keepNodeId, patch, resolutions);
+  }
+  beginCopy(parentId: string | null, beforeNodeId: string | null, externalDependencies: { nodeId: string; requiresNodeId: string }[]): void {
+    this.current().beginCopy(parentId, beforeNodeId, externalDependencies);
+  }
+  beginUndo(targetOperationId: string, previewDigest: string, direction: 'undo' | 'redo'): void {
+    this.current().beginUndo(targetOperationId, previewDigest, direction);
+  }
+  beginSaveUserTemplate(templateId: string, title: string, bodyLanguage: string, rootNodeId: string): void {
+    this.current().beginSaveUserTemplate(templateId, title, bodyLanguage, rootNodeId);
+  }
+  beginInsertUserTemplate(template: UserTemplateView, parentId: string, beforeNodeId: string | null): void {
+    this.current().beginInsertUserTemplate(template, parentId, beforeNodeId);
+  }
+  loadUserTemplates(): Promise<void> { return this.current().loadUserTemplates(); }
+  loadUndoHistory(): Promise<void> { return this.current().loadUndoHistory(); }
+  previewUndoAction(targetOperationId: string, direction: 'undo' | 'redo'): Promise<{ ok: true; previewDigest: string } | { ok: false; code: string; message: string }> {
+    return this.current().previewUndoAction(targetOperationId, direction);
   }
   preview(): StructurePreview | null { return this.current().preview(); }
   retryRead(): Promise<SaveStatus> { return this.current().retryRead(); }

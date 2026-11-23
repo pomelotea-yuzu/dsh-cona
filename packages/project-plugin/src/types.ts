@@ -17,8 +17,20 @@ export type {
   CommittedCommand,
   MoveNodeCommand,
   InsertPresetCommand,
+  UndoPlanEditCommand,
+  SaveUserTemplateCommand,
+  InsertUserTemplateCommand,
   PresetCatalog,
+  // 2.6 统一树编辑器的只读预览边界类型。
+  InversePreviewRequest,
+  InversePreviewResult,
+  InverseConflictView,
+  UndoHistoryResult,
+  UndoHistoryEntry,
+  UserTemplateDescriptor,
+  UserTemplateListResult,
 } from './application/command-service.js'
+export type { InverseDirection } from './domain/inverse.js'
 export type { PresetDescriptor, PresetContentLocale, PresetNodeRef, PresetNodeText, PresetContent, PresetDependencyRef } from './domain/presets.js'
 export type { ProjectSnapshot, SnapshotResult, PlanSummary, SnapshotSync, StreamEventView, FollowResult } from './application/snapshot.js'
 // follow 订阅（V32）：Remote follow/followEvents/followClose 的边界类型。
