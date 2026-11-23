@@ -127,6 +127,8 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
           </ul>
           <ResumeCardView state={state.resumeCard} chatNotice={state.chatNotice} controller={controller} t={t} />
           <ResumeSaveSection controller={controller} state={state} t={t} />
+          <MigrationSection controller={controller} state={state} t={t} />
+          <RegisterSection controller={controller} state={state} t={t} />
         </div>
       ) : null}
     </div>
@@ -137,6 +139,177 @@ type TopTranslate = ProjectTopBarProps['t'];
 
 const fieldStyle = { width: '100%', boxSizing: 'border-box' as const, fontSize: 12, padding: '4px 6px' };
 const rowStyle = { margin: '6px 0', fontSize: 12 };
+
+const MIG_STATUS_KEY: Record<string, LocaleKey> = {
+  prepared: 'migStatusPrepared',
+  'target-ready': 'migStatusTargetReady',
+  switched: 'migStatusSwitched',
+  committed: 'migStatusCommitted',
+  canceled: 'migStatusCanceled',
+};
+
+const KIND_OPTIONS = ['project-directory', 'dsh-data', 'custom'] as const;
+
+/** 1.5 迁移区：预览 → 确认；中断记录提供恢复／取消（确认摘要核对原操作）。 */
+function MigrationSection(props: { controller: ProjectOverviewController; state: OverviewState; t: TopTranslate }): JSX.Element | null {
+  const { controller, state, t } = props;
+  const [, force] = useState(0);
+  const [toRoot, setToRoot] = useState('');
+  const [toKind, setToKind] = useState<(typeof KIND_OPTIONS)[number]>('custom');
+  const migration = state.migration;
+  if (state.selectedId === null) return null;
+  const refresh = () => { void controller.loadMigrations().then(() => force((n) => n + 1)); };
+  const preview = migration.preview;
+  const checks = preview !== null && 'checks' in preview ? preview.checks : [];
+  const open = preview !== null && 'openMigration' in preview && preview.openMigration !== undefined ? preview.openMigration : null;
+  return (
+    <section data-cona-migration="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
+      <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>{t('migTitle')}</h4>
+      {migration.phase === 'error' && migration.code !== null ? (
+        <p style={{ ...rowStyle, color: '#b3261e' }}>{migration.code}{migration.message ? `: ${migration.message}` : ''}</p>
+      ) : null}
+      {migration.record !== null ? (
+        <p style={rowStyle}>
+          {t(MIG_STATUS_KEY[migration.record.status] ?? 'migStatusPrepared')} · {migration.record.operationId.slice(0, 8)}
+        </p>
+      ) : null}
+      <div style={rowStyle}>
+        <input
+          data-cona-mig-target="1"
+          value={toRoot}
+          placeholder={t('migTo', { root: '' }).replace(/[:：]\s*$/, '')}
+          style={fieldStyle}
+          onChange={(e) => setToRoot(e.target.value)}
+        />
+        <select value={toKind} style={{ ...fieldStyle, marginTop: 4 }} onChange={(e) => setToKind(e.target.value as (typeof KIND_OPTIONS)[number])}>
+          {KIND_OPTIONS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+        </select>
+      </div>
+      <p style={{ margin: '6px 0', display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          data-cona-mig-preview="1"
+          disabled={toRoot.trim() === '' || migration.phase === 'busy'}
+          onClick={() => { void controller.previewMigration(toRoot.trim(), toKind).then(() => force((n) => n + 1)); }}
+        >
+          {t('migPreview')}
+        </button>
+        <button
+          type="button"
+          data-cona-mig-run="1"
+          disabled={toRoot.trim() === '' || migration.phase === 'busy' || (preview !== null && 'checks' in preview && preview.checks.length > 0)}
+          onClick={() => { void controller.runMigration(toRoot.trim(), toKind).then(() => force((n) => n + 1)); }}
+        >
+          {t('migRun')}
+        </button>
+        <button type="button" data-cona-mig-list="1" onClick={refresh}>{t('migList')}</button>
+      </p>
+      {open !== null ? <p style={{ ...rowStyle, color: '#8a6d3b' }}>{t('migOpenNotice', { operationId: open.operationId })}</p> : null}
+      {checks.length > 0 ? (
+        <div style={{ ...rowStyle, color: '#b3261e' }}>
+          <strong>{t('migChecks')}</strong>
+          {checks.map((check, i) => <div key={i}>{check.code}{check.message ? `: ${check.message}` : ''}</div>)}
+        </div>
+      ) : null}
+      {migration.migrations.length > 0 ? (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: 12 }}>
+          {migration.migrations.map((record) => {
+            const openStatus = record.status === 'prepared' || record.status === 'target-ready' || record.status === 'switched';
+            return (
+              <li key={record.operationId} style={{ margin: '4px 0' }}>
+                <span>{t(MIG_STATUS_KEY[record.status] ?? 'migStatusPrepared')} · {record.from.root} → {record.to.root}</span>
+                {openStatus ? (
+                  <span style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                    <button
+                      type="button"
+                      data-cona-mig-recover={record.operationId}
+                      onClick={() => { void controller.recoverMigration(record.operationId, record.requestDigest).then(() => force((n) => n + 1)); }}
+                    >
+                      {t('migRecover')}
+                    </button>
+                    {record.status !== 'switched' ? (
+                      <button
+                        type="button"
+                        data-cona-mig-cancel={record.operationId}
+                        onClick={() => { void controller.cancelMigration(record.operationId, record.requestDigest).then(() => force((n) => n + 1)); }}
+                      >
+                        {t('migCancel')}
+                      </button>
+                    ) : null}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      <p style={{ ...rowStyle, color: '#8a6d3b' }}>{t('migOldRootKept')}</p>
+    </section>
+  );
+}
+
+/** 1.1 接入区：预览（位置／Git／项目 ID／版本）→ 显式登记。 */
+function RegisterSection(props: { controller: ProjectOverviewController; state: OverviewState; t: TopTranslate }): JSX.Element | null {
+  const { controller, state, t } = props;
+  const [, force] = useState(0);
+  const [sourceRoot, setSourceRoot] = useState('');
+  const [kind, setKind] = useState<(typeof KIND_OPTIONS)[number]>('custom');
+  const register = state.register;
+  if (state.selectedId === null) return null;
+  const preview = register.preview;
+  const gitLine = preview !== null && preview.status === 'preview' && preview.git !== null
+    ? preview.git.available
+      ? t('regGitAvailable', { head: (preview.git.headCommit ?? '').slice(0, 7), branch: preview.git.branch ?? '' })
+          + (preview.git.dirty === true ? t('regGitDirty') : '')
+      : t('regGitUnavailable', { reason: '' })
+    : null;
+  return (
+    <section data-cona-register="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
+      <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>{t('regTitle')}</h4>
+      {register.phase === 'error' && register.code !== null ? (
+        <p style={{ ...rowStyle, color: '#b3261e' }}>{register.code}{register.message ? `: ${register.message}` : ''}</p>
+      ) : null}
+      <div style={rowStyle}>
+        <input
+          data-cona-reg-source="1"
+          value={sourceRoot}
+          style={fieldStyle}
+          onChange={(e) => setSourceRoot(e.target.value)}
+        />
+      </div>
+      <p style={{ margin: '6px 0', display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          data-cona-reg-preview="1"
+          disabled={sourceRoot.trim() === '' || register.phase === 'busy'}
+          onClick={() => { void controller.previewRegister(sourceRoot.trim()).then(() => force((n) => n + 1)); }}
+        >
+          {t('regPreview')}
+        </button>
+      </p>
+      {preview !== null && preview.status === 'preview' ? (
+        <div style={{ ...rowStyle, whiteSpace: 'pre-wrap' }}>
+          <div>{t('regProject', { projectId: preview.projectId })}</div>
+          <div>{t('regVersion', { planVersion: preview.planVersion.slice(0, 12) })}</div>
+          <div>{t('regRecords', { count: String(preview.recordCount) })}</div>
+          {gitLine !== null ? <div>{gitLine}</div> : null}
+          <div style={{ marginTop: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <select value={kind} onChange={(e) => setKind(e.target.value as (typeof KIND_OPTIONS)[number])}>
+              {KIND_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+            <button
+              type="button"
+              data-cona-reg-confirm="1"
+              onClick={() => { void controller.confirmRegister(preview.sourceRoot, kind, preview.projectId).then(() => force((n) => n + 1)); }}
+            >
+              {t('regConfirm')}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 /** 接续保存区：入口按钮 + 表单 + 共享内容预览 + 保存回执状态。 */
 function ResumeSaveSection(props: { controller: ProjectOverviewController; state: OverviewState; t: TopTranslate }): JSX.Element | null {

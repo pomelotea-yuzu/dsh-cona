@@ -1,4 +1,4 @@
-// 本机根与注册表命令（tasks 3.2；1.1–1.3 扩展）：纯 Node，无 DSH 服务。
+// 本机根与注册表命令（tasks 3.2；1.1–1.3 扩展；1.4–1.5 迁移）：纯 Node，无 DSH 服务。
 // 用法：
 //   local.js root    (--dsh-home <dir> | --local-root <dir>) [--source <资料根>]
 //   local.js register --local-root <dir> --source <资料根> --project-id <uuid> --kind <kind>
@@ -8,6 +8,12 @@
 //   local.js preview-refresh --local-root <dir> --instance <instanceId> --source <资料根>
 //   local.js refresh --local-root <dir> --instance <instanceId> --source <资料根>
 //                    [--preview-file <preview-refresh 输出 JSON>] [--confirm-fallback]
+//   local.js migrate-preview --local-root <dir> --instance <id> --to <目标根> --to-kind <kind>
+//   local.js migrate         --local-root <dir> --instance <id> --to <目标根> --to-kind <kind>
+//   local.js migrate-status  --local-root <dir>
+//   local.js migrate-recover --local-root <dir> --operation <operationId> --confirm <requestDigest>
+//   local.js migrate-cancel  --local-root <dir> --operation <operationId> --confirm <requestDigest>
+//   local.js startup-location (--dsh-home <dir> | --local-root <dir>) --configured-root <旧资料根>
 //   local.js diagnostics --local-root <dir> --instance <instanceId>
 //   local.js unisolate --local-root <dir> --instance <instanceId> --confirm offline-reviewed
 //   local.js quarantined --local-root <dir>
@@ -27,11 +33,13 @@ import { LocalStateService } from '../application/local-state.js';
 import type { RefreshPreview } from '../application/local-state.js';
 import type { LocationKind } from '../application/location.js';
 import { LocalStateStore } from '../adapters/fs/local-state.js';
+import { createMigrationFiles } from '../adapters/fs/migration-files.js';
 import { inspectPrivateRoot } from '../adapters/fs/git-guard.js';
 import { readGitStatus } from '../adapters/fs/git-status.js';
 import { createGitHistory } from '../adapters/fs/git-history.js';
 import { resolveLocalRoot, rootRelation } from '../adapters/fs/local-root.js';
 import { createSourceFiles } from '../adapters/fs/source-files.js';
+import { MigrationService } from '../application/migration.js';
 import type { Sha256Fn } from '../domain/types.js';
 
 const sha256: Sha256Fn = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -51,6 +59,12 @@ function usage(): string {
     '  local.js unisolate --local-root <dir> --instance <instanceId> --confirm offline-reviewed',
     '  local.js quarantined --local-root <dir>',
     '  local.js release-lock --local-root <dir> (--force | --token <token>)',
+    '  local.js migrate-preview --local-root <dir> --instance <id> --to <目标根> --to-kind <kind>',
+    '  local.js migrate         --local-root <dir> --instance <id> --to <目标根> --to-kind <kind>',
+    '  local.js migrate-status  --local-root <dir>',
+    '  local.js migrate-recover --local-root <dir> --operation <operationId> --confirm <requestDigest>',
+    '  local.js migrate-cancel  --local-root <dir> --operation <operationId> --confirm <requestDigest>',
+    '  local.js startup-location (--dsh-home <dir> | --local-root <dir>) --configured-root <旧资料根>',
   ].join('\n') + '\n';
 }
 
@@ -80,6 +94,25 @@ function buildService(): LocalStateService {
   });
 }
 
+/** 1.4：迁移服务依赖装配（与 local 服务共享 resolver／基线读取与哈希）。 */
+function buildMigrationService(): MigrationService {
+  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const files = createSourceFiles(path.join(packageRoot, 'formats', 'v1'), sha256);
+  return new MigrationService({
+    store: new LocalStateStore(),
+    resolver: { resolveLocal: resolveLocalRoot, relation: rootRelation },
+    readBaseline: (sourceRoot: string) => readSourceBaseline(files, sourceRoot, sha256, () => new Date().toISOString()),
+    files: createMigrationFiles(),
+    // 目标侧独占候选目录：与目标同父目录，目录名携带完整操作号（所有权证据之一）。
+    candidatePathFor: (toRoot: string, operationId: string) =>
+      path.join(path.dirname(toRoot), `.cona-mig-${operationId}`),
+    sha256,
+    clock: () => new Date().toISOString(),
+    newOperationId: () => randomUUID(),
+    newOwnershipToken: () => randomUUID(),
+  });
+}
+
 function rootRequest(values: Record<string, unknown>): { dshHome?: string; localDataRoot?: string } {
   const request: { dshHome?: string; localDataRoot?: string } = {};
   if (typeof values['dsh-home'] === 'string') request.dshHome = values['dsh-home'];
@@ -103,6 +136,10 @@ async function main(): Promise<number> {
       'preview-file': { type: 'string' },
       'confirm-fallback': { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
+      to: { type: 'string' },
+      'to-kind': { type: 'string' },
+      operation: { type: 'string' },
+      'configured-root': { type: 'string' },
     },
   });
   const command = positionals[0];
@@ -141,7 +178,8 @@ async function main(): Promise<number> {
         .filter((item): item is { repositoryId: string; absolutePath: string } => item !== null);
       const result = await service.register({
         localDataRoot: values['local-root'],
-        sourceRoot: values['source'],
+        // 1.4：与 refresh 的来源核对同一规范化域，避免同一路径两种写法被误判不一致。
+        sourceRoot: path.resolve(values['source']),
         sourceKind: values['kind'] as LocationKind,
         projectId: values['project-id'],
         ...(repositoryMaps.length > 0 ? { repositoryMaps } : {}),
@@ -211,6 +249,8 @@ async function main(): Promise<number> {
         ...(values['confirm-fallback'] === true && preview?.fallback !== undefined
           ? { confirmFallback: { commit: preview.fallback.commit } }
           : {}),
+        // 1.4：声明来源，与实例有效定位核对（外部编辑旧根不刷新新实例）。
+        source: path.resolve(values['source']),
       });
       process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
       return result.ok ? 0 : 1;
@@ -296,6 +336,101 @@ async function main(): Promise<number> {
       const result = await store.releaseLock(localRoot, {
         force: values['force'] === true,
         ...(typeof values['token'] === 'string' ? { expectedToken: values['token'] } : {}),
+      });
+      process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
+      return result.ok ? 0 : 1;
+    }
+    if (command === 'migrate-preview') {
+      const localRoot = values['local-root'];
+      const instanceId = values['instance'];
+      if (
+        typeof localRoot !== 'string' ||
+        typeof instanceId !== 'string' ||
+        typeof values['to'] !== 'string' ||
+        typeof values['to-kind'] !== 'string'
+      ) {
+        process.stderr.write('migrate-preview 需要 --local-root、--instance、--to 与 --to-kind\n' + usage());
+        return 2;
+      }
+      const result = await buildMigrationService().preview({
+        localDataRoot: localRoot,
+        instanceId,
+        toRoot: path.resolve(values['to']),
+        toKind: values['to-kind'] as LocationKind,
+      });
+      process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
+      return result.ok ? 0 : 1;
+    }
+    if (command === 'migrate') {
+      const localRoot = values['local-root'];
+      const instanceId = values['instance'];
+      if (
+        typeof localRoot !== 'string' ||
+        typeof instanceId !== 'string' ||
+        typeof values['to'] !== 'string' ||
+        typeof values['to-kind'] !== 'string'
+      ) {
+        process.stderr.write('migrate 需要 --local-root、--instance、--to 与 --to-kind\n' + usage());
+        return 2;
+      }
+      const result = await buildMigrationService().migrate({
+        localDataRoot: localRoot,
+        instanceId,
+        toRoot: path.resolve(values['to']),
+        toKind: values['to-kind'] as LocationKind,
+        ...(typeof values['operation'] === 'string' ? { operationId: values['operation'] } : {}),
+      });
+      process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
+      return result.ok ? 0 : 1;
+    }
+    if (command === 'migrate-status') {
+      const localRoot = values['local-root'];
+      if (typeof localRoot !== 'string') {
+        process.stderr.write('migrate-status 需要 --local-root\n' + usage());
+        return 2;
+      }
+      const result = await buildMigrationService().listMigrations({ localDataRoot: localRoot });
+      process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
+      return result.ok ? 0 : 1;
+    }
+    if (command === 'migrate-recover') {
+      const localRoot = values['local-root'];
+      if (typeof localRoot !== 'string' || typeof values['operation'] !== 'string' || typeof values['confirm'] !== 'string') {
+        process.stderr.write('migrate-recover 需要 --local-root、--operation 与 --confirm（原请求摘要）\n' + usage());
+        return 2;
+      }
+      const result = await buildMigrationService().recover({
+        localDataRoot: localRoot,
+        operationId: values['operation'],
+        confirmDigest: values['confirm'],
+        ...(typeof values['instance'] === 'string' ? { instanceId: values['instance'] } : {}),
+      });
+      process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
+      return result.ok ? 0 : 1;
+    }
+    if (command === 'migrate-cancel') {
+      const localRoot = values['local-root'];
+      if (typeof localRoot !== 'string' || typeof values['operation'] !== 'string' || typeof values['confirm'] !== 'string') {
+        process.stderr.write('migrate-cancel 需要 --local-root、--operation 与 --confirm（原请求摘要）\n' + usage());
+        return 2;
+      }
+      const result = await buildMigrationService().cancel({
+        localDataRoot: localRoot,
+        operationId: values['operation'],
+        confirmDigest: values['confirm'],
+        ...(typeof values['instance'] === 'string' ? { instanceId: values['instance'] } : {}),
+      });
+      process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
+      return result.ok ? 0 : 1;
+    }
+    if (command === 'startup-location') {
+      if (typeof values['configured-root'] !== 'string') {
+        process.stderr.write('startup-location 需要 --configured-root\n' + usage());
+        return 2;
+      }
+      const result = await buildMigrationService().resolveStartup({
+        ...rootRequest(values),
+        configuredRoot: path.resolve(values['configured-root']),
       });
       process.stdout.write(JSON.stringify({ command, ...result }) + '\n');
       return result.ok ? 0 : 1;

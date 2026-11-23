@@ -30,10 +30,24 @@ import type {
   ResumeLinkResult,
 } from '../host/overview-service.js'
 
+import type {
+  RegisterPreviewResult,
+  RegisterSourceResult,
+  MigrationOpResult,
+  MigrationPreviewOpResult,
+  MigrationListOpResult,
+} from '../host/overview-service.js'
+import type { LocationKind } from '../application/location.js'
+
 /** client 侧结果：OwnerDenial 的 null 在 callOverview 归一为 rejected，不进入控制器。 */
 type ResumeChatsView = Exclude<ResumeChatsResult, null>
 type ResumeLinkView = Exclude<ResumeLinkResult, null>
 type ResumeChatTargetView = Exclude<ResumeChatTargetResult, null>
+type RegisterPreviewView = Exclude<RegisterPreviewResult, null>
+type RegisterSourceView = Exclude<RegisterSourceResult, null>
+type MigrationOpView = Exclude<MigrationOpResult, null>
+type MigrationPreviewOpView = Exclude<MigrationPreviewOpResult, null>
+type MigrationListView = Exclude<MigrationListOpResult, null>
 
 export const name = 'dsh-cona-project.client'
 
@@ -177,6 +191,78 @@ function resolveChatTarget(instanceId: string, recordId: string, contentHash: st
   )
 }
 
+/**
+ * 迁移/登记的通用 POST（1.4/1.5）：结果形状是 `{ ok }` 或 `{ status }` 的并集，
+ * 与 callOverview 的 status 约束不同。HTTP 失败／形状不合法／OwnerDenial null
+ * 都归一为 `{ ok: false, issues: [...] }`，控制器按稳定码诊断。
+ */
+async function callMigration<T>(method: string, request: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`/api/conaOverview/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({
+      type: 'client-request',
+      rpcId: `cona-overview-${globalThis.crypto.randomUUID()}`,
+      method: `conaOverview/${method}`,
+      payload: { args: { request } },
+    }),
+  })
+  const denied = (code: string, message: string) => ({ ok: false, issues: [{ code, message }] }) as T
+  if (!response.ok) return denied('transport-http', `HTTP ${response.status}`)
+  const body = await response.json() as {
+    result?: { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } }
+  }
+  if (body.result === undefined) return denied('transport-parse', '响应缺少结果')
+  if (!body.result.ok) return denied(body.result.error.code, body.result.error.message)
+  const value = body.result.value
+  if (value === null || typeof value !== 'object') return denied('forbidden', '非 owner 或响应形状不合法')
+  return value as T
+}
+
+/** 1.5：迁移预览（conaOverview/migrationPreview）。 */
+function migrationPreview(instanceId: string, toRoot: string, toKind: LocationKind): Promise<MigrationPreviewOpView> {
+  return callMigration<MigrationPreviewOpView>('migrationPreview', { instanceId, toRoot, toKind })
+}
+
+/** 1.5：迁移确认（conaOverview/migrationRun）。 */
+function migrationRun(instanceId: string, toRoot: string, toKind: LocationKind, operationId?: string): Promise<MigrationOpView> {
+  return callMigration<MigrationOpView>('migrationRun', { instanceId, toRoot, toKind, operationId })
+}
+
+/** 1.5：迁移恢复（conaOverview/migrationRecover）。 */
+function migrationRecover(instanceId: string, operationId: string, confirmDigest: string): Promise<MigrationOpView> {
+  return callMigration<MigrationOpView>('migrationRecover', { instanceId, operationId, confirmDigest })
+}
+
+/** 1.5：迁移取消（conaOverview/migrationCancel）。 */
+function migrationCancel(instanceId: string, operationId: string, confirmDigest: string): Promise<MigrationOpView> {
+  return callMigration<MigrationOpView>('migrationCancel', { instanceId, operationId, confirmDigest })
+}
+
+/** 1.5：迁移记录列表（conaOverview/migrationList）。 */
+function migrationList(): Promise<MigrationListView> {
+  return callMigration<MigrationListView>('migrationList', {})
+}
+
+/** 1.1：接入预览（conaOverview/registerPreview）。 */
+function registerPreview(sourceRoot: string): Promise<RegisterPreviewView> {
+  return callOverview<RegisterPreviewView>(
+    'registerPreview',
+    { sourceRoot },
+    (code, message) => ({ status: 'rejected', code, message }),
+  )
+}
+
+/** 1.1：显式登记（conaOverview/registerSource）。 */
+function registerSource(request: { sourceRoot: string; sourceKind: LocationKind; projectId: string }): Promise<RegisterSourceView> {
+  return callOverview<RegisterSourceView>(
+    'registerSource',
+    { ...request },
+    (code, message) => ({ status: 'rejected', code, message }),
+  )
+}
+
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, dictionaries), 'dsh-cona-project: dictionaries')
   const t = ctx.locale.bind(NS)
@@ -188,6 +274,15 @@ export function apply(ctx: ClientContext): void {
     listResumeChats,
     linkResume,
     resolveChatTarget,
+    // 1.5：迁移操作（宿主未装配时 conaOverview 返回 unavailable，控制器显示稳定码）。
+    migrationPreview,
+    migrationRun,
+    migrationRecover,
+    migrationCancel,
+    migrationList,
+    // 1.1：接入预览与显式登记。
+    registerPreview,
+    registerSource,
     // 1.1 探针实证：fiber 注入 uiWorkspace 后 openSession(id) 落到指定 Session。
     // 宿主生成的类型不随插件分发，这里按探针实证的最小结构访问。
     openSession: (sessionId) => {

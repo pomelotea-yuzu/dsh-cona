@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { conversationStateOf, resumePointersOf, type InstanceAggregate, type QuarantineInfo, type Registry } from '../../application/local-state.js';
+import { conversationStateOf, migrationsOf, resumePointersOf, type InstanceAggregate, type QuarantineInfo, type Registry } from '../../application/local-state.js';
 import type { LocalIssue, LocalLockInfo, LocalStateStorePort } from '../../application/ports.js';
 import { replaceAtomicallyChecked, type AtomicHooks, type AtomicStage } from './atomic-write.js';
 
@@ -84,14 +84,34 @@ export class LocalStateStore implements LocalStateStorePort {
     } catch {
       throw new LocalStateError('local-registry-corrupt', `注册表不是合法 JSON：${REGISTRY_FILE}`);
     }
-    const registry = parsed as { schemaVersion?: unknown; instances?: unknown };
-    if (registry?.schemaVersion !== 1 || !Array.isArray(registry.instances)) {
+    const registry = parsed as { schemaVersion?: unknown; instances?: unknown; migrations?: unknown };
+    // schema 1（旧）与 schema 2（1.4 迁移记录）都读；未知版本停写，不静默覆盖。
+    if (
+      (registry?.schemaVersion !== 1 && registry?.schemaVersion !== 2) ||
+      !Array.isArray(registry.instances)
+    ) {
       throw new LocalStateError('local-registry-unsupported', '注册表版本不受支持；不静默覆盖');
     }
-    return { schemaVersion: 1, instances: registry.instances as Registry['instances'] };
+    if (registry.schemaVersion === 2 && !Array.isArray(registry.migrations)) {
+      throw new LocalStateError('local-registry-corrupt', 'schema 2 注册表缺少迁移记录数组');
+    }
+    const result = registry as unknown as Registry;
+    return { ...result, migrations: migrationsOf(result) };
   }
 
   async writeRegistry(localRoot: string, registry: Registry): Promise<void> {
+    if (registry.schemaVersion === 2 && !Array.isArray(registry.migrations)) {
+      throw new LocalStateError('local-registry-corrupt', 'schema 2 注册表写入缺少迁移记录数组');
+    }
+    if (registry.schemaVersion === 1) {
+      if (Array.isArray(registry.migrations) && registry.migrations.length > 0) {
+        throw new LocalStateError('local-registry-corrupt', 'schema 1 注册表不得携带迁移记录；先升级 schema 2');
+      }
+      // schema 1 落盘保持旧形状（不带空 migrations 字段），旧读者可继续读取。
+      const plain: Registry = { schemaVersion: 1, instances: registry.instances };
+      await writeJsonAtomic(path.join(localRoot, REGISTRY_FILE), plain);
+      return;
+    }
     await writeJsonAtomic(path.join(localRoot, REGISTRY_FILE), registry);
   }
 

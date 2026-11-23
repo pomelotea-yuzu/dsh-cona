@@ -30,7 +30,9 @@ import { describeRoot } from '../adapters/fs/location.js'
 import { observeWorkCopy } from '../adapters/fs/work-copy.js'
 import type { Sha256Fn } from '../domain/types.js'
 import { ConaDiagnosticService } from './diagnostic-service.js'
-import { createLocalStateService, openConfiguredInstance, resolveHostConfig, type HostConfigInput, type HostWiring } from './bootstrap.js'
+import { createLocalStateService, createMigrationService, openConfiguredInstance, resolveHostConfig, type HostConfigInput, type HostWiring } from './bootstrap.js'
+import { readSourceBaseline } from '../application/baseline.js'
+import { readGitStatus } from '../adapters/fs/git-status.js'
 import { ConaProjectService, type ConaProjectRuntime, type RuntimeResult } from './project-service.js'
 import { ConaOverviewService } from './overview-service.js'
 import { InstanceRuntimeRegistry, type OpenInstanceInput } from './instance-runtime-registry.js'
@@ -249,6 +251,29 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       ),
     )
   })
+  // 1.4：迁移服务共用同一装配（registry store、resolver、files）。
+  const migration = createMigrationService(wiring)
+  // 1.1：接入预览读取（基线 + Git 只读观察一次取齐）。
+  const readBaselineForPreview = async (root: string) => {
+    const result = await readSourceBaseline(files, root, sha256, clock)
+    if (!result.ok) return result
+    const view = readGitStatus(root, { projectFile: 'project.json' })
+    return {
+      ok: true as const,
+      doc: result.doc,
+      baseline: {
+        ...result.baseline,
+        git: {
+          available: view.available,
+          ...(view.repositoryRoot === undefined ? {} : { repositoryRoot: view.repositoryRoot }),
+          headCommit: view.headCommit,
+          branch: view.branch,
+          unmerged: view.unmerged,
+          dirty: view.dirty,
+        },
+      },
+    }
+  }
 
   /** 由已打开实例装配四个应用服务；A 与 B 走同一路径，各自得到隔离的运行时。 */
   const assembleRuntime = (instance: import('./bootstrap.js').OpenedInstance): RuntimeResult => {
@@ -379,6 +404,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       sha256,
       clock,
       localState,
+      migration,
       defaultLocalRoot: async () => defaultLocalRootDir(),
       describeLocation: describe,
     })
@@ -410,6 +436,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
         sha256,
         clock,
         localState,
+        migration,
         defaultLocalRoot: async () => defaultLocalRootDir(),
         describeLocation: describe,
       },
@@ -457,6 +484,10 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
   ctx.plugin(ConaOverviewService, {
     registry: instanceRegistry,
     localRootDisplay: (root: string) => describeRoot(root).displayPath,
+    migration,
+    localDataRoot: async () => config.localDataRoot ?? (await defaultLocalRootDir()),
+    readBaseline: readBaselineForPreview,
+    localState,
   })
 
   // 启动即尝试打开一次：成功与失败都留一行宿主日志作为直接证据。

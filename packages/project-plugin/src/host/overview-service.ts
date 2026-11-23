@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import type { BaselineResult } from '../application/baseline.js'
 import type { CommandEnvelope, CommandResult } from '../application/command-service.js'
 import type { PresetDescriptor } from '../domain/presets.js'
 import type { SnapshotResult } from '../application/snapshot.js'
@@ -15,9 +16,17 @@ import { parseResumeBody, selectResumeCandidate, type ResumePayload } from '../d
 import type { ResumeChatPointerView } from '../application/resume-chat.js'
 import { FollowSessions, type FollowEventBatch, type FollowHandleView } from './follow-sessions.js'
 import type { FollowResult } from '../application/snapshot.js'
-import {
+import type {
+  MigrationOutcome,
+  MigrationPreviewResult,
+  MigrationService,
+} from '../application/migration.js'
+import type { MigrationRecord } from '../application/local-state.js'
+import type { LocationKind } from '../application/location.js'
+import type { LocalStateService } from '../application/local-state.js'
+import type {
   InstanceRuntimeRegistry,
-  type OverviewInstanceRow,
+  OverviewInstanceRow,
 } from './instance-runtime-registry.js'
 import type {
   ConaExecuteRequest,
@@ -36,6 +45,14 @@ export interface ConaOverviewServiceDeps {
   registry: InstanceRuntimeRegistry;
   /** 本机根显示路径（home 折叠）；与 conaProject 同一实现。 */
   localRootDisplay: (root: string) => string;
+  /** 1.4：迁移服务（1.5 概览迁移操作；缺省时迁移入口返回 unavailable）。 */
+  migration?: MigrationService;
+  /** 1.4：本机运行数据根解析（迁移与登记写入的落点）。 */
+  localDataRoot?: () => Promise<string | undefined>;
+  /** 1.1：接入预览的资料基线读取（宿主装配；缺省时登记入口返回 unavailable）。 */
+  readBaseline?: (root: string) => Promise<BaselineResult>;
+  /** 1.1：显式登记入口（LocalStateService.register；缺省时登记入口返回 unavailable）。 */
+  localState?: LocalStateService;
 }
 
 export interface ConaOverviewSnapshotRequest extends ConaSnapshotRequest {
@@ -132,6 +149,70 @@ export type OverviewListResult =
   | { status: 'listed'; instances: OverviewInstanceRow[] }
   | { status: 'unconfigured'; message: string }
   | OwnerDenial;
+
+/** 1.1：接入预览（位置／格式／项目身份／Git 状态），显式登记前只读。 */
+export type RegisterPreviewResult =
+  | {
+      status: 'preview';
+      sourceRoot: string;
+      sourceDisplay: string;
+      projectId: string;
+      planVersion: string;
+      headHash: string;
+      recordCount: number;
+      git: {
+        available: boolean;
+        headCommit?: string;
+        branch?: string;
+        dirty: boolean | 'unknown';
+        unmerged: boolean | 'unknown';
+      } | null;
+    }
+  | { status: 'rejected'; code: string; message: string }
+  | OwnerDenial;
+
+/** 1.1：显式登记结果；重复接入同一规范根回到既有实例。 */
+export type RegisterSourceResult =
+  | { status: 'registered'; instanceId: string; projectId: string; reused: boolean }
+  | { status: 'rejected'; code: string; message: string }
+  | OwnerDenial;
+
+export interface ConaRegisterSourceRequest {
+  sourceRoot: string;
+  sourceKind: LocationKind;
+  projectId: string;
+  repositoryMaps?: { repositoryId: string; absolutePath: string }[];
+}
+
+export interface ConaMigrationRequest {
+  instanceId: string;
+  toRoot: string;
+  toKind: LocationKind;
+  operationId?: string;
+}
+
+export interface ConaMigrationRecoverRequest {
+  instanceId: string;
+  operationId: string;
+  confirmDigest: string;
+}
+
+/** 1.5：概览迁移操作结果（application 层结果原样投影；未装配迁移服务给 unavailable）。 */
+export type MigrationOpResult = MigrationOutcome | { status: 'unavailable'; message: string } | OwnerDenial;
+
+export type MigrationPreviewOpResult = MigrationPreviewResult | { ok: false; issues: { code: string; message: string; path?: string }[] } | { status: 'unavailable'; message: string } | OwnerDenial;
+
+export type MigrationListOpResult =
+  | { ok: true; migrations: MigrationRecord[] }
+  | { ok: false; issues: LocalIssueView[] }
+  | { status: 'unavailable'; message: string }
+  | OwnerDenial;
+
+export interface LocalIssueView {
+  code: string;
+  message: string;
+  path?: string;
+}
 
 export class ConaOverviewService extends TypertRemoteService {
   private readonly follows = new FollowSessions()
@@ -444,9 +525,205 @@ export class ConaOverviewService extends TypertRemoteService {
     return { status: 'listed', presets: [...runtime.value.command.treePresets()] }
   }
 
+  // ---------- 1.1：接入预览与显式登记 ----------
+
+  /** 接入预览：只读资料基线与 Git 观察，不登记、不写盘。 */
+  @Remote('registerPreview')
+  async registerPreview(request: { sourceRoot: string }): Promise<RegisterPreviewResult> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    if (this.deps.readBaseline === undefined) {
+      return { status: 'rejected', code: 'register-unavailable', message: '此宿主未装配资料基线读取；无法预览接入' }
+    }
+    if (typeof request?.sourceRoot !== 'string' || request.sourceRoot === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 sourceRoot' }
+    }
+    const baseline = await this.deps.readBaseline(request.sourceRoot)
+    if (!baseline.ok) {
+      const first = baseline.issues[0]
+      return {
+        status: 'rejected',
+        code: first?.code ?? 'invalid-project',
+        message: baseline.issues.map((issue) => issue.message).join('；') || '资料根不可读',
+      }
+    }
+    return {
+      status: 'preview',
+      sourceRoot: request.sourceRoot,
+      sourceDisplay: this.deps.localRootDisplay(request.sourceRoot),
+      projectId: baseline.baseline.projectId,
+      planVersion: baseline.baseline.planVersion,
+      headHash: baseline.baseline.headHash,
+      recordCount: baseline.baseline.records.length,
+      git: baseline.baseline.git ?? null,
+    }
+  }
+
+  /** 显式登记：位置／Git 状态已预览后由 owner 确认；重复接入同一规范根回到既有实例。 */
+  @Remote('registerSource')
+  async registerSource(request: ConaRegisterSourceRequest): Promise<RegisterSourceResult> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    if (this.deps.localState === undefined || this.deps.localDataRoot === undefined) {
+      return { status: 'rejected', code: 'register-unavailable', message: '此宿主未装配本机登记服务；无法显式登记' }
+    }
+    if (typeof request?.sourceRoot !== 'string' || request.sourceRoot === ''
+      || typeof request.projectId !== 'string' || request.projectId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'sourceRoot 与 projectId 必须是非空字符串' }
+    }
+    const localRoot = await this.deps.localDataRoot()
+    if (localRoot === undefined) {
+      return { status: 'rejected', code: 'local-root-missing', message: '无法确定本机运行数据根' }
+    }
+    const outcome = await this.deps.localState.register({
+      localDataRoot: localRoot,
+      sourceRoot: request.sourceRoot,
+      sourceKind: request.sourceKind,
+      projectId: request.projectId,
+      ...(Array.isArray(request.repositoryMaps) && request.repositoryMaps.length > 0
+        ? { repositoryMaps: request.repositoryMaps }
+        : {}),
+    })
+    if (!outcome.ok) {
+      const first = outcome.issues[0]
+      return {
+        status: 'rejected',
+        code: first?.code ?? 'register-failed',
+        message: outcome.issues.map((issue) => issue.message).join('；') || '登记失败',
+      }
+    }
+    return {
+      status: 'registered',
+      instanceId: outcome.entry.instanceId,
+      projectId: outcome.entry.projectId,
+      reused: outcome.reused,
+    }
+  }
+
+  // ---------- 1.5：概览迁移操作 ----------
+
+  /** 迁移预览：位置／占用／工作守卫诊断进 checks，不落盘。 */
+  @Remote('migrationPreview')
+  async migrationPreview(request: ConaMigrationRequest): Promise<MigrationPreviewOpResult> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    if (this.deps.migration === undefined || this.deps.localDataRoot === undefined) {
+      return { status: 'unavailable', message: '此宿主未装配迁移服务' }
+    }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return badId
+    if (typeof request.toRoot !== 'string' || request.toRoot === '') {
+      return { ok: false, issues: [{ code: 'operation-mismatch', message: '缺少 toRoot' }] }
+    }
+    const localRoot = await this.deps.localDataRoot()
+    if (localRoot === undefined) {
+      return { ok: false, issues: [{ code: 'local-root-missing', message: '无法确定本机运行数据根' }] }
+    }
+    return this.deps.migration.preview({
+      localDataRoot: localRoot,
+      instanceId: request.instanceId,
+      toRoot: request.toRoot,
+      toKind: request.toKind,
+    })
+  }
+
+  /** 迁移确认：事务化 prepared → 复制装入 → target-ready → 切换 → committed。 */
+  @Remote('migrationRun')
+  async migrationRun(request: ConaMigrationRequest): Promise<MigrationOpResult> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    if (this.deps.migration === undefined || this.deps.localDataRoot === undefined) {
+      return { status: 'unavailable', message: '此宿主未装配迁移服务' }
+    }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return badId
+    if (typeof request.toRoot !== 'string' || request.toRoot === '') {
+      return { ok: false, issues: [{ code: 'operation-mismatch', message: '缺少 toRoot' }] }
+    }
+    const localRoot = await this.deps.localDataRoot()
+    if (localRoot === undefined) {
+      return { ok: false, issues: [{ code: 'local-root-missing', message: '无法确定本机运行数据根' }] }
+    }
+    return this.deps.migration.migrate({
+      localDataRoot: localRoot,
+      instanceId: request.instanceId,
+      toRoot: request.toRoot,
+      toKind: request.toKind,
+      ...(typeof request.operationId === 'string' ? { operationId: request.operationId } : {}),
+    })
+  }
+
+  /** 迁移恢复（重启后继续／补齐）：确认摘要必须与登记的原请求摘要一致。 */
+  @Remote('migrationRecover')
+  async migrationRecover(request: ConaMigrationRecoverRequest): Promise<MigrationOpResult> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    if (this.deps.migration === undefined || this.deps.localDataRoot === undefined) {
+      return { status: 'unavailable', message: '此宿主未装配迁移服务' }
+    }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return badId
+    if (typeof request.operationId !== 'string' || request.operationId === ''
+      || typeof request.confirmDigest !== 'string' || request.confirmDigest === '') {
+      return { ok: false, issues: [{ code: 'operation-mismatch', message: 'operationId 与 confirmDigest 必须是非空字符串' }] }
+    }
+    const localRoot = await this.deps.localDataRoot()
+    if (localRoot === undefined) {
+      return { ok: false, issues: [{ code: 'local-root-missing', message: '无法确定本机运行数据根' }] }
+    }
+    return this.deps.migration.recover({
+      localDataRoot: localRoot,
+      instanceId: request.instanceId,
+      operationId: request.operationId,
+      confirmDigest: request.confirmDigest,
+    })
+  }
+
+  /** 迁移取消：未切换才可取消；只清理有所有权证据且内容核对过的候选。 */
+  @Remote('migrationCancel')
+  async migrationCancel(request: ConaMigrationRecoverRequest): Promise<MigrationOpResult> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    if (this.deps.migration === undefined || this.deps.localDataRoot === undefined) {
+      return { status: 'unavailable', message: '此宿主未装配迁移服务' }
+    }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return badId
+    if (typeof request.operationId !== 'string' || request.operationId === ''
+      || typeof request.confirmDigest !== 'string' || request.confirmDigest === '') {
+      return { ok: false, issues: [{ code: 'operation-mismatch', message: 'operationId 与 confirmDigest 必须是非空字符串' }] }
+    }
+    const localRoot = await this.deps.localDataRoot()
+    if (localRoot === undefined) {
+      return { ok: false, issues: [{ code: 'local-root-missing', message: '无法确定本机运行数据根' }] }
+    }
+    return this.deps.migration.cancel({
+      localDataRoot: localRoot,
+      instanceId: request.instanceId,
+      operationId: request.operationId,
+      confirmDigest: request.confirmDigest,
+    })
+  }
+
+  /** 迁移记录列表：诊断与恢复入口（requestDigest 用于重复确认核对）。 */
+  @Remote('migrationList')
+  async migrationList(): Promise<MigrationListOpResult> {
+    const denied = this.deny()
+    if (denied !== null) return denied
+    if (this.deps.migration === undefined || this.deps.localDataRoot === undefined) {
+      return { status: 'unavailable', message: '此宿主未装配迁移服务' }
+    }
+    const localRoot = await this.deps.localDataRoot()
+    if (localRoot === undefined) {
+      return { ok: false, issues: [{ code: 'local-root-missing', message: '无法确定本机运行数据根' }] }
+    }
+    const result = await this.deps.migration.listMigrations({ localDataRoot: localRoot })
+    if (!result.ok) return { ok: false, issues: result.issues }
+    return { ok: true, migrations: result.migrations }
+  }
+
   /** 按实例执行命令（owner 保存接续用）；实例身份由 envelope 与路由双重核对。 */
-  @Remote('execute')
-  async execute(request: ConaOverviewExecuteRequest): Promise<CommandResult> {
+  @Remote('execute')  async execute(request: ConaOverviewExecuteRequest): Promise<CommandResult> {
     const denied = this.deny()
     if (denied !== null) return denied
     const badId = this.requireId(request.instanceId)

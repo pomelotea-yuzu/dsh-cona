@@ -77,3 +77,25 @@ export type {
   ConaResumeChatTargetRequest,
   TreePresetsResult,
 } from './host/overview-service.js'
+// R2 收尾 1.4/1.5：位置迁移与接入登记（conaOverview migration*/register* 边界类型）。
+export type { LocationKind } from './application/location.js'
+export type {
+  MigrationOutcome,
+  MigrationPreviewResult,
+} from './application/migration.js'
+export type {
+  MigrationRecord,
+  MigrationReceipt,
+  MigrationStatus,
+} from './application/local-state.js'
+export type {
+  RegisterPreviewResult,
+  RegisterSourceResult,
+  ConaRegisterSourceRequest,
+  ConaMigrationRequest,
+  ConaMigrationRecoverRequest,
+  MigrationOpResult,
+  MigrationPreviewOpResult,
+  MigrationListOpResult,
+  LocalIssueView,
+} from './host/overview-service.js'

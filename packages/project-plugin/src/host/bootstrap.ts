@@ -5,8 +5,11 @@
 // 面板只展示，不做位置迁移。
 
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { readSourceBaseline } from '../application/baseline.js';
 import { LocalStateService, type RegistryEntry } from '../application/local-state.js';
+import { MigrationService } from '../application/migration.js';
+import { createMigrationFiles } from '../adapters/fs/migration-files.js';
 import type { GitPrivateRootPort, LocalRootResolverPort, LocalStateStorePort, SourceFilesPort } from '../application/ports.js';
 import type { Sha256Fn } from '../domain/types.js';
 
@@ -79,6 +82,8 @@ export interface BootstrapDeps {
   defaultLocalRoot: () => Promise<string | undefined>;
   /** 资料根显示路径（home 折叠）。 */
   describeLocation: (root: string) => { displayPath: string };
+  /** 1.4：迁移服务（可选；缺省时旧根配置按新接入处理，不做启动定位核对）。 */
+  migration?: MigrationService;
 }
 
 export interface OpenedInstance {
@@ -120,7 +125,27 @@ export async function openConfiguredInstance(
     return { status: 'failed', code: 'cona-local-root-missing', message: '无法确定本机运行数据根；请配置 localDataRoot' };
   }
 
-  const baseline = await readSourceBaseline(deps.files, sourceRoot, deps.sha256, deps.clock);
+  // 1.4 启动定位：配置仍指向旧根时，按该实例已确认的迁移定位启动；
+  // 旧根已登记为另一独立实例时要求按实例显式选择，不静默挑一个。
+  let effectiveRoot = sourceRoot;
+  if (deps.migration !== undefined) {
+    const startup = await deps.migration.resolveStartup({
+      localDataRoot: localRoot,
+      configuredRoot: sourceRoot,
+    });
+    if (startup.ok === true && startup.migrated) {
+      effectiveRoot = startup.effectiveRoot;
+    } else if (startup.ok === false && startup.issues.some((issue) => issue.code === 'startup-location-ambiguous')) {
+      return {
+        status: 'failed',
+        code: 'cona-startup-location-ambiguous',
+        message: startup.issues.map((issue) => issue.message).join('；'),
+        issues: startup.issues.map((issue) => ({ code: issue.code, message: issue.message })),
+      };
+    }
+  }
+
+  const baseline = await readSourceBaseline(deps.files, effectiveRoot, deps.sha256, deps.clock);
   if (!baseline.ok) {
     return {
       status: 'failed',
@@ -132,7 +157,7 @@ export async function openConfiguredInstance(
 
   const registered = await deps.localState.register({
     localDataRoot: localRoot,
-    sourceRoot,
+    sourceRoot: effectiveRoot,
     sourceKind: 'custom',
     projectId: baseline.baseline.projectId,
   });
@@ -185,9 +210,9 @@ export async function openConfiguredInstance(
     instance: {
       instanceId: entry.instanceId,
       projectId: entry.projectId,
-      sourceRoot,
+      sourceRoot: effectiveRoot,
       sourceKind: entry.sourceKind,
-      sourceDisplay: deps.describeLocation(sourceRoot).displayPath,
+      sourceDisplay: deps.describeLocation(effectiveRoot).displayPath,
       sourceEpoch: entry.sourceGeneration,
       localRoot,
       created: !registered.reused,
@@ -218,5 +243,21 @@ export function createLocalStateService(wiring: HostWiring, notify?: Constructor
     clock: wiring.clock,
     newInstanceId: wiring.newInstanceId,
     ...(notify === undefined ? {} : { notify }),
+  });
+}
+
+/** 1.4：用同一装配构造迁移服务（候选目录与目标同父、目录名携带完整操作号）。 */
+export function createMigrationService(wiring: HostWiring): MigrationService {
+  return new MigrationService({
+    store: wiring.store,
+    resolver: wiring.resolver,
+    readBaseline: (root: string) => readSourceBaseline(wiring.files, root, wiring.sha256, wiring.clock),
+    files: createMigrationFiles(),
+    candidatePathFor: (toRoot: string, operationId: string) =>
+      path.join(path.dirname(toRoot), `.cona-mig-${operationId}`),
+    sha256: wiring.sha256,
+    clock: wiring.clock,
+    newOperationId: () => randomUUID(),
+    newOwnershipToken: () => randomUUID(),
   });
 }

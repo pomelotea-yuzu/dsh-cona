@@ -10,7 +10,20 @@ import type {
   ResumeChatsResult,
   ResumeLinkResult,
   ResumeChatTargetResult,
+  RegisterPreviewResult,
+  RegisterSourceResult,
+  MigrationOpResult,
+  MigrationPreviewOpResult,
+  MigrationListOpResult,
 } from '../host/overview-service.js';
+import type { LocationKind } from '../application/location.js';
+
+/** client 侧视图：OwnerDenial 的 null 已在传输层归一为 rejected，不再出现在控制器输入。 */
+export type RegisterPreviewView = Exclude<RegisterPreviewResult, null>;
+export type RegisterSourceView = Exclude<RegisterSourceResult, null>;
+export type MigrationOpView = Exclude<MigrationOpResult, null>;
+export type MigrationPreviewOpView = Exclude<MigrationPreviewOpResult, null>;
+export type MigrationListView = Exclude<MigrationListOpResult, null>;
 import type { ResumeChatPointerView } from '../application/resume-chat.js';
 
 /** client 侧结果：OwnerDenial 的 null 已在传输层归一为 rejected，不再出现在控制器输入。 */
@@ -93,6 +106,59 @@ export type OverviewListResult =
   | { status: 'unconfigured'; message: string }
   | { status: 'rejected'; code: string; message: string };
 
+/** client 侧迁移记录视图（host migrationList 投影；requestDigest 用于重复确认核对）。 */
+export interface MigrationRecordView {
+  operationId: string;
+  requestDigest: string;
+  instanceId: string;
+  projectId: string;
+  from: { root: string; kind: string; expectedGeneration: number };
+  to: { root: string; kind: string };
+  newGeneration: number;
+  status: string;
+  receipt?: { operationId: string; committedAt: string; sourceGeneration: number; effectiveRoot: string };
+  cancel?: { at: string; removed: string[] };
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 1.5：迁移操作面板状态：预览 → 确认/取消/恢复，宿主结果原样投影。 */
+export interface MigrationState {
+  phase: 'idle' | 'busy' | 'ready' | 'error';
+  /** 上一次预览结果（checks 含占用／重叠／工作守卫诊断）。 */
+  preview: MigrationPreviewOpView | null;
+  /** 最近一次迁移操作返回的记录（prepared/target-ready/switched/committed/canceled）。 */
+  record: MigrationRecordView | null;
+  /** 全部迁移记录（诊断与恢复入口）。 */
+  migrations: MigrationRecordView[];
+  message: string | null;
+  code: string | null;
+}
+
+/** 1.1：接入登记面板状态：预览（位置／Git／项目 ID／版本）→ 显式登记。 */
+export interface RegisterState {
+  phase: 'idle' | 'busy' | 'ready' | 'error';
+  preview: RegisterPreviewResult | null;
+  message: string | null;
+  code: string | null;
+}
+
+const EMPTY_MIGRATION: MigrationState = {
+  phase: 'idle',
+  preview: null,
+  record: null,
+  migrations: [],
+  message: null,
+  code: null,
+};
+
+const EMPTY_REGISTER: RegisterState = {
+  phase: 'idle',
+  preview: null,
+  message: null,
+  code: null,
+};
+
 export interface OverviewControllerDeps {
   /** 列出已登记实例（conaOverview/instances）。 */
   listInstances: () => Promise<OverviewListResult>;
@@ -109,6 +175,20 @@ export interface OverviewControllerDeps {
   /** 为指定实例构造独立 transport（A→conaProject，B→conaOverview）。 */
   transportFor: (instanceId: string) => PanelTransport;
   newOperationId: () => string;
+  /** 1.5：迁移预览（conaOverview/migrationPreview；宿主未装配时 unavailable）。 */
+  migrationPreview?: (instanceId: string, toRoot: string, toKind: LocationKind) => Promise<MigrationPreviewOpView>;
+  /** 1.5：迁移确认（conaOverview/migrationRun）。 */
+  migrationRun?: (instanceId: string, toRoot: string, toKind: LocationKind, operationId?: string) => Promise<MigrationOpView>;
+  /** 1.5：迁移恢复（conaOverview/migrationRecover；确认摘要核对原操作）。 */
+  migrationRecover?: (instanceId: string, operationId: string, confirmDigest: string) => Promise<MigrationOpView>;
+  /** 1.5：迁移取消（conaOverview/migrationCancel；未切换才可取消）。 */
+  migrationCancel?: (instanceId: string, operationId: string, confirmDigest: string) => Promise<MigrationOpView>;
+  /** 1.5：迁移记录列表（conaOverview/migrationList）。 */
+  migrationList?: () => Promise<MigrationListView>;
+  /** 1.1：接入预览（conaOverview/registerPreview）。 */
+  registerPreview?: (sourceRoot: string) => Promise<RegisterPreviewView>;
+  /** 1.1：显式登记（conaOverview/registerSource；预览后由 owner 确认）。 */
+  registerSource?: (request: { sourceRoot: string; sourceKind: LocationKind; projectId: string }) => Promise<RegisterSourceView>;
 }
 
 export interface OverviewState {
@@ -131,6 +211,10 @@ export interface OverviewState {
   resumePartial: ResumePartial | null;
   /** 打开原聊天失败提示（稳定码）。 */
   chatNotice: { code: string; message: string } | null;
+  /** 1.5：迁移操作状态（预览／确认／取消／恢复）。 */
+  migration: MigrationState;
+  /** 1.1：接入登记状态（预览与显式登记）。 */
+  register: RegisterState;
 }
 
 const EMPTY: OverviewState = {
@@ -146,6 +230,8 @@ const EMPTY: OverviewState = {
   resumeChats: { phase: 'idle', chats: [], reason: null },
   resumePartial: null,
   chatNotice: null,
+  migration: EMPTY_MIGRATION,
+  register: EMPTY_REGISTER,
 };
 
 export class ProjectOverviewController {
@@ -222,6 +308,8 @@ export class ProjectOverviewController {
       resumeChats: { phase: 'idle', chats: [], reason: null },
       resumePartial: null,
       chatNotice: null,
+      migration: EMPTY_MIGRATION,
+      register: EMPTY_REGISTER,
     });
     void this.loadResumeCard(instanceId);
     return true;
@@ -276,6 +364,195 @@ export class ProjectOverviewController {
   patchResumeDraft(patch: Partial<Omit<ResumeDraft, 'operationId'>>): void {
     if (this.state.resumeDraft === null) return;
     this.patch({ resumeDraft: { ...this.state.resumeDraft, ...patch } });
+  }
+
+  // ---------- 1.5：迁移操作 ----------
+
+  private requireMigrationDeps(): boolean {
+    if (
+      this.deps.migrationPreview === undefined ||
+      this.deps.migrationRun === undefined ||
+      this.deps.migrationRecover === undefined ||
+      this.deps.migrationCancel === undefined ||
+      this.deps.migrationList === undefined
+    ) {
+      this.patch({ migration: { ...EMPTY_MIGRATION, phase: 'error', message: null, code: 'migration-unavailable' } });
+      return false;
+    }
+    return true;
+  }
+
+  private migrationFailure(code: string, message: string, record?: MigrationRecordView | null): MigrationState {
+    return {
+      ...EMPTY_MIGRATION,
+      phase: 'error',
+      preview: this.state.migration.preview,
+      migrations: this.state.migration.migrations,
+      ...(record === undefined || record === null ? {} : { record }),
+      code,
+      message,
+    };
+  }
+
+  private migrationFromOutcome(result: MigrationOpView, fallbackCode: string): MigrationState {
+    if ('status' in result) {
+      // rejected（owner 准入已归一）或 unavailable（宿主未装配迁移服务）。
+      return result.status === 'unavailable'
+        ? this.migrationFailure('migration-unavailable', result.message)
+        : this.migrationFailure(result.code, result.message);
+    }
+    if (result.ok === false) {
+      const first = result.issues[0];
+      return this.migrationFailure(first?.code ?? fallbackCode, result.issues.map((issue) => issue.message).join('；'), result.record ?? null);
+    }
+    return {
+      ...EMPTY_MIGRATION,
+      phase: 'ready',
+      preview: this.state.migration.preview,
+      migrations: this.state.migration.migrations,
+      record: result.record as MigrationRecordView,
+      code: null,
+      message: null,
+    };
+  }
+
+  /** 迁移预览：只读；checks 的占用／重叠／工作守卫诊断由渲染层展示。 */
+  async previewMigration(toRoot: string, toKind: LocationKind): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || !this.requireMigrationDeps()) return;
+    this.patch({ migration: { ...EMPTY_MIGRATION, phase: 'busy', migrations: this.state.migration.migrations } });
+    try {
+      const preview = await this.deps.migrationPreview!(instanceId, toRoot, toKind);
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ migration: { ...EMPTY_MIGRATION, phase: 'ready', preview, migrations: this.state.migration.migrations } });
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ migration: this.migrationFailure('transport-failed', (error as Error).message) });
+    }
+  }
+
+  /** 迁移确认：事务化执行；中断时保留 record（恢复入口）。 */
+  async runMigration(toRoot: string, toKind: LocationKind, operationId?: string): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || !this.requireMigrationDeps()) return;
+    this.patch({ migration: { ...EMPTY_MIGRATION, phase: 'busy', preview: this.state.migration.preview, migrations: this.state.migration.migrations } });
+    try {
+      const result = await this.deps.migrationRun!(instanceId, toRoot, toKind, operationId);
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ migration: this.migrationFromOutcome(result, 'migration-failed') });
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ migration: this.migrationFailure('transport-failed', (error as Error).message) });
+    }
+  }
+
+  /** 迁移恢复（重启后继续／补齐）：确认摘要与登记的原请求摘要核对。 */
+  async recoverMigration(operationId: string, confirmDigest: string): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || !this.requireMigrationDeps()) return;
+    this.patch({ migration: { ...EMPTY_MIGRATION, phase: 'busy', preview: this.state.migration.preview, migrations: this.state.migration.migrations } });
+    try {
+      const result = await this.deps.migrationRecover!(instanceId, operationId, confirmDigest);
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ migration: this.migrationFromOutcome(result, 'migration-recover-failed') });
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ migration: this.migrationFailure('transport-failed', (error as Error).message) });
+    }
+  }
+
+  /** 迁移取消：未切换才可取消；只清理有所有权证据且内容核对过的候选。 */
+  async cancelMigration(operationId: string, confirmDigest: string): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || !this.requireMigrationDeps()) return;
+    this.patch({ migration: { ...EMPTY_MIGRATION, phase: 'busy', preview: this.state.migration.preview, migrations: this.state.migration.migrations } });
+    try {
+      const result = await this.deps.migrationCancel!(instanceId, operationId, confirmDigest);
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ migration: this.migrationFromOutcome(result, 'migration-cancel-failed') });
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({ migration: this.migrationFailure('transport-failed', (error as Error).message) });
+    }
+  }
+
+  /** 读取迁移记录列表（诊断与恢复入口）。 */
+  async loadMigrations(): Promise<void> {
+    if (!this.requireMigrationDeps()) return;
+    try {
+      const result = await this.deps.migrationList!();
+      if ('status' in result) {
+        // rejected（owner 准入已归一）或 unavailable（宿主未装配迁移服务）。
+        this.patch({
+          migration: result.status === 'unavailable'
+            ? this.migrationFailure('migration-unavailable', result.message)
+            : this.migrationFailure(result.code, result.message),
+        });
+        return;
+      }
+      if (result.ok === false) {
+        const first = result.issues[0];
+        this.patch({ migration: this.migrationFailure(first?.code ?? 'migration-list-failed', first?.message ?? '读取迁移记录失败') });
+        return;
+      }
+      this.patch({
+        migration: {
+          ...this.state.migration,
+          phase: this.state.migration.phase === 'busy' ? 'ready' : this.state.migration.phase,
+          migrations: result.migrations as MigrationRecordView[],
+        },
+      });
+    } catch (error) {
+      this.patch({ migration: this.migrationFailure('transport-failed', (error as Error).message) });
+    }
+  }
+
+  // ---------- 1.1：接入预览与显式登记 ----------
+
+  /** 接入预览：只读资料基线与 Git 状态；显式登记前必须先预览。 */
+  async previewRegister(sourceRoot: string): Promise<void> {
+    if (this.deps.registerPreview === undefined || this.deps.registerSource === undefined) {
+      this.patch({ register: { ...EMPTY_REGISTER, phase: 'error', code: 'register-unavailable', message: null } });
+      return;
+    }
+    this.patch({ register: { ...EMPTY_REGISTER, phase: 'busy' } });
+    try {
+      const preview = await this.deps.registerPreview(sourceRoot);
+      this.patch({
+        register: preview.status === 'preview'
+          ? { phase: 'ready', preview, message: null, code: null }
+          : { phase: 'error', preview: null, message: preview.status === 'rejected' ? preview.message : null, code: preview.status === 'rejected' ? preview.code : 'register-preview-failed' },
+      });
+    } catch (error) {
+      this.patch({ register: { phase: 'error', preview: null, message: (error as Error).message, code: 'transport-failed' } });
+    }
+  }
+
+  /** 显式登记：预览后确认；重复接入同一规范根回到既有实例。 */
+  async confirmRegister(sourceRoot: string, sourceKind: LocationKind, projectId: string): Promise<void> {
+    if (this.deps.registerSource === undefined) {
+      this.patch({ register: { ...EMPTY_REGISTER, phase: 'error', code: 'register-unavailable', message: null } });
+      return;
+    }
+    this.patch({ register: { ...EMPTY_REGISTER, phase: 'busy' } });
+    try {
+      const result = await this.deps.registerSource({ sourceRoot, sourceKind, projectId });
+      if (result.status === 'registered') {
+        this.patch({ register: { phase: 'ready', preview: this.state.register.preview, message: null, code: null } });
+        await this.load();
+        return;
+      }
+      this.patch({
+        register: {
+          phase: 'error',
+          preview: this.state.register.preview,
+          message: result.status === 'rejected' ? result.message : null,
+          code: result.status === 'rejected' ? result.code : 'register-failed',
+        },
+      });
+    } catch (error) {
+      this.patch({ register: { phase: 'error', preview: this.state.register.preview, message: (error as Error).message, code: 'transport-failed' } });
+    }
   }
 
   /** 丢弃草稿与保存状态。 */

@@ -57,8 +57,71 @@ export interface RegistryEntry {
 }
 
 export interface Registry {
-  schemaVersion: 1;
+  /** schema 1＝无迁移记录的旧注册表；schema 2 起携带迁移记录（1.4）。首笔迁移时整表原子升级。 */
+  schemaVersion: 1 | 2;
   instances: RegistryEntry[];
+  /** 迁移记录（1.4，design §1）；schema 1 没有该字段，读取时归一化为空数组。 */
+  migrations?: MigrationRecord[];
+}
+
+/** 迁移状态机（1.4）：prepared → target-ready → switched → committed；未切换可 canceled。 */
+export type MigrationStatus = 'prepared' | 'target-ready' | 'switched' | 'committed' | 'canceled';
+
+/** 未结束的迁移：占用目标、阻止实例刷新与登记抢占；switched 之后只允许补齐，不允许取消。 */
+export const MIGRATION_OPEN_STATUSES: readonly MigrationStatus[] = ['prepared', 'target-ready', 'switched'];
+
+export function isMigrationOpen(status: MigrationStatus): boolean {
+  return (MIGRATION_OPEN_STATUSES as readonly string[]).includes(status);
+}
+
+export interface MigrationManifestFile {
+  /** 协议相对路径（project.json 或 records/<id>/<hash>.md）。 */
+  path: string;
+  /** 逐字节观察哈希（sha256:…）。 */
+  hash: string;
+}
+
+/** 迁移冻结清单（1.4）：头哈希 + 全部引用正文哈希 + 清单哈希；复制与恢复逐字节核对的依据。 */
+export interface MigrationManifest {
+  headHash: string;
+  files: MigrationManifestFile[];
+  filesHash: string;
+}
+
+export interface MigrationReceipt {
+  operationId: string;
+  committedAt: string;
+  sourceGeneration: number;
+  effectiveRoot: string;
+}
+
+export interface MigrationRecord {
+  operationId: string;
+  /** 原请求摘要：恢复／取消的重复确认与它核对，不认别的身份。 */
+  requestDigest: string;
+  instanceId: string;
+  projectId: string;
+  from: { root: string; kind: LocationKind; expectedGeneration: number };
+  to: { root: string; kind: LocationKind };
+  newGeneration: number;
+  /** 目标侧独占候选目录与所有权标识；取消只清理有所有权证据且内容核对过的候选。 */
+  candidate: { path: string; ownershipToken: string };
+  manifest: MigrationManifest;
+  status: MigrationStatus;
+  /** committed 后的原回执；恢复补齐时填入，重复恢复按原回执返回。 */
+  receipt?: MigrationReceipt;
+  /** canceled 记录：清理了哪些路径（仅限所有权证据 + 内容核对过的候选／装入目标）。 */
+  cancel?: { at: string; removed: string[] };
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 注册表迁移记录归一化：schema 1 或缺字段时为空数组，不静默改写磁盘。 */
+export function migrationsOf(value: unknown): MigrationRecord[] {
+  if (value === null || typeof value !== 'object' || !Array.isArray((value as { migrations?: unknown }).migrations)) {
+    return [];
+  }
+  return (value as { migrations: MigrationRecord[] }).migrations;
 }
 
 /** 最近一次有效观察：规划指纹之外另记头字节哈希与逐条正文哈希（3.5）。 */
@@ -499,6 +562,8 @@ export interface RefreshRequest extends LocalRootRequest {
   preview?: RefreshPreview;
   /** 1.3：显式确认合法历史回退；commit 必须与预览给出的证据一致。 */
   confirmFallback?: { commit: string };
+  /** 1.4：调用方读取基线时使用的资料根；与实例有效定位不一致即拒绝（外部编辑旧根不刷新新实例）。 */
+  source?: string;
 }
 
 /** 预览刷新的候选观察（preview-refresh 输出、refresh 接纳输入的最小契约）。 */
@@ -742,12 +807,27 @@ export class LocalStateService {
     if (!('ok' in ensured) || ensured.ok !== true) return ensured as { ok: false; issues: LocalIssue[] };
     const rootView = ensured.root;
 
-    const locked = await this.deps.store.withLock(rootView.root, async () => {
+      const locked = await this.deps.store.withLock(rootView.root, async () => {
       const registry = await this.deps.store.readRegistry(rootView.root);
       const now = this.deps.clock();
+      // 1.4：目标正被未结束迁移占用时拒绝登记——复制期间不得抢占目标。
+      const occupant = migrationsOf(registry).find(
+        (item) => isMigrationOpen(item.status) && item.to.root === request.sourceRoot,
+      );
+      if (occupant !== undefined) {
+        return {
+          ok: false as const,
+          issues: [
+            {
+              code: 'migration-target-occupied',
+              message: `目标正被实例 ${occupant.instanceId} 的迁移 ${occupant.operationId} 占用（状态 ${occupant.status}）；不抢占`,
+              path: request.sourceRoot,
+            },
+          ],
+        };
+      }
       const existing = registry.instances.find((entry) => entry.sourceRoot === request.sourceRoot);
-      if (existing !== undefined) {
-        if (existing.projectId !== request.projectId) {
+      if (existing !== undefined) {        if (existing.projectId !== request.projectId) {
           return {
             ok: false as const,
             issues: [
@@ -998,6 +1078,35 @@ export class LocalStateService {
               {
                 code: 'source-identity-changed',
                 message: `同一资料路径的项目 id 已变为 ${request.baseline.projectId}（原 ${entry.projectId}）；拒绝刷新，请核对来源后另建实例`,
+                path: entry.sourceRoot,
+              },
+            ],
+          };
+        }
+        // 1.4：实例存在未结束迁移时停写——复制期间到达的刷新收到 migration-in-progress。
+        const openMigration = migrationsOf(registry).find(
+          (item) => item.instanceId === entry.instanceId && isMigrationOpen(item.status),
+        );
+        if (openMigration !== undefined) {
+          return {
+            ok: false as const,
+            issues: [
+              {
+                code: 'migration-in-progress',
+                message: `实例迁移 ${openMigration.operationId} 进行中（状态 ${openMigration.status}）；完成或取消后再刷新`,
+                path: openMigration.to.root,
+              },
+            ],
+          };
+        }
+        // 1.4：调用方声明的来源与实例有效定位不一致即拒绝——外部编辑旧根不会刷新新实例。
+        if (request.source !== undefined && request.source !== entry.sourceRoot) {
+          return {
+            ok: false as const,
+            issues: [
+              {
+                code: 'source-location-mismatch',
+                message: `提供的来源 ${request.source} 不是实例的有效定位 ${entry.sourceRoot}；旧根不刷新新实例，显式重接入请另行登记`,
                 path: entry.sourceRoot,
               },
             ],
