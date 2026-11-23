@@ -62,3 +62,15 @@ export type {
   InverseConflict,
   PlanInverse,
 } from './inverse.js';
+export {
+  USER_TEMPLATE_SUMMARY_PREFIX,
+  USER_TEMPLATE_VERSION_MARKER,
+  USER_TEMPLATE_VERSION,
+  USER_TEMPLATE_LIMITS,
+  extractSubtreeTemplate,
+  internalDependencies,
+  validateUserTemplateBody,
+  buildUserTemplateText,
+  parseUserTemplateText,
+} from './user-template.js';
+export type { UserTemplateNode, UserTemplateDependency, UserTemplateBody } from './user-template.js';

@@ -29,6 +29,8 @@ function usage(): string {
     '  command.js recover --local-root <dir> --instance <id> --operation <uuid> [--trusted …]',
     '  command.js preview-undo --local-root <dir> --instance <id> --target-operation <uuid> --direction undo|redo [--trusted …]',
     '  command.js undo-history --local-root <dir> --instance <id> [--trusted …]',
+    '  command.js list-user-templates --local-root <dir> --instance <id> [--trusted …]',
+    '  command.js get-user-template --local-root <dir> --instance <id> --template-id <uuid> --version-record <uuid> --content-hash <sha> [--trusted …]',
   ].join('\n') + '\n';
 }
 
@@ -49,10 +51,13 @@ async function main(): Promise<number> {
       operation: { type: 'string' },
       'target-operation': { type: 'string' },
       direction: { type: 'string' },
+      'template-id': { type: 'string' },
+      'version-record': { type: 'string' },
+      'content-hash': { type: 'string' },
     },
   });
   const commandName = positionals[0];
-  if (!['run', 'receipt', 'recover', 'preview-undo', 'undo-history'].includes(commandName ?? '')) {
+  if (!['run', 'receipt', 'recover', 'preview-undo', 'undo-history', 'list-user-templates', 'get-user-template'].includes(commandName ?? '')) {
     process.stderr.write(usage());
     return 2;
   }
@@ -93,6 +98,23 @@ async function main(): Promise<number> {
 
   if (commandName === 'undo-history') {
     const result = await service.undoHistory(readonlyTrusted, { instanceId });
+    process.stdout.write(JSON.stringify({ command: commandName, ...result }) + '\n');
+    return result.status === 'committed' ? 0 : 1;
+  }
+  if (commandName === 'list-user-templates') {
+    const result = await service.listUserTemplates(readonlyTrusted, { instanceId });
+    process.stdout.write(JSON.stringify({ command: commandName, ...result }) + '\n');
+    return result.status === 'committed' ? 0 : 1;
+  }
+  if (commandName === 'get-user-template') {
+    const templateId = values['template-id'];
+    const versionRecordId = values['version-record'];
+    const contentHash = values['content-hash'];
+    if (typeof templateId !== 'string' || typeof versionRecordId !== 'string' || typeof contentHash !== 'string') {
+      process.stderr.write('get-user-template 需要 --template-id、--version-record 与 --content-hash\n' + usage());
+      return 2;
+    }
+    const result = await service.getUserTemplate(readonlyTrusted, { instanceId, templateId, versionRecordId, contentHash });
     process.stdout.write(JSON.stringify({ command: commandName, ...result }) + '\n');
     return result.status === 'committed' ? 0 : 1;
   }

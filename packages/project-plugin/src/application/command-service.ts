@@ -17,6 +17,15 @@ import {
   type PlanInverse,
 } from '../domain/inverse.js';
 import {
+  USER_TEMPLATE_SUMMARY_PREFIX,
+  buildUserTemplateText,
+  extractSubtreeTemplate,
+  internalDependencies,
+  parseUserTemplateText,
+  validateUserTemplateBody,
+  type UserTemplateBody,
+} from '../domain/user-template.js';
+import {
   FEATURE_DEVELOPMENT_PRESET,
   validatePreset,
   type PresetContentLocale,
@@ -34,6 +43,7 @@ import type {
   WorkNode,
 } from '../domain/types.js';
 import { validateProjectDocument } from '../domain/validate.js';
+import { UUID_RE } from '../domain/validate-constants.js';
 import { readSourceBaseline } from './baseline.js';
 import { InstanceCommandQueue } from './command-queue.js';
 import type {
@@ -98,6 +108,16 @@ export interface UndoPlanEditCommand {
   previewDigest: string;
 }
 
+/** 保存用户模板：从所选子树抽取模板正文，作为不可变 plan-change 记录发布。 */
+export interface SaveUserTemplateCommand {
+  type: 'save-user-template';
+  templateId: string;
+  title: string;
+  bodyLanguage: string;
+  /** 子树根的项目节点 id；正文只用局部键，原节点身份不进入模板。 */
+  rootNodeId: string;
+}
+
 export type Command =
   | { type: 'add-nodes'; nodes: NewNodeInput[] }
   | { type: 'update-node'; nodeId: string; patch: NodePatch }
@@ -122,11 +142,13 @@ export type Command =
   | MoveNodeCommand
   | InsertPresetCommand
   | UndoPlanEditCommand
+  | SaveUserTemplateCommand
   | AppendRecordCommand;
 
 /** 只能由 owner 发起的结构与逆向命令；agent-work 上下文直达须在准入阶段拒绝。 */
 const OWNER_ONLY_COMMANDS = new Set<string>([
-  'move-node', 'insert-preset', 'group-nodes', 'merge-nodes', 'copy-subtree', 'undo-plan-edit', 'redo-plan-edit',
+  'move-node', 'insert-preset', 'group-nodes', 'merge-nodes', 'copy-subtree',
+  'undo-plan-edit', 'redo-plan-edit', 'save-user-template',
 ]);
 
 /** 可撤销的规划编辑（append-record 与逆向命令自身不写入新的逆向信息）。 */
@@ -193,6 +215,38 @@ export interface UndoHistoryEntry {
 export type UndoHistoryResult =
   | { status: 'committed'; instanceId: string; entries: UndoHistoryEntry[] }
   | { status: 'rejected'; code: string; message: string };
+
+/** 用户模板目录项：来源固定 user，身份为 templateId + versionRecordId + contentHash。 */
+export interface UserTemplateDescriptor {
+  source: 'user';
+  templateId: string;
+  versionRecordId: string;
+  contentHash: string;
+  bodyLanguage: string;
+  title: string;
+}
+
+export type UserTemplateListResult =
+  | { status: 'committed'; instanceId: string; templates: UserTemplateDescriptor[] }
+  | { status: 'rejected'; code: string; message: string };
+
+export type UserTemplateGetResult =
+  | { status: 'committed'; descriptor: UserTemplateDescriptor; body: UserTemplateBody }
+  | { status: 'rejected'; code: 'template-version-unavailable' | 'template-version-mismatch' | 'template-invalid'; message: string };
+
+/** 从已发布正文与索引条目组装目录项；正文损坏或版本不支持时返回 null（目录过滤）。 */
+function templateDescriptor(entry: {
+  id: string; path: string; contentHash: string; summary: string;
+}, parsed: UserTemplateBody): UserTemplateDescriptor {
+  return {
+    source: 'user',
+    templateId: parsed.templateId,
+    versionRecordId: entry.id,
+    contentHash: entry.contentHash,
+    bodyLanguage: parsed.bodyLanguage,
+    title: parsed.title,
+  };
+}
 
 /** 提交时从私有历史解析出的逆向上下文（只在实例队列内构造，不进入公开资料）。 */
 interface InverseContext {
@@ -448,6 +502,121 @@ export class ProjectCommandService {
       command: envelope.command,
     };
     return 'sha256:' + this.deps.sha256(new TextEncoder().encode(JSON.stringify(stableValue(payload))));
+  }
+
+  /**
+   * 从当前公开资料抽取所选子树，构造用户模板正文（tasks 2.4）。
+   * 只用局部键，省略对外依赖；项目节点身份、聊天、授权与私有数据均不进入正文。
+   */
+  private buildTemplateBody(
+    doc: ProjectDocument,
+    request: { templateId: string; title: string; bodyLanguage: string; rootNodeId: string },
+  ): { ok: true; body: UserTemplateBody } | { ok: false; code: string; message: string } {
+    const uuid = UUID_RE.test(request.templateId);
+    if (!uuid) return { ok: false, code: 'template-invalid', message: 'templateId 必须是 UUID' };
+    if (request.title.trim() === '') return { ok: false, code: 'template-invalid', message: '模板标题不能为空' };
+    if (!doc.plan.nodes.some((node) => node.id === request.rootNodeId)) {
+      return { ok: false, code: 'node-not-found', message: `子树根 ${request.rootNodeId} 不存在` };
+    }
+    const extracted = extractSubtreeTemplate(doc.plan, request.rootNodeId);
+    const body: UserTemplateBody = {
+      version: 1,
+      templateId: request.templateId,
+      title: request.title,
+      bodyLanguage: request.bodyLanguage,
+      nodes: extracted.nodes,
+      dependencies: internalDependencies(doc.plan, extracted.keyOf),
+    };
+    const validated = validateUserTemplateBody(body);
+    if (!validated.ok) {
+      return { ok: false, code: 'template-invalid', message: validated.issues[0]?.message ?? '模板描述无效' };
+    }
+    return { ok: true, body: validated.body };
+  }
+
+  /** 只读预览所选子树的模板正文与摘要（不发布、不改文件）。 */
+  async previewUserTemplate(
+    ctx: TrustedContext | undefined,
+    request: SaveUserTemplateCommand & { instanceId: string },
+  ): Promise<
+    | { status: 'available'; body: UserTemplateBody; text: string; summary: string }
+    | { status: 'rejected'; code: string; message: string }
+  > {
+    const authorized = checkTrustedContext(ctx);
+    if (!authorized.ok) return { status: 'rejected', code: authorized.code, message: authorized.message };
+    const registry = await this.deps.store.readRegistry(this.deps.localRoot);
+    const entry = registry.instances.find((item) => item.instanceId === request.instanceId);
+    if (entry === undefined) return { status: 'rejected', code: 'binding-expired', message: '本机注册表中没有该实例' };
+    const baseline = await readSourceBaseline(this.deps.files, entry.sourceRoot, this.deps.sha256, this.deps.clock);
+    if (!baseline.ok) return { status: 'rejected', code: 'invalid-project', message: '当前资料不可读或不合法' };
+    const built = this.buildTemplateBody(baseline.doc, request);
+    if (!built.ok) return { status: 'rejected', code: built.code, message: built.message };
+    return {
+      status: 'available',
+      body: built.body,
+      text: buildUserTemplateText(built.body),
+      summary: `${USER_TEMPLATE_SUMMARY_PREFIX}${built.body.title}（${built.body.nodes.length} 节点）`,
+    };
+  }
+
+  /** 读取某实例的异步用户模板目录；只收已发布且正文验证成功的记录版本。 */
+  async listUserTemplates(ctx: TrustedContext | undefined, request: { instanceId: string }): Promise<UserTemplateListResult> {
+    const authorized = checkTrustedContext(ctx);
+    if (!authorized.ok) return { status: 'rejected', code: authorized.code, message: authorized.message };
+    const quarantine = await this.deps.store.readQuarantine(this.deps.localRoot, request.instanceId);
+    if (quarantine !== null) return { status: 'rejected', code: 'unknown-state', message: `实例已隔离（${quarantine.reason}）` };
+    const registry = await this.deps.store.readRegistry(this.deps.localRoot);
+    const entry = registry.instances.find((item) => item.instanceId === request.instanceId);
+    if (entry === undefined) return { status: 'rejected', code: 'binding-expired', message: '本机注册表中没有该实例' };
+    const doc = await this.deps.files.readDocument(entry.sourceRoot);
+    if (!doc.ok) return { status: 'rejected', code: 'invalid-project', message: '当前资料不可读或不合法' };
+
+    const templates: UserTemplateDescriptor[] = [];
+    for (const record of doc.doc.records) {
+      if (record.kind !== 'plan-change' || !record.summary.startsWith(USER_TEMPLATE_SUMMARY_PREFIX)) continue;
+      const body = await this.deps.files.readScopedFile(entry.sourceRoot, record.path);
+      if (!body.ok) continue;
+      const actualHash = 'sha256:' + this.deps.sha256(body.bytes);
+      if (actualHash !== record.contentHash) continue;
+      const parsed = parseUserTemplateText(new TextDecoder().decode(body.bytes));
+      if (!parsed.ok) continue;
+      templates.push(templateDescriptor(record, parsed.body));
+    }
+    return { status: 'committed', instanceId: request.instanceId, templates };
+  }
+
+  /** 按 templateId + versionRecordId + contentHash 三元组精确读取单一版本。 */
+  async getUserTemplate(
+    ctx: TrustedContext | undefined,
+    request: { instanceId: string; templateId: string; versionRecordId: string; contentHash: string },
+  ): Promise<UserTemplateGetResult> {
+    const listed = await this.listUserTemplates(ctx, { instanceId: request.instanceId });
+    if (listed.status !== 'committed') {
+      return { status: 'rejected', code: 'template-version-unavailable', message: listed.message };
+    }
+    const descriptor = listed.templates.find((item) =>
+      item.templateId === request.templateId
+      && item.versionRecordId === request.versionRecordId
+      && item.contentHash === request.contentHash,
+    );
+    if (descriptor === undefined) {
+      return { status: 'rejected', code: 'template-version-unavailable', message: '模板版本不存在或已移出索引' };
+    }
+    const registry = await this.deps.store.readRegistry(this.deps.localRoot);
+    const entry = registry.instances.find((item) => item.instanceId === request.instanceId);
+    if (entry === undefined) {
+      return { status: 'rejected', code: 'template-version-unavailable', message: '实例不存在' };
+    }
+    const body = await this.deps.files.readScopedFile(entry.sourceRoot,
+      `records/${request.versionRecordId}/${request.contentHash.slice('sha256:'.length)}.md`);
+    if (!body.ok) return { status: 'rejected', code: 'template-version-unavailable', message: '正文不可读' };
+    const parsed = parseUserTemplateText(new TextDecoder().decode(body.bytes));
+    if (!parsed.ok) return { status: 'rejected', code: 'template-invalid', message: '模板正文无效' };
+    const actualHash = 'sha256:' + this.deps.sha256(body.bytes);
+    if (actualHash !== request.contentHash || parsed.body.templateId !== request.templateId) {
+      return { status: 'rejected', code: 'template-version-mismatch', message: '模板身份或正文哈希不匹配' };
+    }
+    return { status: 'committed', descriptor, body: parsed.body };
   }
 
   /**
@@ -1167,7 +1336,8 @@ export class ProjectCommandService {
     );
     if ('rejected' in candidate) return candidate.rejected;
 
-    const planning = envelope.command.type !== 'append-record';
+    // 用户模板保存是记录追加（只推进状态修订、需写回资料头更新记录索引），不是规划变换。
+    const planning = envelope.command.type !== 'append-record' && envelope.command.type !== 'save-user-template';
     const noBusinessChange = planning && candidate.doc.planVersion === baseline.baseline.planVersion;
     const impact: 'plan' | 'state' = noBusinessChange ? 'state' : planning ? 'plan' : 'state';
     const planRevision = impact === 'plan' ? aggregate.revisions.plan + 1 : aggregate.revisions.plan;
@@ -1459,6 +1629,20 @@ export class ProjectCommandService {
     if (inverseContext !== undefined) {
       return this.buildInverseCandidate(doc, baselineRecords, generated, inverseContext);
     }
+    // 保存用户模板：从所选子树构造正文，作为 plan-change 记录发布（只推进状态修订）。
+    if (command.type === 'save-user-template') {
+      const built = this.buildTemplateBody(doc, command);
+      if (!built.ok) return { rejected: { status: 'rejected', code: built.code, message: built.message } };
+      const asRecord: AppendRecordCommand = {
+        type: 'append-record',
+        kind: 'plan-change',
+        subjectNodeIds: [],
+        summary: `${USER_TEMPLATE_SUMMARY_PREFIX}${built.body.title}（${built.body.nodes.length} 节点）`,
+        sources: [],
+        body: buildUserTemplateText(built.body),
+      };
+      return this.buildCandidate(asRecord, doc, baselineRecords, generated, resolvedPreset, inverseContext);
+    }
     if (command.type !== 'append-record') {
       const applied = applyPlanCommand(doc, this.materialize(command, generated.nodeIds ?? [], resolvedPreset), this.deps.sha256);
       if (!applied.ok) {
@@ -1659,6 +1843,7 @@ export class ProjectCommandService {
       return inverseContext.inverse.replacement === undefined ? {} : { recordId: this.deps.newRecordId() };
     }
     if (command.type === 'append-record') return { recordId: this.deps.newRecordId() };
+    if (command.type === 'save-user-template') return { recordId: this.deps.newRecordId() };
     if (command.type === 'add-nodes') return { nodeIds: command.nodes.map(() => this.deps.newNodeId()) };
     if (command.type === 'split-node') return { nodeIds: command.children.map(() => this.deps.newNodeId()) };
     // 2.1 分组：组节点身份由应用层分配，成员沿用原 id。
@@ -1736,6 +1921,9 @@ export class ProjectCommandService {
       case 'redo-plan-edit':
         // 逆向命令在 buildCandidate 的 inverseContext 分支处理，不物化为领域 PlanCommand。
         throw new Error('撤销/重做命令不能物化为普通规划命令');
+      case 'save-user-template':
+        // 用户模板作为公开记录发布，不经领域 PlanCommand 变换。
+        throw new Error('用户模板保存命令不能物化为规划命令');
       default:
         return command;
     }

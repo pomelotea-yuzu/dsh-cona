@@ -211,6 +211,9 @@ export function commandAction(command: Command): WorkAction {
     case 'undo-plan-edit':
     case 'redo-plan-edit':
       return 'update';
+    // 模板保存是 owner-only 的记录发布；保守映射，不走工作绑定。
+    case 'save-user-template':
+      return 'record';
   }
 }
 
@@ -248,6 +251,9 @@ export function commandTargets(command: Command): string[] {
     case 'undo-plan-edit':
     case 'redo-plan-edit':
       return [];
+    // 模板正文不针对具体节点（subjectNodeIds 为空），目标为空。
+    case 'save-user-template':
+      return [command.rootNodeId];
   }
 }
 
