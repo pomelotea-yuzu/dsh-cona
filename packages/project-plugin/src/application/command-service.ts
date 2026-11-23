@@ -118,6 +118,19 @@ export interface SaveUserTemplateCommand {
   rootNodeId: string;
 }
 
+/**
+ * 插入用户模板：身份三元组冻结一个不可变版本，提交时重读当前发布索引与正文核对。
+ * parentId 必须是现有父节点（null 与缺失都返回 parent-not-found）。
+ */
+export interface InsertUserTemplateCommand {
+  type: 'insert-user-template';
+  templateId: string;
+  versionRecordId: string;
+  contentHash: string;
+  parentId: string | null;
+  beforeNodeId: string | null;
+}
+
 export type Command =
   | { type: 'add-nodes'; nodes: NewNodeInput[] }
   | { type: 'update-node'; nodeId: string; patch: NodePatch }
@@ -143,18 +156,19 @@ export type Command =
   | InsertPresetCommand
   | UndoPlanEditCommand
   | SaveUserTemplateCommand
+  | InsertUserTemplateCommand
   | AppendRecordCommand;
 
 /** 只能由 owner 发起的结构与逆向命令；agent-work 上下文直达须在准入阶段拒绝。 */
 const OWNER_ONLY_COMMANDS = new Set<string>([
   'move-node', 'insert-preset', 'group-nodes', 'merge-nodes', 'copy-subtree',
-  'undo-plan-edit', 'redo-plan-edit', 'save-user-template',
+  'undo-plan-edit', 'redo-plan-edit', 'save-user-template', 'insert-user-template',
 ]);
 
 /** 可撤销的规划编辑（append-record 与逆向命令自身不写入新的逆向信息）。 */
 const INVERTIBLE_COMMANDS = new Set<string>([
   'add-nodes', 'update-node', 'split-node', 'group-nodes', 'merge-nodes', 'copy-subtree',
-  'set-dependencies', 'set-node-status', 'move-node', 'insert-preset',
+  'set-dependencies', 'set-node-status', 'move-node', 'insert-preset', 'insert-user-template',
 ]);
 
 /** 逆向命令的方向与目标。 */
@@ -1289,6 +1303,52 @@ export class ProjectCommandService {
       resolvedPreset = resolved.preset;
     }
 
+    // 插入用户模板：提交时重读当前发布索引与正文，精确核对 templateId + versionRecordId + contentHash。
+    // 解析只在首次提交发生；同号重试与恢复用已持久化的候选与回执，不重新解析模板。
+    let resolvedUserTemplate: UserTemplateBody | undefined;
+    if (envelope.command.type === 'insert-user-template') {
+      const request = envelope.command;
+      const record = baseline.doc.records.find((item) => item.id === request.versionRecordId);
+      if (record === undefined || record.kind !== 'plan-change'
+        || !record.summary.startsWith(USER_TEMPLATE_SUMMARY_PREFIX)) {
+        return {
+          status: 'rejected', code: 'template-version-unavailable',
+          message: '模板版本不存在或已移出索引',
+        };
+      }
+      if (record.contentHash !== request.contentHash) {
+        return {
+          status: 'rejected', code: 'template-version-mismatch',
+          message: '模板记录的内容哈希与请求不一致',
+        };
+      }
+      const bodyResult = await this.deps.files.readScopedFile(entry.sourceRoot, record.path);
+      if (!bodyResult.ok) {
+        return {
+          status: 'rejected', code: 'template-version-unavailable', message: '模板正文不可读',
+        };
+      }
+      const actualHash = 'sha256:' + this.deps.sha256(bodyResult.bytes);
+      if (actualHash !== request.contentHash) {
+        return {
+          status: 'rejected', code: 'template-version-mismatch', message: '模板正文哈希与索引不一致',
+        };
+      }
+      const parsed = parseUserTemplateText(new TextDecoder().decode(bodyResult.bytes));
+      if (!parsed.ok) {
+        return {
+          status: 'rejected', code: 'template-invalid',
+          message: parsed.issues[0]?.message ?? '模板正文描述无效',
+        };
+      }
+      if (parsed.body.templateId !== request.templateId) {
+        return {
+          status: 'rejected', code: 'template-version-mismatch', message: '模板身份与请求不一致',
+        };
+      }
+      resolvedUserTemplate = parsed.body;
+    }
+
     // 逆向命令：从已核对的私有历史与当前基线重算候选。确认指纹与安全条件都在发布前核对。
     let inverseContext: InverseContext | undefined;
     const inverseCommand = inverseCommandOf(envelope.command);
@@ -1330,9 +1390,9 @@ export class ProjectCommandService {
     }
 
     // 稳定生成 id：先落意图，重启或核对时复用同一批 id，不重复创建。
-    const generated = this.allocateIds(envelope.command, baseline.doc, resolvedPreset, inverseContext);
+    const generated = this.allocateIds(envelope.command, baseline.doc, resolvedPreset, inverseContext, resolvedUserTemplate);
     const candidate = this.buildCandidate(
-      envelope.command, baseline.doc, baseline.baseline.records, generated, resolvedPreset, inverseContext,
+      envelope.command, baseline.doc, baseline.baseline.records, generated, resolvedPreset, inverseContext, resolvedUserTemplate,
     );
     if ('rejected' in candidate) return candidate.rejected;
 
@@ -1616,6 +1676,7 @@ export class ProjectCommandService {
     generated: { recordId?: string; nodeIds?: string[] },
     resolvedPreset?: PresetDescriptor,
     inverseContext?: InverseContext,
+    resolvedUserTemplate?: UserTemplateBody,
   ):
     | {
         doc: ProjectDocument;
@@ -1641,16 +1702,21 @@ export class ProjectCommandService {
         sources: [],
         body: buildUserTemplateText(built.body),
       };
-      return this.buildCandidate(asRecord, doc, baselineRecords, generated, resolvedPreset, inverseContext);
+      return this.buildCandidate(asRecord, doc, baselineRecords, generated, resolvedPreset, inverseContext, resolvedUserTemplate);
     }
     if (command.type !== 'append-record') {
-      const applied = applyPlanCommand(doc, this.materialize(command, generated.nodeIds ?? [], resolvedPreset), this.deps.sha256);
+      const applied = applyPlanCommand(
+        doc,
+        this.materialize(command, generated.nodeIds ?? [], resolvedPreset, resolvedUserTemplate),
+        this.deps.sha256,
+      );
       if (!applied.ok) {
         // 结构命令把领域拒绝码原样上抛（parent-not-found / invalid-anchor 等），
         // 便于界面逐项提示；其余命令维持既有 invalid-project 诊断。
         const structural =
           command.type === 'move-node' || command.type === 'insert-preset' || command.type === 'group-nodes'
-          || command.type === 'merge-nodes' || command.type === 'copy-subtree';
+          || command.type === 'merge-nodes' || command.type === 'copy-subtree'
+          || command.type === 'insert-user-template';
         const domainCode = structural ? applied.issues.find((issue) =>
           ['parent-not-found', 'invalid-anchor', 'node-not-found', 'root-to-child', 'child-to-root',
             'invalid-parent', 'empty-selection', 'cross-parent-selection', 'root-in-selection',
@@ -1836,6 +1902,7 @@ export class ProjectCommandService {
     doc: ProjectDocument,
     preset?: PresetDescriptor,
     inverseContext?: InverseContext,
+    body?: UserTemplateBody,
   ): { recordId?: string; nodeIds?: string[] } {
     // 撤销/重做生成节点已在原操作回执的 inverse 中固定身份，不重新分配；
     // 合并的逆向需要一条新的结构化记录（clear 或新 replace），分配一个记录 id。
@@ -1866,11 +1933,19 @@ export class ProjectCommandService {
     if (command.type === 'insert-preset' && preset !== undefined) {
       return { nodeIds: preset.nodes.map(() => this.deps.newNodeId()) };
     }
+    if (command.type === 'insert-user-template' && body !== undefined) {
+      return { nodeIds: body.nodes.map(() => this.deps.newNodeId()) };
+    }
     return {};
   }
 
   /** 新节点 id 由应用层生成并已在意图中固定；命令不能指定 id 覆盖旧节点。 */
-  private materialize(command: PlanningCommand, allocated: string[], preset?: PresetDescriptor): PlanCommand {
+  private materialize(
+    command: PlanningCommand,
+    allocated: string[],
+    preset?: PresetDescriptor,
+    body?: UserTemplateBody,
+  ): PlanCommand {
     let cursor = 0;
     const nextId = (): string => allocated[cursor++] ?? this.deps.newNodeId();
     const toNode = (input: NewNodeInput, parentOverride?: string | null): WorkNode => ({
@@ -1913,6 +1988,17 @@ export class ProjectCommandService {
           type: 'instantiate-template',
           preset,
           contentLocale: command.contentLocale,
+          newIds: [...allocated],
+          parentId: command.parentId,
+          beforeNodeId: command.beforeNodeId,
+        };
+      case 'insert-user-template':
+        if (body === undefined) {
+          throw new Error('insert-user-template 缺少已解析模板正文，不能在物化阶段重新解析');
+        }
+        return {
+          type: 'instantiate-user-template',
+          body,
           newIds: [...allocated],
           parentId: command.parentId,
           beforeNodeId: command.beforeNodeId,

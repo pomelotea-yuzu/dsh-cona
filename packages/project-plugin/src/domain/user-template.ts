@@ -10,7 +10,8 @@
 
 import { strictParse } from './strict-json.js';
 import { UUID_RE } from './validate-constants.js';
-import type { Plan, ValidationIssue, WorkNode } from './types.js';
+import { validatePlanStructure } from './validate.js';
+import type { DependencyEdge, Plan, TransformResult, ValidationIssue, WorkNode } from './types.js';
 
 export const USER_TEMPLATE_SUMMARY_PREFIX = '[cona:template] ';
 export const USER_TEMPLATE_VERSION_MARKER = '<!-- cona:template v1 -->';
@@ -332,4 +333,91 @@ export function parseUserTemplateText(text: string): { ok: true; body: UserTempl
     return { ok: false, issues: [issue(parsed.error.code === 'duplicate-key' ? 'duplicate-key' : 'invalid-json', '/', `模板 JSON 解析失败：${parsed.error.message}`)] };
   }
   return validateUserTemplateBody(parsed.value);
+}
+
+/**
+ * 实例化用户模板（tasks 2.5）：按模板节点顺序分配新项目 ID，用单语言原文创建
+ * todo 节点，按局部键映射父子与内部依赖；对外依赖不进入模板，故不注入。
+ * 目标 parentId 必须是现有节点（null 以 parent-not-found 拒绝），beforeNodeId 为同级锚点。
+ * 输入 Plan 与正文不被修改；任一步失败整体拒绝。
+ */
+export function instantiateUserTemplate(
+  plan: Plan,
+  body: UserTemplateBody,
+  newIds: readonly string[],
+  parentId: string | null,
+  beforeNodeId: string | null,
+): TransformResult<Plan> {
+  const validated = validateUserTemplateBody(body);
+  if (!validated.ok) return { ok: false, issues: validated.issues };
+  if (newIds.length !== body.nodes.length) {
+    return { ok: false, issues: [issue('template-id-count-mismatch', '/newIds', '分配 ID 数量与模板节点数不一致')] };
+  }
+  const existingIds = new Set(plan.nodes.map((node) => node.id));
+  const batch = new Set<string>();
+  for (const [index, id] of newIds.entries()) {
+    if (!UUID_RE.test(id)) return { ok: false, issues: [issue('invalid-uuid', `/newIds/${index}`, '新节点 ID 必须是 v4 UUID')] };
+    if (existingIds.has(id) || batch.has(id)) {
+      return { ok: false, issues: [issue('duplicate-node-id', `/newIds/${index}`, '新节点 ID 与现有节点或批内重复')] };
+    }
+    batch.add(id);
+  }
+  if (parentId === null || !existingIds.has(parentId)) {
+    return { ok: false, issues: [issue('parent-not-found', '/plan/nodes', `目标父节点 ${String(parentId)} 不存在`)] };
+  }
+  if (beforeNodeId !== null) {
+    const anchor = plan.nodes.find((node) => node.id === beforeNodeId);
+    if (anchor === undefined || anchor.parentId !== parentId) {
+      return { ok: false, issues: [issue('invalid-anchor', '/plan/nodes', '锚点不属于目标同级组')] };
+    }
+  }
+
+  const keyToId = new Map<string, string>();
+  body.nodes.forEach((node, index) => keyToId.set(node.key, newIds[index] as string));
+  const created: WorkNode[] = body.nodes.map((node, index) => ({
+    id: newIds[index] as string,
+    parentId: node.parentKey === null ? parentId : (keyToId.get(node.parentKey) ?? parentId),
+    order: node.order,
+    title: node.title,
+    goal: node.goal,
+    completionCriteria: [...node.completionCriteria],
+    status: 'todo',
+  }));
+  const templateRootKey = body.nodes.find((node) => node.parentKey === null)!.key;
+  const templateRoot = created.find((node) => node.id === keyToId.get(templateRootKey))!;
+
+  // 目标同级组：既有节点 + 模板根，按锚点插入并重编号；其余创建节点挂到模板内父键映射。
+  const byParent = new Map<string | null, WorkNode[]>();
+  for (const item of plan.nodes) {
+    const list = byParent.get(item.parentId) ?? [];
+    list.push({ ...item, completionCriteria: [...item.completionCriteria] });
+    byParent.set(item.parentId, list);
+  }
+  for (const list of byParent.values()) list.sort((a, b) => a.order - b.order);
+  const targetList = byParent.get(parentId) ?? [];
+  const insertAt = beforeNodeId === null ? targetList.length : targetList.findIndex((item) => item.id === beforeNodeId);
+  targetList.splice(insertAt, 0, templateRoot);
+  byParent.set(parentId, targetList);
+  for (const node of created) {
+    if (node.id === templateRoot.id) continue;
+    const list = byParent.get(node.parentId) ?? [];
+    list.push(node);
+    byParent.set(node.parentId, list);
+  }
+
+  const nodes: WorkNode[] = [];
+  for (const list of byParent.values()) {
+    list.forEach((node, index) => { node.order = index; nodes.push(node); });
+  }
+  const injected: DependencyEdge[] = body.dependencies.map((edge) => ({
+    nodeId: keyToId.get(edge.nodeKey)!,
+    requiresNodeId: keyToId.get(edge.requiresKey)!,
+  }));
+  const candidate: Plan = {
+    nodes,
+    dependencies: [...plan.dependencies.map((edge) => ({ ...edge })), ...injected],
+  };
+  const issues = validatePlanStructure(candidate);
+  if (issues.length > 0) return { ok: false, issues };
+  return { ok: true, value: candidate };
 }

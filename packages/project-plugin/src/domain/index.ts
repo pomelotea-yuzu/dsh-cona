@@ -72,5 +72,6 @@ export {
   validateUserTemplateBody,
   buildUserTemplateText,
   parseUserTemplateText,
+  instantiateUserTemplate,
 } from './user-template.js';
 export type { UserTemplateNode, UserTemplateDependency, UserTemplateBody } from './user-template.js';

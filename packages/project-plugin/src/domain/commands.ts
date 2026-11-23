@@ -15,6 +15,8 @@ import {
   type MergeDependencyResolution,
 } from './transforms.js';
 import type { PresetContentLocale, PresetDescriptor } from './presets.js';
+import { instantiateUserTemplate } from './user-template.js';
+import type { UserTemplateBody } from './user-template.js';
 import type {
   DependencyEdge,
   NodeStatus,
@@ -114,6 +116,13 @@ export type PlanCommand =
       newIds: string[];
       parentId: string | null;
       beforeNodeId: string | null;
+    }
+  | {
+      type: 'instantiate-user-template';
+      body: UserTemplateBody;
+      newIds: string[];
+      parentId: string | null;
+      beforeNodeId: string | null;
     };
 
 /**
@@ -159,6 +168,15 @@ export function applyPlanCommand(
         doc.plan,
         command.preset,
         command.contentLocale,
+        command.newIds,
+        command.parentId,
+        command.beforeNodeId,
+      );
+      break;
+    case 'instantiate-user-template':
+      result = instantiateUserTemplate(
+        doc.plan,
+        command.body,
         command.newIds,
         command.parentId,
         command.beforeNodeId,

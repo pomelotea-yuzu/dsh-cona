@@ -214,6 +214,9 @@ export function commandAction(command: Command): WorkAction {
     // 模板保存是 owner-only 的记录发布；保守映射，不走工作绑定。
     case 'save-user-template':
       return 'record';
+    // 用户模板插入是 owner-only（本阶段），与内置预设一致按 add 保守映射。
+    case 'insert-user-template':
+      return 'add';
   }
 }
 
@@ -254,6 +257,8 @@ export function commandTargets(command: Command): string[] {
     // 模板正文不针对具体节点（subjectNodeIds 为空），目标为空。
     case 'save-user-template':
       return [command.rootNodeId];
+    case 'insert-user-template':
+      return command.parentId === null ? [] : [command.parentId];
   }
 }
 
