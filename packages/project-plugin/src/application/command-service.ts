@@ -4,7 +4,8 @@
 // 4.5 增补：unknown-state／聚合不可读时写隔离标记，停止该实例读写，并提供只读诊断与显式解除。
 
 import { applyPlanCommand, appendRecordIndex, type NodePatch, type PlanCommand } from '../domain/commands.js';
-import type { GroupContent } from '../domain/transforms.js';
+import type { GroupContent, MergeDependencyResolution } from '../domain/transforms.js';
+import { buildReplacementReplaceText, REPLACEMENT_SUMMARY_PREFIX } from '../domain/replacement.js';
 import {
   FEATURE_DEVELOPMENT_PRESET,
   validatePreset,
@@ -85,6 +86,20 @@ export type Command =
   | { type: 'update-node'; nodeId: string; patch: NodePatch }
   | { type: 'split-node'; parentId: string; children: Omit<NewNodeInput, 'parentId'>[] }
   | { type: 'group-nodes'; nodeIds: string[]; group: GroupContent; anchorId: string | null }
+  | {
+      type: 'merge-nodes';
+      keepNodeId: string;
+      sourceNodeIds: string[];
+      patch?: NodePatch;
+      resolutions: MergeDependencyResolution[];
+    }
+  | {
+      type: 'copy-subtree';
+      nodeId: string;
+      targetParentId: string | null;
+      anchorId: string | null;
+      externalDependencies: { nodeId: string; requiresNodeId: string }[];
+    }
   | { type: 'set-dependencies'; dependencies: DependencyEdge[] }
   | { type: 'set-node-status'; nodeId: string; status: NodeStatus }
   | MoveNodeCommand
@@ -92,7 +107,7 @@ export type Command =
   | AppendRecordCommand;
 
 /** 只能由 owner 发起的结构命令；agent-work 上下文直达须在准入阶段拒绝。 */
-const OWNER_ONLY_COMMANDS = new Set<string>(['move-node', 'insert-preset', 'group-nodes']);
+const OWNER_ONLY_COMMANDS = new Set<string>(['move-node', 'insert-preset', 'group-nodes', 'merge-nodes', 'copy-subtree']);
 
 /** 随包预设目录：按 ID 与版本精确匹配，未知 ID／不可用版本返回稳定诊断。 */
 export interface PresetCatalog {
@@ -815,7 +830,7 @@ export class ProjectCommandService {
     }
 
     // 稳定生成 id：先落意图，重启或核对时复用同一批 id，不重复创建。
-    const generated = this.allocateIds(envelope.command, resolvedPreset);
+    const generated = this.allocateIds(envelope.command, baseline.doc, resolvedPreset);
     const candidate = this.buildCandidate(envelope.command, baseline.doc, baseline.baseline.records, generated, resolvedPreset);
     if ('rejected' in candidate) return candidate.rejected;
 
@@ -1073,10 +1088,14 @@ export class ProjectCommandService {
       if (!applied.ok) {
         // 结构命令把领域拒绝码原样上抛（parent-not-found / invalid-anchor 等），
         // 便于界面逐项提示；其余命令维持既有 invalid-project 诊断。
-        const structural = command.type === 'move-node' || command.type === 'insert-preset' || command.type === 'group-nodes';
+        const structural =
+          command.type === 'move-node' || command.type === 'insert-preset' || command.type === 'group-nodes'
+          || command.type === 'merge-nodes' || command.type === 'copy-subtree';
         const domainCode = structural ? applied.issues.find((issue) =>
           ['parent-not-found', 'invalid-anchor', 'node-not-found', 'root-to-child', 'child-to-root',
             'invalid-parent', 'empty-selection', 'cross-parent-selection', 'root-in-selection',
+            'invalid-merge-source', 'duplicate-merge-source', 'unresolved-dependency', 'dependency-not-found',
+            'copy-id-count-mismatch',
             'template-invalid', 'template-locale-unsupported', 'duplicate-node-id',
             'invalid-uuid', 'template-id-count-mismatch'].includes(issue.code),
         ) : undefined;
@@ -1087,6 +1106,47 @@ export class ProjectCommandService {
             message: domainCode?.message ?? '命令变换未通过领域校验',
             issues: applied.issues,
           },
+        };
+      }
+      // 2.2 合并：规划候选与结构化替代记录在同一权威头发布（plan-change 记录 + 正文）。
+      if (command.type === 'merge-nodes') {
+        const recordId = generated.recordId ?? this.deps.newRecordId();
+        const bodyText = buildReplacementReplaceText({
+          version: 1,
+          kind: 'replace',
+          sourceNodeIds: [...command.sourceNodeIds],
+          replacementNodeId: command.keepNodeId,
+        });
+        const bytesData = new TextEncoder().encode(bodyText);
+        const contentHash = 'sha256:' + this.deps.sha256(bytesData);
+        const recordPath = `records/${recordId}/${contentHash.slice('sha256:'.length)}.md`;
+        const appended = appendRecordIndex(applied.doc.records, {
+          id: recordId,
+          kind: 'plan-change',
+          subjectNodeIds: [command.keepNodeId, ...command.sourceNodeIds],
+          path: recordPath,
+          contentHash,
+          summary: `${REPLACEMENT_SUMMARY_PREFIX}${command.sourceNodeIds.length} 个来源并入 ${command.keepNodeId}`,
+          sources: [],
+        });
+        if (!appended.ok) {
+          return {
+            rejected: { status: 'rejected', code: 'invalid-project', message: '替代记录索引追加失败', issues: appended.issues },
+          };
+        }
+        const withRecord: ProjectDocument = { ...applied.doc, records: appended.value };
+        const validated = validateProjectDocument(withRecord, { sha256: this.deps.sha256 });
+        if (!validated.ok) {
+          return {
+            rejected: { status: 'rejected', code: 'invalid-project', message: '合并候选未通过领域校验', issues: validated.issues },
+          };
+        }
+        return {
+          doc: validated.doc,
+          records: [...baselineRecords, { path: recordPath, contentHash, observedHash: contentHash }],
+          bodies: [{ recordId, contentHash, path: recordPath, bytes: bytesData.length, bytesData }],
+          recordId,
+          recordPath,
         };
       }
       return { doc: applied.doc, records: baselineRecords, bodies: [] };
@@ -1126,12 +1186,27 @@ export class ProjectCommandService {
     };
   }
 
-  private allocateIds(command: Command, preset?: PresetDescriptor): { recordId?: string; nodeIds?: string[] } {
+  private allocateIds(command: Command, doc: ProjectDocument, preset?: PresetDescriptor): { recordId?: string; nodeIds?: string[] } {
     if (command.type === 'append-record') return { recordId: this.deps.newRecordId() };
     if (command.type === 'add-nodes') return { nodeIds: command.nodes.map(() => this.deps.newNodeId()) };
     if (command.type === 'split-node') return { nodeIds: command.children.map(() => this.deps.newNodeId()) };
     // 2.1 分组：组节点身份由应用层分配，成员沿用原 id。
     if (command.type === 'group-nodes') return { nodeIds: [this.deps.newNodeId()] };
+    // 2.2 合并：分配替代记录 id（无新节点）；复制：按源子树 DFS 顺序分配新 id。
+    if (command.type === 'merge-nodes') return { recordId: this.deps.newRecordId() };
+    if (command.type === 'copy-subtree') {
+      // 源子树节点数（含自身）：逐层向下数，顺序与 copySubtree 的 DFS 一致。
+      let count = 0;
+      const level = [command.nodeId];
+      while (level.length > 0) {
+        const current = level.shift()!;
+        count += 1;
+        for (const node of doc.plan.nodes) {
+          if (node.parentId === current) level.push(node.id);
+        }
+      }
+      return { nodeIds: Array.from({ length: count }, () => this.deps.newNodeId()) };
+    }
     if (command.type === 'insert-preset' && preset !== undefined) {
       return { nodeIds: preset.nodes.map(() => this.deps.newNodeId()) };
     }
@@ -1168,6 +1243,10 @@ export class ProjectCommandService {
           anchorId: command.anchorId,
           newGroupId: nextId(),
         };
+      case 'merge-nodes':
+        return command;
+      case 'copy-subtree':
+        return { ...command, newIds: [...allocated] };
       case 'move-node':
         return command;
       case 'insert-preset':

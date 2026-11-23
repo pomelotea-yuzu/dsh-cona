@@ -202,6 +202,8 @@ export function commandAction(command: Command): WorkAction {
     // 避免穷尽 switch 遗漏，且任何意外的 agent 直达都落在受限动作上。
     case 'move-node':
     case 'group-nodes':
+    case 'merge-nodes':
+    case 'copy-subtree':
       return 'update';
     case 'insert-preset':
       return 'add';
@@ -232,6 +234,10 @@ export function commandTargets(command: Command): string[] {
       return [command.nodeId, ...(command.parentId === null ? [] : [command.parentId])];
     case 'group-nodes':
       return [...new Set(command.nodeIds)];
+    case 'merge-nodes':
+      return [...new Set([command.keepNodeId, ...command.sourceNodeIds])];
+    case 'copy-subtree':
+      return command.targetParentId === null ? [] : [command.targetParentId];
     case 'insert-preset':
       return command.parentId === null ? [] : [command.parentId];
   }

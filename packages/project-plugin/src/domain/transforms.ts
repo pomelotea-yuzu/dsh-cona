@@ -84,6 +84,12 @@ export interface GroupContent {
   completionCriteria: string[];
 }
 
+/** 合并时一条受影响依赖的处置：保留原样、把来源端点重接到保留节点、或删除该边。 */
+export interface MergeDependencyResolution {
+  edge: { nodeId: string; requiresNodeId: string };
+  action: 'keep' | 'reattach' | 'drop';
+}
+
 /**
  * 分组同级普通节点（tasks 2.1，design §2）：创建一个组节点并移动选中的原子树。
  * - 选择必须非空、全部存在且同父级；任一为根节点即拒绝（根降为组子节点违反 v1 父链规则）；
@@ -417,6 +423,286 @@ export function setDependencies(plan: Plan, dependencies: readonly DependencyEdg
   const structureIssues = validatePlanStructure(candidate);
   if (structureIssues.length > 0) {
     return { ok: false, issues: structureIssues };
+  }
+  return { ok: true, value: candidate };
+}
+
+/**
+ * 合并同级普通节点（tasks 2.2，design §2）：保留 keepNodeId，来源节点以原 ID
+ * 保留为 canceled 与被替代（结构化替代记录由应用层按候选发布，不在变换内）。
+ * - 选择必须非空、全部存在、同父级、互不重复，keep 不在来源中；
+ * - 来源节点的后代移入保留节点（追加到其子级末尾，相对顺序保持）；
+ * - 来源节点留在原父级原位置，状态改为 canceled，其余字段不变；
+ * - 每条触及来源节点的依赖边必须显式处置：keep（原样保留）、reattach
+ *   （来源端点改指保留节点）、drop（删除）。未处置的边按 unresolved-dependency
+ *   整批拒绝；处置指向不存在的边按 dependency-not-found 拒绝；
+ * - 保留节点可同时应用字段补丁（复用 update-node 语义，可省略）。
+ */
+export function mergeNodes(
+  plan: Plan,
+  keepNodeId: string,
+  sourceNodeIds: readonly string[],
+  patch: { title?: string; goal?: string; completionCriteria?: string[] } | undefined,
+  resolutions: readonly MergeDependencyResolution[],
+): TransformResult<Plan> {
+  if (sourceNodeIds.length === 0) {
+    return fail({ code: 'empty-selection', path: '/plan/nodes', message: '合并来源为空' });
+  }
+  const exists = plan.nodes.find((node) => node.id === keepNodeId);
+  if (exists === undefined) {
+    return fail({ code: 'node-not-found', path: '/plan/nodes', message: `保留节点 ${keepNodeId} 不存在` });
+  }
+  const sources: WorkNode[] = [];
+  const seen = new Set<string>();
+  for (const id of sourceNodeIds) {
+    if (id === keepNodeId) {
+      return fail({ code: 'invalid-merge-source', path: '/plan/nodes', message: '保留节点不得出现在来源数组中' });
+    }
+    const found = plan.nodes.find((node) => node.id === id);
+    if (found === undefined) {
+      return fail({ code: 'node-not-found', path: '/plan/nodes', message: `来源节点 ${id} 不存在` });
+    }
+    if (seen.has(id)) {
+      return fail({ code: 'duplicate-merge-source', path: '/plan/nodes', message: `来源节点 ${id} 重复` });
+    }
+    seen.add(id);
+    sources.push(found);
+  }
+  if (sources.some((node) => node.parentId !== exists.parentId)) {
+    return fail({ code: 'cross-parent-selection', path: '/plan/nodes', message: '合并的来源与保留节点必须属于同一父级' });
+  }
+
+  // 每条触及来源节点的边都必须显式处置；处置的边必须真实存在且触及来源。
+  const sourceIds = new Set(sourceNodeIds);
+  const touched = plan.dependencies.filter(
+    (edge) => sourceIds.has(edge.nodeId) || sourceIds.has(edge.requiresNodeId),
+  );
+  const edgeKey = (edge: { nodeId: string; requiresNodeId: string }): string => `${edge.nodeId}\u0000${edge.requiresNodeId}`;
+  const touchedKeys = new Set(touched.map(edgeKey));
+  const unresolved = touched.filter((edge) => !resolutions.some((item) => edgeKey(item.edge) === edgeKey(edge)));
+  if (unresolved.length > 0) {
+    const first = unresolved[0]!;
+    return fail({
+      code: 'unresolved-dependency',
+      path: '/plan/dependencies',
+      message: `依赖 ${first.nodeId}→${first.requiresNodeId} 触及来源节点，需要显式处置（keep／reattach／drop）`,
+    });
+  }
+  const resolutionKeys = new Set(resolutions.map((item) => edgeKey(item.edge)));
+  const foreign = resolutions.filter((item) => !touchedKeys.has(edgeKey(item.edge)));
+  if (foreign.length > 0) {
+    const first = foreign[0]!;
+    return fail({
+      code: 'dependency-not-found',
+      path: '/plan/dependencies',
+      message: `处置的依赖 ${first.edge.nodeId}→${first.edge.requiresNodeId} 不存在或不触及来源节点`,
+    });
+  }
+
+  // 依赖重写：reattach 把来源端点改指保留节点；drop 删除；keep 原样。
+  const nextDependencies: DependencyEdge[] = [];
+  for (const edge of plan.dependencies) {
+    const resolution = resolutions.find((item) => edgeKey(item.edge) === edgeKey(edge));
+    if (resolution !== undefined) {
+      if (resolution.action === 'keep') nextDependencies.push({ ...edge });
+      if (resolution.action === 'reattach') {
+        nextDependencies.push({
+          nodeId: sourceIds.has(edge.nodeId) ? keepNodeId : edge.nodeId,
+          requiresNodeId: sourceIds.has(edge.requiresNodeId) ? keepNodeId : edge.requiresNodeId,
+        });
+      }
+      continue;
+    }
+    nextDependencies.push({ ...edge });
+  }
+
+  // 保留节点：应用字段补丁（title／goal／completionCriteria，与 update-node 同语义）。
+  const basePlan: Plan =
+    patch === undefined
+      ? { nodes: plan.nodes.map((node) => ({ ...node, completionCriteria: [...node.completionCriteria] })), dependencies: plan.dependencies.map((edge) => ({ ...edge })) }
+      : (() => {
+          const patched = plan.nodes.map((node) => {
+            if (node.id !== keepNodeId) return { ...node, completionCriteria: [...node.completionCriteria] };
+            return {
+              ...node,
+              ...(patch.title === undefined ? {} : { title: patch.title }),
+              ...(patch.goal === undefined ? {} : { goal: patch.goal }),
+              ...(patch.completionCriteria === undefined ? {} : { completionCriteria: [...patch.completionCriteria] }),
+            };
+          });
+          return { nodes: patched, dependencies: plan.dependencies.map((edge) => ({ ...edge })) };
+        })();
+
+  // 来源节点：状态 canceled（原 ID 原位置保留）；其子级移到保留节点末尾（按原相对顺序）。
+  const keepChildren = basePlan.nodes.filter((node) => node.parentId === keepNodeId).sort((a, b) => a.order - b.order);
+  const descendantsBySource = new Map<string, WorkNode[]>();
+  for (const source of sources) {
+    descendantsBySource.set(
+      source.id,
+      basePlan.nodes.filter((node) => node.parentId === source.id).sort((a, b) => a.order - b.order),
+    );
+  }
+
+  // 来源的直接子级从原位置移除（稍后重挂到保留节点下），避免与重挂副本重复。
+  const nodes = basePlan.nodes
+    .filter((node) => node.parentId === null || !sourceIds.has(node.parentId))
+    .map((node) => {
+      if (sourceIds.has(node.id)) {
+        return { ...node, status: 'canceled' as const, completionCriteria: [...node.completionCriteria] };
+      }
+      return { ...node, completionCriteria: [...node.completionCriteria] };
+    });
+
+  // 后代重挂：追加到保留节点子级末尾，保持每个来源子级内的相对顺序。
+  let cursor = keepChildren.length;
+  for (const source of sources) {
+    for (const child of descendantsBySource.get(source.id) ?? []) {
+      nodes.push({ ...child, parentId: keepNodeId, order: cursor, completionCriteria: [...child.completionCriteria] });
+      cursor += 1;
+    }
+  }
+
+  const candidate: Plan = { nodes, dependencies: nextDependencies };
+  const issues = validatePlanStructure(candidate);
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+  return { ok: true, value: candidate };
+}
+
+/**
+ * 复制子树（tasks 2.2，design §2）：源子树按 DFS 顺序映射到应用层分配的新 ID。
+ * - 目标父节点必须存在（null 按 parent-not-found 拒绝，与模板插入一致）；
+ * - 锚点必须属于目标同级组；`newIds` 数量与源子树节点数一致且全部为未用 UUID；
+ * - 新节点保留标题、目标、完成条件与内部结构（parentId/order 按 DFS 键映射），
+ *   一律从 todo 开始；内部依赖按两端映射到新 ID；
+ * - 触及子树外节点的外部依赖默认不接入；请求明确列出的外部边按原端点映射
+ *   （子树内端点 → 新 ID）接入，列出不存在或不触及子树的外部边整批拒绝。
+ */
+export function copySubtree(
+  plan: Plan,
+  nodeId: string,
+  targetParentId: string | null,
+  anchorId: string | null,
+  newIds: readonly string[],
+  externalDependencies: readonly { nodeId: string; requiresNodeId: string }[],
+): TransformResult<Plan> {
+  const root = plan.nodes.find((node) => node.id === nodeId);
+  if (root === undefined) {
+    return fail({ code: 'node-not-found', path: '/plan/nodes', message: `复制源节点 ${nodeId} 不存在` });
+  }
+  if (targetParentId === null || !plan.nodes.some((node) => node.id === targetParentId)) {
+    return fail({ code: 'parent-not-found', path: '/plan/nodes', message: `目标父节点 ${String(targetParentId)} 不存在` });
+  }
+  if (anchorId !== null) {
+    const anchor = plan.nodes.find((node) => node.id === anchorId);
+    if (anchor === undefined || anchor.parentId !== targetParentId) {
+      return fail({ code: 'invalid-anchor', path: '/plan/nodes', message: '锚点不属于目标同级组' });
+    }
+  }
+
+  // DFS 收集源子树（保持父子与同级顺序）。
+  const childrenOf = new Map<string | null, WorkNode[]>();
+  for (const node of plan.nodes) {
+    const list = childrenOf.get(node.parentId) ?? [];
+    list.push(node);
+    childrenOf.set(node.parentId, list);
+  }
+  for (const list of childrenOf.values()) list.sort((a, b) => a.order - b.order);
+  const subtree: WorkNode[] = [];
+  const subtreeIds = new Set<string>();
+  const walk = (id: string): void => {
+    const node = plan.nodes.find((item) => item.id === id);
+    if (node === undefined) return;
+    subtree.push(node);
+    subtreeIds.add(id);
+    for (const child of childrenOf.get(id) ?? []) walk(child.id);
+  };
+  walk(nodeId);
+  if (newIds.length !== subtree.length) {
+    return fail({ code: 'copy-id-count-mismatch', path: '/newIds', message: `分配 ID 数量 ${newIds.length} 与源子树节点数 ${subtree.length} 不一致` });
+  }
+  const existingIds = new Set(plan.nodes.map((node) => node.id));
+  const batchIds = new Set<string>();
+  for (const [index, id] of newIds.entries()) {
+    if (!UUID_RE.test(id)) {
+      return fail({ code: 'invalid-uuid', path: `/newIds/${index}`, message: '新节点 ID 必须是 v4 UUID' });
+    }
+    if (existingIds.has(id) || batchIds.has(id)) {
+      return fail({ code: 'duplicate-node-id', path: `/newIds/${index}`, message: `新节点 ID ${id} 冲突或批内重复` });
+    }
+    batchIds.add(id);
+  }
+
+  // 外部依赖处置：列出的边必须真实存在且恰好触及子树一端。
+  for (const edge of externalDependencies) {
+    const found = plan.dependencies.some(
+      (item) => item.nodeId === edge.nodeId && item.requiresNodeId === edge.requiresNodeId,
+    );
+    if (!found) {
+      return fail({ code: 'dependency-not-found', path: '/plan/dependencies', message: `接入的依赖 ${edge.nodeId}→${edge.requiresNodeId} 在源资料中不存在` });
+    }
+    const inSubtree = subtreeIds.has(edge.nodeId) !== subtreeIds.has(edge.requiresNodeId);
+    if (!inSubtree) {
+      return fail({ code: 'dependency-not-found', path: '/plan/dependencies', message: `依赖 ${edge.nodeId}→${edge.requiresNodeId} 不是源子树的外部依赖` });
+    }
+  }
+
+  // 新节点：DFS 顺序映射新 ID；parentId 沿父子键映射（根映射到目标父）。
+  const idMap = new Map<string, string>();
+  subtree.forEach((node, index) => idMap.set(node.id, newIds[index] as string));
+  const created: WorkNode[] = subtree.map((node, index) => ({
+    id: newIds[index] as string,
+    parentId: node.id === nodeId ? targetParentId : (idMap.get(node.parentId as string) as string),
+    order: node.order,
+    title: node.title,
+    goal: node.goal,
+    completionCriteria: [...node.completionCriteria],
+    status: 'todo',
+  }));
+
+  // 内部依赖映射；外部依赖按确认接入（子树内端点 → 新 ID）。
+  const internalDeps = plan.dependencies
+    .filter((edge) => subtreeIds.has(edge.nodeId) && subtreeIds.has(edge.requiresNodeId))
+    .map((edge) => ({ nodeId: idMap.get(edge.nodeId)!, requiresNodeId: idMap.get(edge.requiresNodeId)! }));
+  const adoptedDeps = externalDependencies.map((edge) => ({
+    nodeId: subtreeIds.has(edge.nodeId) ? (idMap.get(edge.nodeId) as string) : edge.nodeId,
+    requiresNodeId: subtreeIds.has(edge.requiresNodeId) ? (idMap.get(edge.requiresNodeId) as string) : edge.requiresNodeId,
+  }));
+
+  const byParent = new Map<string | null, WorkNode[]>();
+  for (const node of plan.nodes) {
+    const list = byParent.get(node.parentId) ?? [];
+    list.push({ ...node, completionCriteria: [...node.completionCriteria] });
+    byParent.set(node.parentId, list);
+  }
+  for (const list of byParent.values()) list.sort((a, b) => a.order - b.order);
+  const targetList = byParent.get(targetParentId) ?? [];
+  const insertAt = anchorId === null ? targetList.length : targetList.findIndex((item) => item.id === anchorId);
+  const copyRoot = created[0]!;
+  targetList.splice(insertAt, 0, copyRoot);
+  if (!byParent.has(targetParentId)) byParent.set(targetParentId, targetList);
+  for (const desc of created) {
+    if (desc.id === copyRoot.id) continue;
+    const list = byParent.get(desc.parentId) ?? [];
+    list.push(desc);
+    byParent.set(desc.parentId, list);
+  }
+  const nodes: WorkNode[] = [];
+  for (const list of byParent.values()) {
+    list.forEach((item, index) => {
+      item.order = index;
+      nodes.push(item);
+    });
+  }
+
+  const candidate: Plan = {
+    nodes,
+    dependencies: [...plan.dependencies.map((edge) => ({ ...edge })), ...internalDeps, ...adoptedDeps],
+  };
+  const issues = validatePlanStructure(candidate);
+  if (issues.length > 0) {
+    return { ok: false, issues };
   }
   return { ok: true, value: candidate };
 }

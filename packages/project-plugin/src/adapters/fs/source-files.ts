@@ -17,6 +17,9 @@ export const FORMAT_ASSET_FILES: readonly { source: string; target: string }[] =
   { source: 'project-v1.schema.json', target: 'schema/project-v1.schema.json' },
   { source: 'plan-canonicalization.md', target: 'protocol/plan-canonicalization.md' },
   { source: 'plan-vectors.json', target: 'protocol/plan-vectors.json' },
+  // 2.2：结构化替代记录的可移植工件（schema、协议说明含正反例）。
+  { source: 'replacement-v1.schema.json', target: 'schema/replacement-v1.schema.json' },
+  { source: 'replacement-protocol.md', target: 'protocol/replacement-protocol.md' },
 ];
 
 /** 只描述磁盘现状：不判断项目是否合法，也不因存在其他文件就推断资料归属。 */

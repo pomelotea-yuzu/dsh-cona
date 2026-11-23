@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsh-cona.dev/schemas/replacement-v1.schema.json",
+  "title": "DSH Cona replacement record body v1",
+  "description": "结构化替代记录正文（plan-change，摘要前缀 [cona:replacement] ）。正文首行必须为 <!-- cona:replacement v1 -->，紧接一个 json 围栏代码块，代码块内容符合本 schema。",
+  "oneOf": [
+    {
+      "title": "replace（替代关系）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "kind", "sourceNodeIds", "replacementNodeId"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "replace" },
+        "sourceNodeIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }
+        },
+        "replacementNodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", "not": { "enum": [] } }
+      },
+      "allOf": [
+        {
+          "description": "保留节点不得出现在来源数组中",
+          "not": {
+            "type": "object",
+            "properties": { "replacementNodeId": { "type": "string" } },
+            "required": ["replacementNodeId"]
+          }
+        }
+      ]
+    },
+    {
+      "title": "clear（替代关系解除）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "kind", "clearsRecordId"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "clear" },
+        "clearsRecordId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }
+      }
+    }
+  ]
+}
