@@ -277,6 +277,9 @@ export function commandAction(command: Command): WorkAction {
     // 模板保存是 owner-only 的记录发布；保守映射，不走工作绑定。
     case 'save-user-template':
       return 'record';
+    // 启用扩展规划是 owner-only 的格式发布（命令服务入口拒绝 agent）；保守映射，不走工作绑定。
+    case 'enable-roadmap':
+      return 'update';
   }
 }
 
@@ -436,6 +439,9 @@ export function commandTargets(command: Command, outline?: PlanOutline): string[
       return [command.rootNodeId];
     case 'insert-user-template':
       return command.parentId === null ? [] : [command.parentId];
+    // 启用扩展规划不写节点（owner-only）；目标为空。
+    case 'enable-roadmap':
+      return [];
   }
 }
 

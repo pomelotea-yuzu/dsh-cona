@@ -43,8 +43,9 @@ import type {
   WorkNode,
 } from '../domain/types.js';
 import { validateProjectDocument } from '../domain/validate.js';
+import { convertToRoadmap, roadmapEnableDigest } from '../domain/roadmap.js';
 import { UUID_RE } from '../domain/validate-constants.js';
-import { readSourceBaseline } from './baseline.js';
+import { readSourceBaseline, type SourceBaseline } from './baseline.js';
 import { InstanceCommandQueue } from './command-queue.js';
 import type {
   InstanceAggregate,
@@ -152,6 +153,8 @@ export type Command =
     }
   | { type: 'set-dependencies'; dependencies: DependencyEdge[] }
   | { type: 'set-node-status'; nodeId: string; status: NodeStatus }
+  /** 4.2 启用扩展规划：owner 预览后按确认摘要发布 v2（不改节点与记录身份）。 */
+  | { type: 'enable-roadmap'; previewDigest: string }
   | MoveNodeCommand
   | InsertPresetCommand
   | UndoPlanEditCommand
@@ -167,6 +170,8 @@ export type Command =
 const OWNER_ONLY_COMMANDS = new Set<string>([
   'group-nodes', 'merge-nodes', 'copy-subtree',
   'undo-plan-edit', 'redo-plan-edit', 'save-user-template',
+  // 4.2 启用扩展：改变公开格式版本，只能由 owner 在预览确认后发起。
+  'enable-roadmap',
 ]);
 
 /** 可由可信 WorkRun 发起的结构命令（3.3）：缺工作端口时不得降级放行。 */
@@ -220,6 +225,42 @@ export type InversePreviewResult =
       current: CommandCurrent;
     }
   | { status: 'unavailable' | 'conflict' | 'not-found'; direction: InverseDirection; message: string; conflicts?: InverseConflictView[]; current?: CommandCurrent };
+
+/** 路线图只读状态：v1 为“未启用”，v2 给出里程碑节点（不含详情，详情属目标视图）。 */
+export interface RoadmapStateView {
+  schemaVersion: number;
+  planVersion: string;
+  planRevision: number;
+  sourceEpoch: number;
+  enabled: boolean;
+  milestones: { nodeId: string; deliveryCount: number }[];
+}
+
+export type RoadmapStateResult =
+  | { status: 'ok'; roadmap: RoadmapStateView }
+  | { status: 'rejected'; code: string; message: string };
+
+/** 启用前的兼容影响：哪些验证记录会转成历史、身份与版本如何变化。 */
+export interface RoadmapEnableImpact {
+  current: CommandCurrent & { schemaVersion: number };
+  target: { schemaVersion: 2; planVersion: string };
+  /** 启用只创建空集合。 */
+  milestoneCount: 0;
+  identities: { projectId: string; nodeCount: number; recordCount: number };
+  verifications: {
+    recordId: string;
+    summary: string;
+    status: string;
+    subjectVersion: string | null;
+    /** 启用前是否属于当前规划版本（这些记录启用后转为历史，不计入完成依据）。 */
+    currentlyCurrent: boolean;
+  }[];
+  previewDigest: string;
+}
+
+export type RoadmapEnablePreviewResult =
+  | { status: 'available'; impact: RoadmapEnableImpact }
+  | { status: 'rejected'; code: string; message: string };
 
 /** 历史项：每条带逆向信息的已提交 owner 规划操作及其当前撤销/重做可用性。 */
 export interface UndoHistoryEntry {
@@ -476,6 +517,22 @@ export function authorizeTrustedContext(ctx: TrustedContext | undefined, envelop
 
 function originOf(ctx: TrustedContext): OperationOrigin {
   return ctx.kind === 'remote-owner' ? { kind: 'remote-owner' } : { kind: 'agent-work', workRunId: ctx.workRunId };
+}
+
+/** 路线图只读投影：v1 没有 roadmap 字段，按“未启用 + 空里程碑”表达。 */
+function roadmapStateOf(doc: ProjectDocument, sourceEpoch: number, planRevision: number): RoadmapStateView {
+  const milestones = doc.plan.roadmap?.milestones ?? [];
+  return {
+    schemaVersion: doc.schemaVersion,
+    planVersion: doc.planVersion,
+    planRevision,
+    sourceEpoch,
+    enabled: doc.schemaVersion === 2,
+    milestones: milestones.map((milestone) => ({
+      nodeId: milestone.nodeId,
+      deliveryCount: milestone.deliveries.length,
+    })),
+  };
 }
 
 function sameOrigin(a: OperationOrigin, b: OperationOrigin): boolean {
@@ -741,6 +798,108 @@ export class ProjectCommandService {
   }
 
   /** 只读预览：列出可确认指纹、影响范围与冲突，不改变任何状态。 */
+  /**
+   * 只读：当前资料的路线图状态。v1 返回 enabled=false 与空里程碑（界面据此给空态与启用入口），
+   * v2 返回里程碑节点与交付数量；不返回正文，也不改动资料。
+   */
+  async roadmapState(ctx: TrustedContext | undefined, request: { instanceId: string }): Promise<RoadmapStateResult> {
+    const authorized = checkTrustedContext(ctx);
+    if (!authorized.ok) return { status: 'rejected', code: authorized.code, message: authorized.message };
+    const read = await this.readInstanceSource(request?.instanceId);
+    if (!read.ok) return { status: 'rejected', code: read.code, message: read.message };
+    const roadmap = roadmapStateOf(read.doc, read.sourceEpoch, read.planRevision);
+    return { status: 'ok', roadmap };
+  }
+
+  /**
+   * 只读：启用扩展规划前的兼容影响。确认摘要绑定当前资料字节与规划版本，
+   * 预览后任何外部改写都会让提交返回 preview-mismatch。
+   */
+  async previewRoadmapEnable(
+    ctx: TrustedContext | undefined,
+    request: { instanceId: string },
+  ): Promise<RoadmapEnablePreviewResult> {
+    const authorized = checkTrustedContext(ctx);
+    if (!authorized.ok) return { status: 'rejected', code: authorized.code, message: authorized.message };
+    const read = await this.readInstanceSource(request?.instanceId);
+    if (!read.ok) return { status: 'rejected', code: read.code, message: read.message };
+    if (read.doc.schemaVersion === 2) {
+      return { status: 'rejected', code: 'roadmap-already-enabled', message: '该规划已启用扩展（schemaVersion 2）' };
+    }
+    const converted = convertToRoadmap(read.doc, this.deps.sha256);
+    if (!converted.ok) return { status: 'rejected', code: converted.code, message: converted.message };
+    return {
+      status: 'available',
+      impact: {
+        current: {
+          schemaVersion: read.doc.schemaVersion,
+          planVersion: read.doc.planVersion,
+          planRevision: read.planRevision,
+          sourceEpoch: read.sourceEpoch,
+        },
+        target: { schemaVersion: 2, planVersion: converted.toPlanVersion },
+        milestoneCount: 0,
+        identities: {
+          projectId: read.doc.project.id,
+          nodeCount: read.doc.plan.nodes.length,
+          recordCount: read.doc.records.length,
+        },
+        verifications: read.doc.records
+          .filter((record) => record.kind === 'verification')
+          .map((record) => ({
+            recordId: record.id,
+            summary: record.summary,
+            status: record.verification?.status ?? 'untested',
+            subjectVersion: record.verification?.subjectVersion ?? null,
+            currentlyCurrent: record.verification?.subjectVersion === read.doc.planVersion,
+          })),
+        previewDigest: roadmapEnableDigest(
+          {
+            schemaVersion: read.doc.schemaVersion,
+            planVersion: read.doc.planVersion,
+            headHash: read.baseline.headHash,
+          },
+          this.deps.sha256,
+        ),
+      },
+    };
+  }
+
+  /** 只读读路：隔离、注册表、聚合与完整基线一次核对；任何失败都返回稳定码。 */
+  private async readInstanceSource(instanceId: unknown): Promise<
+    | { ok: true; doc: ProjectDocument; baseline: SourceBaseline; sourceEpoch: number; planRevision: number }
+    | { ok: false; code: string; message: string }
+  > {
+    if (typeof instanceId !== 'string' || instanceId === '') {
+      return { ok: false, code: 'operation-mismatch', message: '缺少 instanceId' };
+    }
+    const quarantine = await this.deps.store.readQuarantine(this.deps.localRoot, instanceId);
+    if (quarantine !== null) {
+      return { ok: false, code: 'unknown-state', message: `该实例已隔离（${quarantine.reason}）；先离线核对再读取` };
+    }
+    const registry = await this.deps.store.readRegistry(this.deps.localRoot);
+    const entry = registry.instances.find((item) => item.instanceId === instanceId);
+    if (entry === undefined) return { ok: false, code: 'binding-expired', message: '本机注册表中没有该实例' };
+    const aggregate = await this.deps.store.readAggregate(this.deps.localRoot, instanceId);
+    if (aggregate === null) return { ok: false, code: 'binding-expired', message: '实例聚合缺失；不自动重建' };
+    const baseline = await readSourceBaseline(this.deps.files, entry.sourceRoot, this.deps.sha256, this.deps.clock);
+    if (!baseline.ok) {
+      const first = baseline.issues[0];
+      return {
+        ok: false,
+        code: first?.code ?? 'invalid-project',
+        message: baseline.issues.map((issue) => issue.message).join('；') || '资料不可读',
+      };
+    }
+    return {
+      ok: true,
+      doc: baseline.doc,
+      baseline: baseline.baseline,
+      sourceEpoch: entry.sourceGeneration,
+      planRevision: aggregate.revisions.plan,
+    };
+  }
+
   async previewInverse(ctx: TrustedContext | undefined, request: InversePreviewRequest): Promise<InversePreviewResult> {
     const authorized = checkTrustedContext(ctx);
     if (!authorized.ok) {
@@ -1170,6 +1329,10 @@ export class ProjectCommandService {
     if (envelope.command === undefined || typeof envelope.command.type !== 'string') {
       return { status: 'rejected', code: 'operation-mismatch', message: '缺少命令内容' };
     }
+    if (envelope.command.type === 'enable-roadmap'
+      && !/^sha256:[0-9a-f]{64}$/.test(String(envelope.command.previewDigest))) {
+      return { status: 'rejected', code: 'operation-mismatch', message: '启用扩展需要预览返回的确认摘要' };
+    }
     return null;
   }
 
@@ -1300,6 +1463,33 @@ export class ProjectCommandService {
           sourceEpoch: entry.sourceGeneration,
         },
       };
+    }
+
+    // 4.2 启用扩展规划：版本与确认摘要都在发布前核对；已启用时不重复发布。
+    if (envelope.command.type === 'enable-roadmap') {
+      if (baseline.doc.schemaVersion === 2) {
+        return { status: 'rejected', code: 'roadmap-already-enabled', message: '该规划已启用扩展（schemaVersion 2）' };
+      }
+      const expectedDigest = roadmapEnableDigest(
+        {
+          schemaVersion: baseline.doc.schemaVersion,
+          planVersion: baseline.baseline.planVersion,
+          headHash: baseline.baseline.headHash,
+        },
+        this.deps.sha256,
+      );
+      if (envelope.command.previewDigest !== expectedDigest) {
+        return {
+          status: 'rejected',
+          code: 'preview-mismatch',
+          message: '确认预览已过期：资料字节或规划版本在预览后发生变化；重新预览后再提交',
+          current: {
+            planVersion: baseline.baseline.planVersion,
+            planRevision: aggregate.revisions.plan,
+            sourceEpoch: entry.sourceGeneration,
+          },
+        };
+      }
     }
 
     // 结构命令：按 ID 与版本精确解析随包预设并核对正文语言。解析失败返回稳定码，
@@ -1723,6 +1913,16 @@ export class ProjectCommandService {
       return this.buildCandidate(asRecord, doc, baselineRecords, generated, resolvedPreset, inverseContext, resolvedUserTemplate);
     }
     if (command.type !== 'append-record') {
+      // 4.2：启用扩展不经过规划变换，直接由 v1 文档构造空里程碑候选（节点／记录身份不变）。
+      if (command.type === 'enable-roadmap') {
+        const converted = convertToRoadmap(doc, this.deps.sha256);
+        if (!converted.ok) {
+          return {
+            rejected: { status: 'rejected', code: converted.code, message: converted.message, ...(converted.issues === undefined ? {} : { issues: converted.issues }) },
+          };
+        }
+        return { doc: converted.doc, records: baselineRecords, bodies: [] };
+      }
       const applied = applyPlanCommand(
         doc,
         this.materialize(command, generated.nodeIds ?? [], resolvedPreset, resolvedUserTemplate),
@@ -2032,6 +2232,9 @@ export class ProjectCommandService {
       case 'save-user-template':
         // 用户模板作为公开记录发布，不经领域 PlanCommand 变换。
         throw new Error('用户模板保存命令不能物化为规划命令');
+      case 'enable-roadmap':
+        // 4.2 启用扩展不经过规划变换：候选由 convertToRoadmap 直接从 v1 文档构造。
+        throw new Error('启用扩展规划命令不能物化为规划命令');
       default:
         return command;
     }

@@ -42,6 +42,21 @@ export function serializeProjectDocument(doc: ProjectDocument): string {
         nodeId: edge.nodeId,
         requiresNodeId: edge.requiresNodeId,
       })),
+      // v2 扩展（tasks 4.1／4.2）：v1 文档没有该字段，序列化不补空集合。
+      ...(doc.plan.roadmap === undefined
+        ? {}
+        : {
+            roadmap: {
+              milestones: doc.plan.roadmap.milestones.map((milestone) => ({
+                nodeId: milestone.nodeId,
+                deliveries: milestone.deliveries.map((delivery) =>
+                  delivery.kind === 'node'
+                    ? { kind: delivery.kind, refId: delivery.refId }
+                    : { kind: delivery.kind, refId: delivery.refId, contentHash: delivery.contentHash },
+                ),
+              })),
+            },
+          }),
     },
     planVersion: doc.planVersion,
     records: doc.records.map((record: RecordIndexEntry) => serializeRecord(record)),

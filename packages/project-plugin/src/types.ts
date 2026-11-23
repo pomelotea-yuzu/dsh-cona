@@ -29,6 +29,11 @@ export type {
   UndoHistoryEntry,
   UserTemplateDescriptor,
   UserTemplateListResult,
+  // 4.2 路线图只读状态与启用预览。
+  RoadmapStateView,
+  RoadmapStateResult,
+  RoadmapEnableImpact,
+  RoadmapEnablePreviewResult,
 } from './application/command-service.js'
 export type { InverseDirection } from './domain/inverse.js'
 export type { PresetDescriptor, PresetContentLocale, PresetNodeRef, PresetNodeText, PresetContent, PresetDependencyRef } from './domain/presets.js'

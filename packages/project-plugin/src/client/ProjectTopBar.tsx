@@ -133,6 +133,7 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
           <ResumeCardView state={state.resumeCard} chatNotice={state.chatNotice} controller={controller} t={t} />
           <ChatSection controller={controller} state={state} t={t} />
           <WorkSection controller={controller} state={state} t={t} />
+          <RoadmapSection controller={controller} state={state} t={t} />
           <ResumeSaveSection controller={controller} state={state} t={t} />
           <MigrationSection controller={controller} state={state} t={t} />
           <RegisterSection controller={controller} state={state} t={t} />
@@ -892,6 +893,111 @@ function WorkSection(props: {
         <p data-cona-work-notice="1" style={{ ...rowStyle, color: '#b3261e' }}>
           {work.notice.code}{work.notice.message ? `: ${work.notice.message}` : ''}
         </p>
+      ) : null}
+    </section>
+  );
+}
+
+const ROADMAP_NOTICE_KEY: Record<string, LocaleKey> = {
+  'preview-mismatch': 'roadmapPreviewStale',
+  'roadmap-already-enabled': 'roadmapAlreadyEnabled',
+  'roadmap-unavailable': 'roadmapUnavailable',
+};
+
+/** 4.2 路线图区：v1 空态给启用入口；启用预览展示版本、身份与历史验证影响，确认后显示已启用。 */
+function RoadmapSection(props: { controller: ProjectOverviewController; state: OverviewState; t: TopTranslate }): JSX.Element | null {
+  const { controller, state, t } = props;
+  const { roadmap } = state;
+  if (state.selectedId === null) return null;
+  const view = roadmap.view;
+  const preview = roadmap.preview;
+  const notice = roadmap.notice;
+  const noticeText = notice === null
+    ? ''
+    : ROADMAP_NOTICE_KEY[notice.code] !== undefined
+      ? t(ROADMAP_NOTICE_KEY[notice.code] as LocaleKey)
+      : `${notice.code}${notice.message ? `: ${notice.message}` : ''}`;
+  const currentCount = preview === null ? 0 : preview.impact.verifications.filter((item) => item.currentlyCurrent).length;
+  return (
+    <section data-cona-roadmap="1" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #eee)' }}>
+      <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>{t('roadmapTitle')}</h4>
+      {roadmap.phase === 'loading' ? <p style={rowStyle}>{t('loading')}</p> : null}
+      {roadmap.phase === 'error' && notice !== null ? (
+        <p data-cona-roadmap-notice={notice.code} style={{ ...rowStyle, color: '#b3261e' }}>{noticeText}</p>
+      ) : null}
+      {view !== null && view.enabled ? (
+        <>
+          <p data-cona-roadmap-enabled="1" style={rowStyle}>{t('roadmapEnabled', { count: String(view.milestones.length) })}</p>
+          {view.milestones.length === 0 ? <p style={rowStyle}>{t('roadmapEnabledEmpty')}</p> : null}
+          {view.milestones.map((milestone) => (
+            <div key={milestone.nodeId} data-cona-roadmap-milestone={milestone.nodeId} style={{ fontSize: 12 }}>
+              {milestone.nodeId} · {milestone.deliveryCount}
+            </div>
+          ))}
+        </>
+      ) : null}
+      {view !== null && !view.enabled ? (
+        <>
+          <p data-cona-roadmap-empty="1" style={rowStyle}>{t('roadmapV1Empty')}</p>
+          {preview === null ? (
+            <button
+              type="button"
+              data-cona-roadmap-preview="1"
+              disabled={roadmap.busy}
+              onClick={() => { void controller.beginRoadmapEnable(); }}
+            >
+              {t('roadmapEnable')}
+            </button>
+          ) : (
+            <div data-cona-roadmap-impact="1" style={{ marginTop: 6 }}>
+              <p style={rowStyle}>{t('roadmapImpactTitle')}</p>
+              <p style={rowStyle}>
+                {t('roadmapImpactVersion', {
+                  from: preview.impact.current.planVersion.slice(0, 12),
+                  to: preview.impact.target.planVersion.slice(0, 12),
+                })}
+              </p>
+              <p style={rowStyle}>
+                {t('roadmapImpactIdentity', {
+                  nodes: String(preview.impact.identities.nodeCount),
+                  records: String(preview.impact.identities.recordCount),
+                })}
+              </p>
+              <p style={rowStyle}>
+                {t('roadmapImpactVerifications', {
+                  count: String(preview.impact.verifications.length),
+                  current: String(currentCount),
+                })}
+              </p>
+              {preview.impact.verifications.slice(0, 3).map((item) => (
+                <div key={item.recordId} style={{ fontSize: 12, color: item.currentlyCurrent ? '#8a6d3b' : undefined }}>
+                  · {item.status} {item.summary}
+                </div>
+              ))}
+              <p style={{ margin: '6px 0', display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  data-cona-roadmap-confirm="1"
+                  disabled={roadmap.busy}
+                  onClick={() => { void controller.confirmRoadmapEnable(); }}
+                >
+                  {t('roadmapConfirm')}
+                </button>
+                <button
+                  type="button"
+                  data-cona-roadmap-cancel="1"
+                  disabled={roadmap.busy}
+                  onClick={() => controller.cancelRoadmapEnable()}
+                >
+                  {t('roadmapCancel')}
+                </button>
+              </p>
+            </div>
+          )}
+        </>
+      ) : null}
+      {roadmap.phase !== 'error' && notice !== null ? (
+        <p data-cona-roadmap-notice={notice.code} style={{ ...rowStyle, color: '#b3261e' }}>{noticeText}</p>
       ) : null}
     </section>
   );

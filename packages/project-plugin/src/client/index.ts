@@ -43,6 +43,7 @@ import type {
   MigrationListOpResult,
 } from '../host/overview-service.js'
 import type { LocationKind } from '../application/location.js'
+import type { RoadmapEnableImpact, RoadmapStateView } from '../application/command-service.js'
 
 /** client 侧结果：OwnerDenial 的 null 在 callOverview 归一为 rejected，不进入控制器。 */
 type ResumeChatsView = Exclude<ResumeChatsResult, null>
@@ -287,6 +288,26 @@ function workStart(request: { instanceId: string; workIntentId: string; sessionI
   )
 }
 
+/** 4.2：路线图状态（v1 空态／v2 里程碑节点）。 */
+function roadmapRead(instanceId: string) {
+  return callOverview<{ status: 'ok'; roadmap: RoadmapStateView } | { status: 'rejected'; code: string; message: string }>(
+    'roadmap',
+    { instanceId },
+    (code, message) => ({ status: 'rejected' as const, code, message }),
+  )
+}
+
+/** 4.2：启用扩展规划预览（只读，返回确认摘要）。 */
+function roadmapPreview(instanceId: string) {
+  return callOverview<
+    { status: 'available'; impact: RoadmapEnableImpact } | { status: 'rejected'; code: string; message: string }
+  >(
+    'roadmapPreview',
+    { instanceId },
+    (code, message) => ({ status: 'rejected' as const, code, message }),
+  )
+}
+
 /**
  * 迁移/登记的通用 POST（1.4/1.5）：结果形状是 `{ ok }` 或 `{ status }` 的并集，
  * 与 callOverview 的 status 约束不同。HTTP 失败／形状不合法／OwnerDenial null
@@ -392,6 +413,9 @@ export function apply(ctx: ClientContext): void {
     workPreview,
     workPrepare,
     workStart,
+    // 4.2：路线图状态与启用预览（确认经 conaOverview/execute 发布 v2）。
+    readRoadmap: roadmapRead,
+    previewRoadmapEnable: roadmapPreview,
     // 1.1 探针实证：fiber 注入 uiWorkspace 后 openSession(id) 落到指定 Session。
     // 宿主生成的类型不随插件分发，这里按探针实证的最小结构访问。
     openSession: (sessionId) => {

@@ -127,6 +127,13 @@ node lib/cli/local.js release-lock --local-root <目录> (--force | --token <tok
   伪造指纹都有稳定诊断码（`milestone-node-missing`／`duplicate-milestone`／`duplicate-milestone-delivery`／
   `milestone-delivery-record-missing`／`milestone-delivery-hash-mismatch`／`plan-version-mismatch`）。
 - **普通编辑保留扩展**：结构命令与撤销重做原样保留未被编辑的 `roadmap`；里程碑的专门编辑与完成流程见 4.3。
+- **显式启用（4.2）**：v1 资料不会被普通编辑升级。启用由 owner 先预览兼容影响（目标版本、节点／记录数量、
+  哪些验证记录会按原受检版本转成历史），确认时带预览返回的 `previewDigest` 提交
+  `{"type":"enable-roadmap","previewDigest":"sha256:…"}`；发布只创建空里程碑集合，项目、节点、依赖、
+  记录身份与验证受检版本不变。预览后资料字节变化返回 `preview-mismatch`，已启用返回 `roadmap-already-enabled`；
+  同 `operationId` 重发只回放原回执。启用后无法退回 v1（需要回退按 Git 历史处理）。
+- **旧读者行为**：仍按 v1 的读方（含 `formats/v1/project-v1.schema.json`）看到 `schemaVersion: 2` 时应报未知格式
+  并**保持文件不动**，不得回写覆盖；升级前请确认所有写方都已支持 v2。
 - **独立核对**：`node lib/cli/validate.js check-file <project.json>` 与 `check <资料根>` 对 v1／v2 都可用，
   不依赖 DSH 或本机状态。
 
@@ -155,6 +162,9 @@ node lib/cli/command.js run --local-root <目录> --instance <id> \
 # 记录命令：正文哈希与路径由应用层计算
 node lib/cli/command.js run --local-root <目录> --instance <id> \
   --command '{"type":"append-record","kind":"analysis-note","subjectNodeIds":["<节点>"],"summary":"结论","sources":[],"body":"# 正文\n"}'
+
+# 启用扩展规划（4.2）：previewDigest 只能由 roadmapPreview 预览得到，CLI 不提供预览，
+# 因此该命令只经 owner Remote 发起（conaOverview/roadmapPreview → conaOverview/execute）。
 ```
 
 可选参数：`--expected-plan-version`／`--expected-plan-revision`（覆盖默认基线，用于复现冲突）、`--epoch`、`--trusted remote-owner|agent-work`、`--work-run`、`--binding-version`、`--operation <uuid>`（固定操作 id，用于重试）。

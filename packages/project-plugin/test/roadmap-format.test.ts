@@ -242,3 +242,22 @@ test('4.1 独立校验 CLI：v2 样例通过；篡改指纹后退出码非零并
   }
   assert.ok(failed.includes('plan-version-mismatch'), failed);
 });
+
+test('4.2 资料头序列化保留 v2 roadmap（写回后重新读取仍等价）', async () => {
+  const { serializeProjectDocument } = await import('../src/adapters/fs/project-json.js');
+  const sample = sampleV2();
+  const text = serializeProjectDocument(sample);
+  const parsed = JSON.parse(text) as { plan: { roadmap?: unknown } };
+  assert.deepEqual(parsed.plan.roadmap, sample.plan.roadmap, 'roadmap 不能在建头时被丢掉');
+  const reread = planVersionFromJsonText(text, sha256);
+  assert.deepEqual(reread.issues, []);
+  assert.equal(reread.planVersion, sample.planVersion);
+
+  // v1 文档不因序列化补出 roadmap 字段（v1 字节协议不变）。
+  const v1 = clone(sample);
+  v1.schemaVersion = 1;
+  delete (v1.plan as { roadmap?: unknown }).roadmap;
+  v1.planVersion = computePlanVersion(v1, sha256).planVersion;
+  const v1Text = serializeProjectDocument(v1);
+  assert.equal((JSON.parse(v1Text) as { plan: { roadmap?: unknown } }).plan.roadmap, undefined);
+});

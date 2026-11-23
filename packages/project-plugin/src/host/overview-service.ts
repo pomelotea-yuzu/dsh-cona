@@ -18,6 +18,8 @@ import type {
   CommandResult,
   InversePreviewRequest,
   InversePreviewResult,
+  RoadmapEnablePreviewResult,
+  RoadmapStateResult,
   UndoHistoryResult,
   UserTemplateListResult,
 } from '../application/command-service.js'
@@ -1090,6 +1092,36 @@ export class ConaOverviewService extends TypertRemoteService {
     const result = await runtime.value.command.previewUserTemplate(OWNER_CONTEXT, request)
     if (result.status !== 'available') return { status: 'rejected', code: result.code, message: result.message }
     return { status: 'available', text: result.text, summary: result.summary, nodeCount: result.body.nodes.length }
+  }
+
+  // ---------- 4.2：路线图只读状态与启用预览 ----------
+
+  /** 路线图状态：v1 返回未启用与空里程碑（空态），v2 返回里程碑节点。 */
+  @Remote('roadmap')
+  async roadmap(request: { instanceId: string }): Promise<RoadmapStateResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return { status: 'rejected', code: resolved.denied.code, message: resolved.denied.message }
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.command.roadmapState(OWNER_CONTEXT, { instanceId: request.instanceId })
+  }
+
+  /** 启用扩展规划预览：兼容影响与确认摘要；不写文件。 */
+  @Remote('roadmapPreview')
+  async roadmapPreview(request: { instanceId: string }): Promise<RoadmapEnablePreviewResult> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const badId = this.requireId(request?.instanceId)
+    if (badId !== null) return { status: 'rejected', code: badId.code, message: badId.message }
+    const resolved = await this.resolveInstance(request.instanceId)
+    if ('denied' in resolved) return { status: 'rejected', code: resolved.denied.code, message: resolved.denied.message }
+    const runtime = resolved.runtime
+    if (!runtime.ok) return { status: 'rejected', code: runtime.code, message: runtime.message }
+    return runtime.value.command.previewRoadmapEnable(OWNER_CONTEXT, { instanceId: request.instanceId })
   }
 
   // ---------- 1.1：接入预览与显式登记 ----------

@@ -30,6 +30,7 @@ export type MigrationListView = Exclude<MigrationListOpResult, null>;
 import type { ResumeChatPointerView } from '../application/resume-chat.js';
 import type { ChatsView, ConversationOutcome, SessionChoice } from '../application/conversations.js';
 import type { WorkAction } from '../application/work.js';
+import type { RoadmapEnableImpact, RoadmapStateView } from '../application/command-service.js';
 
 /** client 侧结果：OwnerDenial 的 null 已在传输层归一为 rejected，不再出现在控制器输入。 */
 type ResumeChatsView = Exclude<ResumeChatsResult, null>;
@@ -202,6 +203,25 @@ const EMPTY_CHATS: ChatsState = {
   busy: false,
 };
 
+/** 4.2：路线图区状态。v1 为“未启用 + 空里程碑”；预览持有确认摘要与原 operationId。 */
+export interface RoadmapState {
+  phase: 'idle' | 'loading' | 'ready' | 'error';
+  /** 当前资料的路线图投影；null 表示尚未读取。 */
+  view: RoadmapStateView | null;
+  /** 启用预览：确认摘要与原 operationId（重试复用，不产生第二次发布）。 */
+  preview: { impact: RoadmapEnableImpact; operationId: string } | null;
+  notice: { code: string; message: string } | null;
+  busy: boolean;
+}
+
+const EMPTY_ROADMAP: RoadmapState = {
+  phase: 'idle',
+  view: null,
+  preview: null,
+  notice: null,
+  busy: false,
+};
+
 /** 聊天写入结果（与 ConversationOutcome 同形，client 只读投影）。 */
 export type ChatMutationView<S> =
   | { status: 'committed'; value: S; stateRevision: number }
@@ -370,6 +390,14 @@ export interface OverviewControllerDeps {
   workStart?: (request: { instanceId: string; workIntentId: string; sessionId: string }) => Promise<
     ChatMutationView<{ workIntentId: string; status: 'awaiting-message' }>
   >;
+  /** 4.2：路线图只读状态（conaOverview/roadmap）。 */
+  readRoadmap?: (instanceId: string) => Promise<
+    { status: 'ok'; roadmap: RoadmapStateView } | { status: 'rejected'; code: string; message: string }
+  >;
+  /** 4.2：启用扩展规划预览（conaOverview/roadmapPreview；只读）。 */
+  previewRoadmapEnable?: (instanceId: string) => Promise<
+    { status: 'available'; impact: RoadmapEnableImpact } | { status: 'rejected'; code: string; message: string }
+  >;
 }
 
 export interface OverviewState {
@@ -398,6 +426,8 @@ export interface OverviewState {
   rebindDraft: RebindDraft | null;
   /** 3.2：配置实例的项目工作（草稿、预览、确认与等待消息状态）。 */
   work: WorkState;
+  /** 4.2：路线图区（v1 空态、启用预览与发布状态）。 */
+  roadmap: RoadmapState;
   /** 1.5：迁移操作状态（预览／确认／取消／恢复）。 */
   migration: MigrationState;
   /** 1.1：接入登记状态（预览与显式登记）。 */
@@ -420,6 +450,7 @@ const EMPTY: OverviewState = {
   chats: EMPTY_CHATS,
   rebindDraft: null,
   work: EMPTY_WORK,
+  roadmap: EMPTY_ROADMAP,
   migration: EMPTY_MIGRATION,
   register: EMPTY_REGISTER,
 };
@@ -470,7 +501,10 @@ export class ProjectOverviewController {
       selectedId: selected,
       resumeCard: selected === null ? null : this.state.selectedId === selected ? this.state.resumeCard : null,
     });
-    if (selected !== null && !stillPresent) void this.loadResumeCard(selected);
+    if (selected !== null && !stillPresent) {
+      void this.loadResumeCard(selected);
+      void this.loadRoadmap(selected);
+    }
     if (selected !== null) void this.loadChats(selected);
   }
 
@@ -502,12 +536,160 @@ export class ProjectOverviewController {
       chats: EMPTY_CHATS,
       rebindDraft: null,
       work: EMPTY_WORK,
+      roadmap: EMPTY_ROADMAP,
       migration: EMPTY_MIGRATION,
       register: EMPTY_REGISTER,
     });
     void this.loadResumeCard(instanceId);
     void this.loadChats(instanceId);
+    void this.loadRoadmap(instanceId);
     return true;
+  }
+
+  /** 4.2：读取路线图状态。未装配或读取失败都保留稳定码，不把“读不到”显示成“未启用”。 */
+  async loadRoadmap(instanceId: string): Promise<void> {
+    if (this.deps.readRoadmap === undefined) {
+      if (this.state.selectedId === instanceId) {
+        this.patch({
+          roadmap: { ...EMPTY_ROADMAP, phase: 'error', notice: { code: 'roadmap-unavailable', message: '' } },
+        });
+      }
+      return;
+    }
+    if (this.state.selectedId === instanceId) {
+      this.patch({ roadmap: { ...this.state.roadmap, phase: 'loading', notice: null } });
+    }
+    try {
+      const result = await this.deps.readRoadmap(instanceId);
+      if (this.state.selectedId !== instanceId) return;
+      if (result.status === 'ok') {
+        this.patch({ roadmap: { phase: 'ready', view: result.roadmap, preview: null, notice: null, busy: false } });
+        return;
+      }
+      this.patch({
+        roadmap: { phase: 'error', view: null, preview: null, notice: { code: result.code, message: result.message }, busy: false },
+      });
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({
+        roadmap: {
+          phase: 'error', view: null, preview: null,
+          notice: { code: 'transport-failed', message: (error as Error).message }, busy: false,
+        },
+      });
+    }
+  }
+
+  /** 4.2：启用扩展规划预览（只读）；成功后持有确认摘要与原 operationId。 */
+  async beginRoadmapEnable(): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || this.state.roadmap.busy || this.state.roadmap.preview !== null) return;
+    if (this.deps.previewRoadmapEnable === undefined) {
+      this.patch({ roadmap: { ...this.state.roadmap, notice: { code: 'roadmap-unavailable', message: '' } } });
+      return;
+    }
+    this.patch({ roadmap: { ...this.state.roadmap, busy: true, notice: null } });
+    try {
+      const result = await this.deps.previewRoadmapEnable(instanceId);
+      if (this.state.selectedId !== instanceId) return;
+      if (result.status !== 'available') {
+        this.patch({
+          roadmap: { ...this.state.roadmap, busy: false, notice: { code: result.code, message: result.message } },
+        });
+        return;
+      }
+      this.patch({
+        roadmap: {
+          ...this.state.roadmap,
+          busy: false,
+          notice: null,
+          preview: { impact: result.impact, operationId: this.deps.newOperationId() },
+        },
+      });
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({
+        roadmap: { ...this.state.roadmap, busy: false, notice: { code: 'transport-failed', message: (error as Error).message } },
+      });
+    }
+  }
+
+  /** 取消启用：丢弃预览与摘要；资料未写，重新预览会得到新的 operationId。 */
+  cancelRoadmapEnable(): void {
+    if (this.state.roadmap.preview === null) return;
+    this.patch({ roadmap: { ...this.state.roadmap, preview: null, notice: null } });
+  }
+
+  /**
+   * 4.2：确认启用（owner 显式发布 v2）。
+   * 先按新快照核对预览基线，再用原 operationId 提交；成功后刷新路线图与接续卡片。
+   * 待核对保留预览与原操作 id，重试只核对不产生第二次发布。
+   */
+  async confirmRoadmapEnable(): Promise<void> {
+    const instanceId = this.state.selectedId;
+    const preview = this.state.roadmap.preview;
+    if (instanceId === null || preview === null || this.state.roadmap.busy) return;
+    this.patch({ roadmap: { ...this.state.roadmap, busy: true, notice: null } });
+    const transport = this.deps.transportFor(instanceId);
+    let baseline;
+    try {
+      baseline = await transport.snapshot({ connectionGeneration: 0 });
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({
+        roadmap: { ...this.state.roadmap, busy: false, notice: { code: 'transport-failed', message: (error as Error).message } },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (baseline.status !== 'snapshot') {
+      const code = baseline.status === 'rejected' ? baseline.code : `unsynced-${baseline.reason}`;
+      const message = baseline.status === 'rejected' ? baseline.message : baseline.detail;
+      this.patch({ roadmap: { ...this.state.roadmap, busy: false, notice: { code, message } } });
+      return;
+    }
+    const snap = baseline.snapshot;
+    // 本地先核对：预览后规划已变就不要带旧摘要提交，直接要求重新预览。
+    if (snap.planVersion !== preview.impact.current.planVersion) {
+      this.patch({
+        roadmap: { ...this.state.roadmap, busy: false, preview: null, notice: { code: 'preview-mismatch', message: '' } },
+      });
+      return;
+    }
+    let result;
+    try {
+      result = await transport.execute({
+        operationId: preview.operationId,
+        command: { type: 'enable-roadmap', previewDigest: preview.impact.previewDigest },
+        expectedPlanVersion: snap.planVersion,
+        expectedPlanRevision: snap.planRevision,
+        sourceEpoch: snap.sourceEpoch,
+      });
+    } catch (error) {
+      if (this.state.selectedId !== instanceId) return;
+      this.patch({
+        roadmap: { ...this.state.roadmap, busy: false, notice: { code: 'transport-failed', message: (error as Error).message } },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status === 'committed') {
+      this.patch({ roadmap: { ...this.state.roadmap, busy: false, preview: null, notice: null } });
+      void this.loadRoadmap(instanceId);
+      // 验证记录转为历史：接续卡片的代码观察与验证状态需要重读。
+      void this.loadResumeCard(instanceId);
+      return;
+    }
+    if (result.status === 'pending-reconciliation') {
+      this.patch({
+        roadmap: { ...this.state.roadmap, busy: false, notice: { code: result.stage, message: result.message } },
+      });
+      return;
+    }
+    // 拒绝：预览与摘要可能已过期，清掉并提示重新预览（原 operationId 的拒绝会按幂等重放）。
+    this.patch({
+      roadmap: { ...this.state.roadmap, busy: false, preview: null, notice: { code: result.code, message: result.message } },
+    });
   }
 
   /** 读取当前选中实例的接续卡片；任何失败显示为诊断，不影响实例选择。 */
