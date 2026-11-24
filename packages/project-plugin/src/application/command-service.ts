@@ -1347,6 +1347,7 @@ export class ProjectCommandService {
             planVersion: current.baseline.planVersion,
             headHash: current.baseline.headHash,
             records: current.baseline.records.map((item) => ({
+              ...(item.recordId === undefined ? {} : { recordId: item.recordId }),
               path: item.path,
               contentHash: item.contentHash,
               observedHash: item.observedHash,
@@ -2158,7 +2159,7 @@ export class ProjectCommandService {
   private buildCandidate(
     command: Command,
     doc: ProjectDocument,
-    baselineRecords: { path: string; contentHash: string; observedHash: string }[],
+    baselineRecords: { recordId?: string; path: string; contentHash: string; observedHash: string }[],
     generated: { recordId?: string; nodeIds?: string[] },
     resolvedPreset?: PresetDescriptor,
     inverseContext?: InverseContext,
@@ -2333,7 +2334,7 @@ export class ProjectCommandService {
         }
         return {
           doc: validated.doc,
-          records: [...baselineRecords, { path: recordPath, contentHash, observedHash: contentHash }],
+          records: [...baselineRecords, { recordId, path: recordPath, contentHash, observedHash: contentHash }],
           bodies: [{ recordId, contentHash, path: recordPath, bytes: bytesData.length, bytesData }],
           recordId,
           recordPath,
@@ -2369,7 +2370,7 @@ export class ProjectCommandService {
     }
     return {
       doc: validated.doc,
-      records: [...baselineRecords, { path: recordPath, contentHash, observedHash: contentHash }],
+      records: [...baselineRecords, { recordId: id, path: recordPath, contentHash, observedHash: contentHash }],
       bodies: [{ recordId: id, contentHash, path: recordPath, bytes: bytesData.length, bytesData }],
       recordId: id,
       recordPath,
@@ -2382,7 +2383,7 @@ export class ProjectCommandService {
    */
   private buildInverseCandidate(
     doc: ProjectDocument,
-    baselineRecords: { path: string; contentHash: string; observedHash: string }[],
+    baselineRecords: { recordId?: string; path: string; contentHash: string; observedHash: string }[],
     generated: { recordId?: string; nodeIds?: string[] },
     context: InverseContext,
   ):
@@ -2476,7 +2477,7 @@ export class ProjectCommandService {
     }
     return {
       doc: validated.doc,
-      records: [...baselineRecords, { path: recordPath, contentHash, observedHash: contentHash }],
+      records: [...baselineRecords, { recordId, path: recordPath, contentHash, observedHash: contentHash }],
       bodies: [{ recordId, contentHash, path: recordPath, bytes: bytesData.length, bytesData }],
       recordId,
       recordPath,

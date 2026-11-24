@@ -324,6 +324,31 @@ test('断点一：prepared 后中断，恢复继续复制并提交；取消只�
   rmSync(base2, { recursive: true, force: true });
 });
 
+test('5.2 回归：目标目录预建但为空时中断恢复按未装入继续（与 migrate 准入一致）', async () => {
+  const base = testDir('mig-bp2-empty-');
+  const env = makeEnv(base);
+  const source1 = makeSource(base, 'src');
+  const instanceId = await registerInstance(env, source1);
+  const target = path.join(base, 'target');
+  mkdirSync(target, { recursive: true });
+  const interrupted = await env.migration.migrate(
+    { localDataRoot: env.localRoot, instanceId, toRoot: target, toKind: 'custom' },
+    { duringCopy: async (count) => { if (count >= 1) throw new Error('inject-copy'); } },
+  );
+  assert.equal(interrupted.ok, false);
+  assert.equal((interrupted as any).record.status, 'prepared');
+
+  const recovered = await env.migration.recover({
+    localDataRoot: env.localRoot,
+    operationId: (interrupted as any).record.operationId,
+    confirmDigest: (interrupted as any).record.requestDigest,
+  });
+  assert.equal(recovered.ok, true, JSON.stringify(recovered.ok === false ? recovered.issues : {}));
+  assert.equal((recovered as any).record.status, 'committed');
+  assert.equal(fingerprint(target), fingerprint(source1));
+  rmSync(base, { recursive: true, force: true });
+});
+
 test('断点二：复制中途中断，恢复幂等重复制；候选含意外内容时拒绝', async () => {
   const base = testDir('mig-bp2-');
   const env = makeEnv(base);

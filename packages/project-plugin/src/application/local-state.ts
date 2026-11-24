@@ -648,9 +648,13 @@ export function compareObservation(
   for (const record of previous?.records ?? []) {
     previousKey.set(record.recordId ?? record.path, record);
   }
-  const candidateKey = new Map<string, SourceBaseline['records'][number]>();
+  // 候选同时按 recordId 与 path 建索引：旧基线若缺 recordId（早先提交只写 path），
+  // 仍能按 path 对上同一条记录，不把自身已提交的记录误判为缺失。
+  const candidateIds = new Set<string>();
+  const candidatePaths = new Set<string>();
   for (const record of candidate.records) {
-    candidateKey.set(record.recordId ?? record.path, record);
+    candidateIds.add(record.recordId ?? record.path);
+    candidatePaths.add(record.path);
   }
 
   const recordsAdded: string[] = [];
@@ -658,8 +662,9 @@ export function compareObservation(
   const recordsChanged: string[] = [];
   const diagnostics: LocalIssue[] = [];
 
-  for (const [key, record] of candidateKey) {
-    const old = previousKey.get(key);
+  for (const record of candidate.records) {
+    const key = record.recordId ?? record.path;
+    const old = previousKey.get(key) ?? previousKey.get(record.path);
     if (old === undefined) {
       recordsAdded.push(record.path);
       continue;
@@ -674,7 +679,7 @@ export function compareObservation(
     }
   }
   for (const [key, old] of previousKey) {
-    if (!candidateKey.has(key)) {
+    if (!candidateIds.has(key) && !candidatePaths.has(key)) {
       recordsRemoved.push(old.path);
       diagnostics.push({
         code: 'source-index-loss',
@@ -1037,6 +1042,35 @@ export class LocalStateService {
     return null;
   }
 
+  /**
+   * 单步刷新的停写闸门（5.2 实测）：与预览同源核对候选诊断。
+   * 无诊断放行（返回 undefined）；有诊断且无合法回退证据时原样拒绝；
+   * 有回退证据但确认缺失或 commit 不符时补 `fallback-confirm-missing`。
+   */
+  private stopWriteGate(
+    previous: ObservationBaseline | null,
+    candidate: SourceBaseline,
+    sourceRoot: string,
+    confirmFallback: { commit: string } | undefined,
+  ): LocalIssue[] | undefined {
+    const { diagnostics } = compareObservation(previous, candidate);
+    if (diagnostics.length === 0) return undefined;
+    const gitView = candidate.git ?? this.deps.gitObserve?.(sourceRoot);
+    const fallback = this.verifyFallback(previous, candidate, sourceRoot, gitView);
+    if (fallback === undefined) return diagnostics;
+    if (confirmFallback === undefined || confirmFallback.commit !== fallback.commit) {
+      return [
+        ...diagnostics,
+        {
+          code: 'fallback-confirm-missing',
+          message: `候选为可核对的历史回退（commit ${fallback.commit}）；先 preview-refresh 再带 preview 与 confirm-fallback 接纳`,
+          path: sourceRoot,
+        },
+      ];
+    }
+    return undefined;
+  }
+
   /** 回退证据核对：诊断非空时尝试把候选对齐到当前 HEAD 的真实历史；任何一步失配都不给证据。 */
   private verifyFallback(
     previous: ObservationBaseline | null,
@@ -1151,6 +1185,14 @@ export class LocalStateService {
           };
         }
 
+        const previous = aggregate.lastObservation;
+        // 5.2 实测回归：单步刷新不得隐式越过停写诊断——缺预览时按当前候选就地核对，
+        // 索引缺失／同 ID 改写一律拒绝，合法历史回退另需与证据一致的显式确认。
+        if (request.preview === undefined) {
+          const gate = this.stopWriteGate(previous, request.baseline, entry.sourceRoot, request.confirmFallback);
+          if (gate !== undefined) return { ok: false as const, issues: gate };
+        }
+
         // 1.2：预览接纳两步——锁内重读磁盘并与预览观察逐项比较，预览与接纳之间被改动即拒绝。
         let effectiveBaseline: SourceBaseline = request.baseline;
         if (request.preview !== undefined) {
@@ -1211,7 +1253,6 @@ export class LocalStateService {
           effectiveBaseline = current;
         }
 
-        const previous = aggregate.lastObservation;
         // 差异统一以公开记录身份比较、以协议路径输出（1.2 起与 compareObservation 一致）。
         const changes: RefreshChanges = compareObservation(previous, effectiveBaseline).changes;
         const observedAt = this.deps.clock();

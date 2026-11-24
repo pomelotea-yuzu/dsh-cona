@@ -16,6 +16,7 @@ import type { ProjectDocument, Sha256Fn } from '../src/domain/types.js';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const localCli = path.join(packageRoot, 'lib', 'cli', 'local.js');
+const commandCli = path.join(packageRoot, 'lib', 'cli', 'command.js');
 const sample = path.join(packageRoot, 'formats', 'v1', 'sample-project.json');
 const artifacts = path.join(packageRoot, 'artifacts');
 mkdirSync(artifacts, { recursive: true });
@@ -257,6 +258,78 @@ test('1.3 合法历史回退：预览核实 commit 树逐字节一致，显式�
   assert.equal(accepted.status, 0, JSON.stringify(accepted.json));
   const observation = accepted.json.aggregate?.lastObservation as { headHash?: string } | null;
   assert.equal(observation?.headHash, preview.json.candidate?.headHash, '接纳的是历史候选而非旧基线');
+  rmSync(ctx.base, { recursive: true, force: true });
+});
+
+test('5.2 回归：插件自身追加的记录不得在下次刷新被误报为索引缺失', () => {
+  const ctx = setupGit('r2-accept-self-record-');
+  const genBefore = establishBaseline(ctx);
+
+  // 以命令封套追加一条记录（插件自己写的头与正文）。
+  const appended = execFileSync(
+    process.execPath,
+    [
+      commandCli,
+      'run',
+      '--local-root',
+      ctx.localRoot,
+      '--instance',
+      ctx.instanceId,
+      '--trusted',
+      'remote-owner',
+      '--operation',
+      '99999999-8888-4777-8666-555555552c03',
+      '--command',
+      JSON.stringify({
+        type: 'append-record',
+        kind: 'analysis-note',
+        subjectNodeIds: [SAMPLE_NODE_ID],
+        summary: '自身追加记录',
+        sources: [],
+        body: '# 自身追加\n',
+      }),
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal((JSON.parse(appended) as { status?: string }).status, 'committed', appended);
+
+  // 紧接着刷新：候选就是自己刚发布的头，诊断必须为空。
+  const preview = run(['preview-refresh', '--local-root', ctx.localRoot, '--instance', ctx.instanceId, '--source', ctx.source]);
+  assert.equal(preview.status, 0, JSON.stringify(preview.json));
+  assert.deepEqual((preview.json.diagnostics ?? []).map((issue) => issue.code), [], JSON.stringify(preview.json));
+
+  const previewFile = path.join(ctx.base, 'preview.json');
+  writeFileSync(previewFile, JSON.stringify(preview.json));
+  const accepted = run(['refresh', '--local-root', ctx.localRoot, '--instance', ctx.instanceId, '--source', ctx.source, '--preview-file', previewFile]);
+  assert.equal(accepted.status, 0, JSON.stringify(accepted.json));
+  assert.equal((accepted.json.aggregate?.source.generation ?? 0) > genBefore, true);
+  rmSync(ctx.base, { recursive: true, force: true });
+});
+
+test('5.2 回归：单步 refresh 不得隐式越过停写诊断与历史回退确认', () => {
+  const ctx = setupGit('r2-accept-bare-');
+  establishBaseline(ctx);
+  const genBefore = run(['show', '--local-root', ctx.localRoot, '--instance', ctx.instanceId]).json.aggregate?.source.generation ?? 0;
+
+  // 工作区切回 c1：候选丢 R2、R1 回到原文，与合法回退证据一致。
+  git(ctx.source, ['checkout', '--quiet', '--detach', ctx.commits[0]!]);
+
+  // 不带预览、不带确认的单步刷新必须拒绝，并给出回退确认缺口。
+  const rejected = run(['refresh', '--local-root', ctx.localRoot, '--instance', ctx.instanceId, '--source', ctx.source]);
+  assert.equal(rejected.status, 1, JSON.stringify(rejected.json));
+  const blocked = codes(rejected.json);
+  assert.equal(blocked.includes('source-index-loss'), true, JSON.stringify(rejected.json));
+  assert.equal(blocked.includes('fallback-confirm-missing'), true, JSON.stringify(rejected.json));
+  const afterReject = run(['show', '--local-root', ctx.localRoot, '--instance', ctx.instanceId]);
+  assert.equal(afterReject.json.aggregate?.source.generation, genBefore, '拒绝不得推进源代际');
+
+  // 走预览 + 确认才接纳。
+  const preview = run(['preview-refresh', '--local-root', ctx.localRoot, '--instance', ctx.instanceId, '--source', ctx.source]);
+  assert.equal(preview.status, 0, JSON.stringify(preview.json));
+  const previewFile = path.join(ctx.base, 'preview.json');
+  writeFileSync(previewFile, JSON.stringify(preview.json));
+  const accepted = run(['refresh', '--local-root', ctx.localRoot, '--instance', ctx.instanceId, '--source', ctx.source, '--preview-file', previewFile, '--confirm-fallback']);
+  assert.equal(accepted.status, 0, JSON.stringify(accepted.json));
   rmSync(ctx.base, { recursive: true, force: true });
 });
 

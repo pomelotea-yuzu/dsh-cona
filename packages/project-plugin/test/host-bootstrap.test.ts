@@ -154,21 +154,21 @@ test('5.2 回归：历史回退不得由启动期自动接纳；恢复后重新�
       env: { ...process.env, GIT_CEILING_DIRECTORIES: artifacts },
     });
   };
-  const commitFile = (body: string, message: string): void => {
+  const commitFile = (body: string, message: string, recordId = '00000000-0000-4000-8000-00000000c231'): void => {
     const hash = createHash('sha256').update(body, 'utf8').digest('hex');
-    mkdirSync(path.join(source, 'records', '00000000-0000-4000-8000-00000000c231'), { recursive: true });
-    writeFileSync(path.join(source, 'records', '00000000-0000-4000-8000-00000000c231', hash + '.md'), body);
+    mkdirSync(path.join(source, 'records', recordId), { recursive: true });
+    writeFileSync(path.join(source, 'records', recordId, hash + '.md'), body);
     const doc = JSON.parse(readFileSync(path.join(source, 'project.json'), 'utf8')) as {
       records: { id: string; kind: string; subjectNodeIds: string[]; path: string; contentHash: string; summary: string; sources: string[] }[];
     };
-    doc.records = doc.records.filter((record) => record.id !== '00000000-0000-4000-8000-00000000c231');
+    doc.records = doc.records.filter((record) => record.id !== recordId);
     doc.records.push({
-      id: '00000000-0000-4000-8000-00000000c231',
+      id: recordId,
       kind: 'analysis-note',
       subjectNodeIds: ['00000000-0000-4000-8000-000000000002'],
-      path: 'records/00000000-0000-4000-8000-00000000c231/' + hash + '.md',
+      path: 'records/' + recordId + '/' + hash + '.md',
       contentHash: 'sha256:' + hash,
-      summary: '记录 c231',
+      summary: '记录 ' + recordId.slice(-4),
       sources: [],
     });
     writeFileSync(path.join(source, 'project.json'), JSON.stringify(doc, null, 2) + '\n');
@@ -196,12 +196,20 @@ test('5.2 回归：历史回退不得由启动期自动接纳；恢复后重新�
     JSON.stringify(rejected),
   );
 
-  // 回到 HEAD 前沿：候选合法追加 → 打开成功。
+  // 回到 HEAD 前沿：内容与既有基线一致 → 打开成功，不重复推进代际（代际是订阅替换边界）。
   git(['checkout', '--quiet', '-']);
   const restored = await open(base, { projectRoot: source, localDataRoot: local });
   assert.equal(restored.status, 'opened', JSON.stringify(restored));
   if (restored.status === 'opened') {
-    assert.equal(restored.instance.sourceEpoch > opened.instance.sourceEpoch, true, '恢复后接纳推进代际');
+    assert.equal(restored.instance.sourceEpoch, opened.instance.sourceEpoch, '恢复后无实质变化不推进代际');
+  }
+
+  // 恢复后仍能接纳合法追加：新记录推进代际。
+  commitFile('# R3 原文\n', 'c3: 追加 R3', '00000000-0000-4000-8000-00000000c233');
+  const advanced = await open(base, { projectRoot: source, localDataRoot: local });
+  assert.equal(advanced.status, 'opened', JSON.stringify(advanced));
+  if (advanced.status === 'opened' && opened.status === 'opened') {
+    assert.equal(advanced.instance.sourceEpoch > opened.instance.sourceEpoch, true, '合法追加推进代际');
   }
   rmSync(base, { recursive: true, force: true });
 });

@@ -941,6 +941,9 @@ export class MigrationService {
   private async targetState(record: MigrationRecord): Promise<'absent' | 'installed' | 'conflict'> {
     const files = await this.deps.files.listFiles(record.to.root);
     if (files === null) return 'absent';
+    // 空目录与 migrate 的准入一致（目标存在但无条目即可装入）：恢复时不能把空目标当冲突，
+    // 否则中断在装入之前、目标目录已预建的迁移无法继续，只能人工删目录。
+    if (files.length === 0) return 'absent';
     const manifestPaths = new Set(record.manifest.files.map((file) => file.path));
     if (files.some((item) => !manifestPaths.has(item))) return 'conflict';
     const mismatch = await this.verifyTree(record.to.root, record.manifest, record.to.root);
