@@ -294,7 +294,14 @@ export type RegisterPreviewResult =
         branch?: string;
         dirty: boolean | 'unknown';
         unmerged: boolean | 'unknown';
+        /** 资料根所在 Git 工作树根目录（仅 available 时给出），用于映射建议。 */
+        repositoryRoot?: string;
       } | null;
+      /**
+       * 资料公开记录引用的仓库清单（去重 repositoryId）；登记时按项配置本机
+       * 绝对路径，形成工作副本映射（C01：映射解析相对引用）。
+       */
+      repositories: { repositoryId: string; suggestedPath: string }[];
     }
   | { status: 'rejected'; code: string; message: string }
   | OwnerDenial;
@@ -1146,6 +1153,14 @@ export class ConaOverviewService extends TypertRemoteService {
         message: baseline.issues.map((issue) => issue.message).join('；') || '资料根不可读',
       }
     }
+    // 仓库清单：从公开记录的 sources 去重；建议路径优先 Git 工作树根，退化资料根。
+    const doc = baseline.doc as {
+      records?: { sources?: { repositoryId?: string }[] }[];
+    } | undefined;
+    const repositoryIds = [
+      ...new Set((doc?.records ?? []).flatMap((r) => (r.sources ?? []).map((s) => s.repositoryId ?? '')).filter((id) => id !== '')),
+    ];
+    const repoRoot = baseline.baseline.git?.repositoryRoot;
     return {
       status: 'preview',
       sourceRoot: request.sourceRoot,
@@ -1155,6 +1170,10 @@ export class ConaOverviewService extends TypertRemoteService {
       headHash: baseline.baseline.headHash,
       recordCount: baseline.baseline.records.length,
       git: baseline.baseline.git ?? null,
+      repositories: repositoryIds.map((id) => ({
+        repositoryId: id,
+        suggestedPath: typeof repoRoot === 'string' && repoRoot !== '' ? repoRoot : request.sourceRoot,
+      })),
     }
   }
 
