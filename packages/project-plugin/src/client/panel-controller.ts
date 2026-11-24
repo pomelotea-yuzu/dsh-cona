@@ -1143,10 +1143,13 @@ function commandOf(draft: PanelDraft, snapshot: PanelSnapshot): Command {
     };
   }
   if (draft.kind === 'merge-nodes') {
+    const keepNodeId = draft.keepNodeId ?? draft.nodeId;
     return {
       type: 'merge-nodes',
-      keepNodeId: draft.keepNodeId ?? draft.nodeId,
-      sourceNodeIds: [...(draft.nodeIds ?? [])],
+      keepNodeId,
+      // 来源数组不含保留节点：域层对「保留节点出现在来源里」直接 `invalid-merge-source`，
+      // 预览的来源也是排除后的列表，命令必须与预览一致（5.3 H 层实测暴露）。
+      sourceNodeIds: [...(draft.nodeIds ?? [])].filter((id) => id !== keepNodeId),
       ...(draft.title === undefined && draft.criteria === undefined
         ? {}
         : { patch: {

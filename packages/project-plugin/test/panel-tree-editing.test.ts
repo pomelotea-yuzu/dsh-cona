@@ -121,7 +121,7 @@ test('2.6 分组/合并/复制：预览期间不落盘，确认后提交精确�
   assert.deepEqual(c.preview()?.sources, ['三'], '合并来源不含保留节点');
   await c.save();
   assert.deepEqual(t.calls[1]!.command, {
-    type: 'merge-nodes', keepNodeId: C1, sourceNodeIds: [C1, C3],
+    type: 'merge-nodes', keepNodeId: C1, sourceNodeIds: [C3],
     resolutions: [{ edge: { nodeId: C3, requiresNodeId: C1 }, action: 'drop' }],
   });
 
