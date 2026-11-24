@@ -156,4 +156,4 @@
   - **交付** 复测 V15 实例不符、V32 重连、V37 真实闭环和 V04 卸载重装清理。汇总每条增量 Scenario、矩阵实际状态、历史复测证据以及最终包哈希。
   - **完成检查** 所有纳入本 change 的必验分句都有相应结果。遇到失败、受阻或未测时保留具体原因与待完成工作，收尾结论按矩阵证据确定。修复后在最终包上复测受影响条件，执行 OpenSpec 严格校验和 `pnpm check:ci`，记录结果及可复核交接。
   - **矩阵证据** J07／J08 与各阶段矩阵。
-  - **结果** 最终包 `pack/final/dsh-cona-project-0.1.0.tgz` sha256 `7dcc48b3…`（lib/formats/locale 与 5.5 包逐字节一致，补 LICENSE 与 npm 原生 package.json 字段）；J08 从 `untested` → `pass`（V15 错实例拒绝与同号改参、V32 重连草稿与同源回读、V37 真实 Agent split+record 与重启同源、V04 可逆卸载重装无重复监听且资料哈希不变），J01 更新最终包哈希。OpenSpec 严格校验 10/10 pass。会话内 `pnpm check:ci` 529 项 476 pass/53 fail，失败均为沙箱删除守卫、无断言失败，完整门禁按用户约定待真终端复跑。J04/J07 的 5.6 残留缺口保持 `untested`，不放宽。
+  - **结果** 最终包 `pack/final/dsh-cona-project-0.1.0.tgz` sha256 `7dcc48b3…`（lib/formats/locale 与 5.5 包逐字节一致，补 LICENSE 与 npm 原生 package.json 字段）；J08 从 `untested` → `pass`（V15 错实例拒绝与同号改参、V32 重连草稿与同源回读、V37 真实 Agent split+record 与重启同源、V04 可逆卸载重装无重复监听且资料哈希不变），J01 更新最终包哈希。OpenSpec 严格校验 10/10 pass。完整 `pnpm check:ci` 已由用户真终端通过（Node 24.21.0／pnpm 12.18.0，2026-11-24 确认；会话内 53 项 fail 均为删除守卫、无断言失败）。J04/J07 的 5.6 残留缺口保持 `untested`，不放宽；下一步为归档，待用户确认后执行。
