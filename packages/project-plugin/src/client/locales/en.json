@@ -251,5 +251,6 @@
   "roadmapLocate": "Locate node",
   "roadmapCheckRecord": "Check deliverable",
   "roadmapOpenChat": "Open chat",
-  "roadmapChatNone": "No linked chat"
+  "roadmapChatNone": "No linked chat",
+  "regRepoMapping": "Local mapping for repository {repositoryId} (work copy absolute path)"
 }

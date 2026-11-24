@@ -251,5 +251,6 @@
   "roadmapLocate": "定位节点",
   "roadmapCheckRecord": "核对成果",
   "roadmapOpenChat": "打开聊天",
-  "roadmapChatNone": "暂无关联聊天"
+  "roadmapChatNone": "暂无关联聊天",
+  "regRepoMapping": "本机映射仓库 {repositoryId}（工作副本绝对路径）"
 }

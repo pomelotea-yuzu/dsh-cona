@@ -272,8 +272,12 @@ function RegisterSection(props: { controller: ProjectOverviewController; state: 
   const [, force] = useState(0);
   const [sourceRoot, setSourceRoot] = useState('');
   const [kind, setKind] = useState<(typeof KIND_OPTIONS)[number]>('custom');
+  /** 每个仓库的本机绝对路径（key = repositoryId；空值回退建议路径）。 */
+  const [repoPaths, setRepoPaths] = useState<Record<string, string>>({});
   const register = state.register;
-  if (state.selectedId === null) return null;
+  // 接入不依赖已选中实例：干净环境（零实例）必须能经概览完成首次接入
+  // （C01 规格：干净 DSH 环境显式接入合并后的资料）。登记成功后 load()
+  // 会重新加载实例列表并自动选中首个可读实例。
   const preview = register.preview;
   const gitLine = preview !== null && preview.status === 'preview' && preview.git !== null
     ? preview.git.available
@@ -311,6 +315,17 @@ function RegisterSection(props: { controller: ProjectOverviewController; state: 
           <div>{t('regVersion', { planVersion: preview.planVersion.slice(0, 12) })}</div>
           <div>{t('regRecords', { count: String(preview.recordCount) })}</div>
           {gitLine !== null ? <div>{gitLine}</div> : null}
+          {(preview.repositories ?? []).map((repo) => (
+            <div key={repo.repositoryId} style={{ marginTop: 4 }}>
+              <div>{t('regRepoMapping', { repositoryId: repo.repositoryId })}</div>
+              <input
+                data-cona-reg-repo={repo.repositoryId}
+                value={repoPaths[repo.repositoryId] ?? repo.suggestedPath}
+                style={fieldStyle}
+                onChange={(e) => setRepoPaths((prev) => ({ ...prev, [repo.repositoryId]: e.target.value }))}
+              />
+            </div>
+          ))}
           <div style={{ marginTop: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
             <select value={kind} onChange={(e) => setKind(e.target.value as (typeof KIND_OPTIONS)[number])}>
               {KIND_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -318,7 +333,13 @@ function RegisterSection(props: { controller: ProjectOverviewController; state: 
             <button
               type="button"
               data-cona-reg-confirm="1"
-              onClick={() => { void controller.confirmRegister(preview.sourceRoot, kind, preview.projectId).then(() => force((n) => n + 1)); }}
+              onClick={() => {
+                const maps = (preview.repositories ?? []).map((repo) => ({
+                  repositoryId: repo.repositoryId,
+                  absolutePath: (repoPaths[repo.repositoryId] ?? repo.suggestedPath).trim(),
+                })).filter((m) => m.absolutePath !== '');
+                void controller.confirmRegister(preview.sourceRoot, kind, preview.projectId, maps).then(() => force((n) => n + 1));
+              }}
             >
               {t('regConfirm')}
             </button>

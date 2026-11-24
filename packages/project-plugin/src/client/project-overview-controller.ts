@@ -346,7 +346,7 @@ export interface OverviewControllerDeps {
   /** 1.1：接入预览（conaOverview/registerPreview）。 */
   registerPreview?: (sourceRoot: string) => Promise<RegisterPreviewView>;
   /** 1.1：显式登记（conaOverview/registerSource；预览后由 owner 确认）。 */
-  registerSource?: (request: { sourceRoot: string; sourceKind: LocationKind; projectId: string }) => Promise<RegisterSourceView>;
+  registerSource?: (request: { sourceRoot: string; sourceKind: LocationKind; projectId: string; repositoryMaps?: { repositoryId: string; absolutePath: string }[] }) => Promise<RegisterSourceView>;
   /** 3.1：按实例读取本机聊天链接与待核对意图（conaOverview/chats）。 */
   listChats?: (instanceId: string) => Promise<ConversationOutcome<ChatsView> | { status: 'rejected'; code: string; message: string }>;
   /** 3.1：可选会话（conaOverview/chatSessions；选择已有）。 */
@@ -908,14 +908,19 @@ export class ProjectOverviewController {
   }
 
   /** 显式登记：预览后确认；重复接入同一规范根回到既有实例。 */
-  async confirmRegister(sourceRoot: string, sourceKind: LocationKind, projectId: string): Promise<void> {
+  async confirmRegister(
+    sourceRoot: string,
+    sourceKind: LocationKind,
+    projectId: string,
+    repositoryMaps?: { repositoryId: string; absolutePath: string }[],
+  ): Promise<void> {
     if (this.deps.registerSource === undefined) {
       this.patch({ register: { ...EMPTY_REGISTER, phase: 'error', code: 'register-unavailable', message: null } });
       return;
     }
     this.patch({ register: { ...EMPTY_REGISTER, phase: 'busy' } });
     try {
-      const result = await this.deps.registerSource({ sourceRoot, sourceKind, projectId });
+      const result = await this.deps.registerSource({ sourceRoot, sourceKind, projectId, ...(repositoryMaps && repositoryMaps.length > 0 ? { repositoryMaps } : {}) });
       if (result.status === 'registered') {
         this.patch({ register: { phase: 'ready', preview: this.state.register.preview, message: null, code: null } });
         await this.load();

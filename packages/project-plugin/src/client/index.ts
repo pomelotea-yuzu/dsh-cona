@@ -372,7 +372,7 @@ function registerPreview(sourceRoot: string): Promise<RegisterPreviewView> {
 }
 
 /** 1.1：显式登记（conaOverview/registerSource）。 */
-function registerSource(request: { sourceRoot: string; sourceKind: LocationKind; projectId: string }): Promise<RegisterSourceView> {
+function registerSource(request: { sourceRoot: string; sourceKind: LocationKind; projectId: string; repositoryMaps?: { repositoryId: string; absolutePath: string }[] }): Promise<RegisterSourceView> {
   return callOverview<RegisterSourceView>(
     'registerSource',
     { ...request },

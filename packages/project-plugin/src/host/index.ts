@@ -382,13 +382,19 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
   /** resolveHostConfig 成功后暂存的工作副本映射；assembleRuntime 构造观察闭包时读取。 */
   let configuredWorkCopyRoots: Record<string, string> | undefined
 
-  /** 每实例只读工作副本观察：未配置映射返回 null；观察失败给 unavailable 原因。 */
+  /** 每实例只读工作副本观察：优先配置映射（R1），否则用登记保存的仓库映射
+   *  （5.2：概览接入时按仓库配置）；都未配置返回 null；观察失败给 unavailable 原因。 */
   const observeWorkCopyFor = (instance: import('./bootstrap.js').OpenedInstance) =>
     (instanceId: string): import('../adapters/fs/work-copy.js').WorkCopyObservation | null => {
       if (instanceId !== instance.instanceId) return null
-      const root = configuredWorkCopyRoots?.[instanceId]
-      if (root === undefined) return null
-      return observeWorkCopy(root, [instance.sourceRoot])
+      const configured = configuredWorkCopyRoots?.[instanceId]
+      if (configured !== undefined) return observeWorkCopy(configured, [instance.sourceRoot])
+      const maps = instance.repositoryMaps ?? []
+      if (maps.length === 0) return null
+      // 多仓库映射时优先选择包含资料根的工作副本（路径包含关系）；否则取首个映射。
+      const preferred =
+        maps.find((m) => m.absolutePath !== '' && instance.sourceRoot.startsWith(m.absolutePath + '/')) ?? maps[0]!
+      return observeWorkCopy(preferred.absolutePath, [instance.sourceRoot])
     }
 
   /** 配置实例 A（R1）：解析配置并打开，失败结果被记忆。行为与 R1 完全一致。 */

@@ -7,7 +7,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { readSourceBaseline } from '../application/baseline.js';
-import { LocalStateService, type RegistryEntry } from '../application/local-state.js';
+import { LocalStateService, repositoryMapsOf, type RegistryEntry } from '../application/local-state.js';
 import { MigrationService } from '../application/migration.js';
 import { createMigrationFiles } from '../adapters/fs/migration-files.js';
 import type { GitPrivateRootPort, LocalRootResolverPort, LocalStateStorePort, SourceFilesPort } from '../application/ports.js';
@@ -98,6 +98,8 @@ export interface OpenedInstance {
   created: boolean;
   /** 本次启动建立的完整基线（刷新成功时非空）。 */
   baselineEstablished: boolean;
+  /** 登记保存的本机仓库映射（1.1/5.2）；1.1 前的旧聚合归一化为空数组。 */
+  repositoryMaps: { repositoryId: string; absolutePath: string }[];
 }
 
 export type BootstrapResult =
@@ -217,6 +219,8 @@ export async function openConfiguredInstance(
       localRoot,
       created: !registered.reused,
       baselineEstablished,
+      /** 登记保存的本机仓库映射（1.1/5.2）：存于本机聚合；旧聚合归一化为空数组。 */
+      repositoryMaps: repositoryMapsOf(aggregate?.repositoryMaps),
     },
   };
 }
