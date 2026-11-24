@@ -116,7 +116,9 @@ test('委托控制器：选中切换时改绑，未选中时 getState 安全', a
   // 给两个实例各自设置不同草稿基线，验证隔离
   aController.select('node-a');
   bController.select('node-b');
-  assert.equal(delegate.getState().phase, 'idle'); // 尚未 open，真实 controller 仍是 idle
+  // load() 自动选中首个可读实例后会触发一次 open()（5.1 自愈），A 的 controller
+  // 不再保证停在 idle；这里以 selectedNodeId 断言委托确实绑到 A 的 controller。
+  assert.equal(delegate.getState().selectedNodeId, 'node-a');
   c.select(B);
   // 切换后委托重绑到 B；B 的 controller 与 A 不同
   assert.notEqual(aController, bController);

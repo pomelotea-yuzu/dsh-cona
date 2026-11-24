@@ -504,6 +504,10 @@ export class ProjectOverviewController {
     if (selected !== null && !stillPresent) {
       void this.loadResumeCard(selected);
       void this.loadRoadmap(selected);
+      // 树面板可能在实例列表加载前已挂载（直接点侧边栏入口）：自动选中后触发
+      // 一次 open()，让面板从加载态自愈；用户显式进入（onEnterTree）会再调 open()，
+      // 两次读取按代际过滤，不产生部分结果。
+      void this.panelController(selected).open();
     }
     if (selected !== null) void this.loadChats(selected);
   }
@@ -1672,6 +1676,8 @@ export class DelegatingPanelController implements IPanelController {
   private bound: IPanelController | null = null;
   private unbind: (() => void) | null = null;
   private readonly unsubOverview: () => void;
+  /** 无选中实例时是否已请求过一次概览加载（避免 5s 轮询反复拉取）。 */
+  private ensureLoadRequested = false;
 
   constructor(private readonly overview: ProjectOverviewController) {
     this.unsubOverview = overview.subscribe(() => this.rebind());
@@ -1698,10 +1704,17 @@ export class DelegatingPanelController implements IPanelController {
     }
   }
 
-  private current(): IPanelController {
-    const active = this.bound ?? this.overview.activePanelController();
-    if (active === null) throw new Error('未选择实例');
-    return active;
+  /**
+   * 无选中实例时返回 null 而不是抛错：面板可在概览实例列表加载完成前挂载
+   * （如直接点侧边栏面板图标），同步抛错会炸掉宿主 main slot（5.1 实测）。
+   * 各动作方法按 null 空守卫；概览 load() 自动选中后会触发 open()，面板自愈。
+   */
+  private current(): IPanelController | null {
+    return this.bound ?? this.overview.activePanelController();
+  }
+  private withCurrent(fn: (c: IPanelController) => void): void {
+    const c = this.current();
+    if (c !== null) fn(c);
   }
 
   getState(): PanelState {
@@ -1725,50 +1738,66 @@ export class DelegatingPanelController implements IPanelController {
   isDirty(): boolean { return this.bound?.isDirty() ?? false; }
   isSaved(): boolean { return this.bound?.isSaved() ?? false; }
   isDraftBaselineStale(): boolean { return this.bound?.isDraftBaselineStale() ?? false; }
-  open(): Promise<void> { return this.current().open(); }
-  reconnect(): Promise<void> { return this.current().reconnect(); }
-  markOffline(reason: string): void { this.current().markOffline(reason); }
-  poll(): Promise<IngestOutcome> { return this.current().poll(); }
-  select(nodeId: string): void { this.current().select(nodeId); }
-  toggleSelect(nodeId: string): void { this.current().toggleSelect(nodeId); }
-  clearSelection(): void { this.current().clearSelection(); }
-  editGoal(nodeId: string, goal: string): void { this.current().editGoal(nodeId, goal); }
-  beginAddNode(parentId?: string): void { this.current().beginAddNode(parentId); }
-  beginMove(nodeId: string, parentId: string | null, beforeNodeId: string | null): void { this.current().beginMove(nodeId, parentId, beforeNodeId); }
-  loadPresets(): Promise<void> { return this.current().loadPresets(); }
+  open(): Promise<void> {
+    const c = this.current();
+    if (c === null) {
+      // 侧边栏等直接进入树面板、概览尚未加载时，请求一次实例列表；加载完成后
+      // 自动选中首个可读实例并触发 open()，面板自愈。只请求一次，避免轮询重复拉取。
+      if (!this.ensureLoadRequested) {
+        this.ensureLoadRequested = true;
+        void this.overview.load();
+      }
+      return Promise.resolve();
+    }
+    return c.open();
+  }
+  reconnect(): Promise<void> { const c = this.current(); return c === null ? Promise.resolve() : c.reconnect(); }
+  markOffline(reason: string): void { this.withCurrent((c) => c.markOffline(reason)); }
+  poll(): Promise<IngestOutcome> { const c = this.current(); return c === null ? Promise.resolve('unsynced') : c.poll(); }
+  select(nodeId: string): void { this.withCurrent((c) => c.select(nodeId)); }
+  toggleSelect(nodeId: string): void { this.withCurrent((c) => c.toggleSelect(nodeId)); }
+  clearSelection(): void { this.withCurrent((c) => c.clearSelection()); }
+  editGoal(nodeId: string, goal: string): void { this.withCurrent((c) => c.editGoal(nodeId, goal)); }
+  beginAddNode(parentId?: string): void { this.withCurrent((c) => c.beginAddNode(parentId)); }
+  beginMove(nodeId: string, parentId: string | null, beforeNodeId: string | null): void {
+    this.withCurrent((c) => c.beginMove(nodeId, parentId, beforeNodeId));
+  }
+  loadPresets(): Promise<void> { const c = this.current(); return c === null ? Promise.resolve() : c.loadPresets(); }
   beginInsertPreset(preset: PresetView, contentLocale: string, parentId: string, beforeNodeId: string | null): void {
-    this.current().beginInsertPreset(preset, contentLocale, parentId, beforeNodeId);
+    this.withCurrent((c) => c.beginInsertPreset(preset, contentLocale, parentId, beforeNodeId));
   }
   beginGroup(group: { title: string; goal: string; completionCriteria: string[] }, anchorId: string | null): void {
-    this.current().beginGroup(group, anchorId);
+    this.withCurrent((c) => c.beginGroup(group, anchorId));
   }
   beginMerge(keepNodeId: string, patch: { title?: string; goal?: string; completionCriteria?: string[] }, resolutions: MergeResolutionView[]): void {
-    this.current().beginMerge(keepNodeId, patch, resolutions);
+    this.withCurrent((c) => c.beginMerge(keepNodeId, patch, resolutions));
   }
   beginCopy(parentId: string | null, beforeNodeId: string | null, externalDependencies: { nodeId: string; requiresNodeId: string }[]): void {
-    this.current().beginCopy(parentId, beforeNodeId, externalDependencies);
+    this.withCurrent((c) => c.beginCopy(parentId, beforeNodeId, externalDependencies));
   }
   beginUndo(targetOperationId: string, previewDigest: string, direction: 'undo' | 'redo'): void {
-    this.current().beginUndo(targetOperationId, previewDigest, direction);
+    this.withCurrent((c) => c.beginUndo(targetOperationId, previewDigest, direction));
   }
   beginSaveUserTemplate(templateId: string, title: string, bodyLanguage: string, rootNodeId: string): void {
-    this.current().beginSaveUserTemplate(templateId, title, bodyLanguage, rootNodeId);
+    this.withCurrent((c) => c.beginSaveUserTemplate(templateId, title, bodyLanguage, rootNodeId));
   }
   beginInsertUserTemplate(template: UserTemplateView, parentId: string, beforeNodeId: string | null): void {
-    this.current().beginInsertUserTemplate(template, parentId, beforeNodeId);
+    this.withCurrent((c) => c.beginInsertUserTemplate(template, parentId, beforeNodeId));
   }
-  loadUserTemplates(): Promise<void> { return this.current().loadUserTemplates(); }
-  loadUndoHistory(): Promise<void> { return this.current().loadUndoHistory(); }
+  loadUserTemplates(): Promise<void> { const c = this.current(); return c === null ? Promise.resolve() : c.loadUserTemplates(); }
+  loadUndoHistory(): Promise<void> { const c = this.current(); return c === null ? Promise.resolve() : c.loadUndoHistory(); }
   previewUndoAction(targetOperationId: string, direction: 'undo' | 'redo'): Promise<{ ok: true; previewDigest: string } | { ok: false; code: string; message: string }> {
-    return this.current().previewUndoAction(targetOperationId, direction);
+    const c = this.current();
+    return c === null ? Promise.resolve({ ok: false as const, code: 'no-instance-selected', message: '未选择实例' }) : c.previewUndoAction(targetOperationId, direction);
   }
-  preview(): StructurePreview | null { return this.current().preview(); }
-  retryRead(): Promise<SaveStatus> { return this.current().retryRead(); }
-  editDraft(patch: Partial<Pick<PanelDraft, 'goal' | 'title' | 'criteria'>>): void { this.current().editDraft(patch); }
-  setReason(reason: string): void { this.current().setReason(reason); }
-  discardDraft(): void { this.current().discardDraft(); }
-  save(): Promise<SaveStatus> { return this.current().save(); }
+  preview(): StructurePreview | null { return this.current()?.preview() ?? null; }
+  retryRead(): Promise<SaveStatus> { const c = this.current(); return c === null ? Promise.resolve('idle') : c.retryRead(); }
+  editDraft(patch: Partial<Pick<PanelDraft, 'goal' | 'title' | 'criteria'>>): void { this.withCurrent((c) => c.editDraft(patch)); }
+  setReason(reason: string): void { this.withCurrent((c) => c.setReason(reason)); }
+  discardDraft(): void { this.withCurrent((c) => c.discardDraft()); }
+  save(): Promise<SaveStatus> { const c = this.current(); return c === null ? Promise.resolve('idle') : c.save(); }
   ingest(result: Awaited<ReturnType<PanelTransport['snapshot']>>, generation: number): IngestOutcome {
-    return this.current().ingest(result, generation);
+    const c = this.current();
+    return c === null ? 'unsynced' : c.ingest(result, generation);
   }
 }
