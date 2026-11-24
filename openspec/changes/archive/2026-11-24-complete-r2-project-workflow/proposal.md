@@ -1,10 +1,10 @@
 # 完成 R2 项目工作流
 
-2026-11-22 DSH 与 GLM（Trae）双审确认通过。 [审阅确认](review.md#L345) [已归档的项目概览与工作接续](../archive/2026-11-20-add-project-overview-and-resume/proposal.md) · [已归档的项目树编辑与流程拼接](../archive/2026-11-22-add-project-tree-editing-and-composition/proposal.md)
+2026-11-22 DSH 与 GLM（Trae）双审确认通过。 [审阅确认](review.md#L345) [已归档的项目概览与工作接续](../2026-11-20-add-project-overview-and-resume/proposal.md) · [已归档的项目树编辑与流程拼接](../2026-11-22-add-project-tree-editing-and-composition/proposal.md)
 
 ## Why
 
-R2 已交付顶部项目概览、手动接续卡片、树重排、子树移动和内置开发流程插入。用户还需要搭建自己的开发流程，将同一规划通过 Git 交给其他工作副本，在新环境关联本机聊天并继续工作，以及从共用规划中查看跨分支里程碑及交付依据。把这些能力放在同一个 R2 change 中，按阶段实施，用同一份项目的端到端流程验收。 [R2 开发路线图](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#r2项目树协作与工作接续)
+R2 已交付顶部项目概览、手动接续卡片、树重排、子树移动和内置开发流程插入。用户还需要搭建自己的开发流程，将同一规划通过 Git 交给其他工作副本，在新环境关联本机聊天并继续工作，以及从共用规划中查看跨分支里程碑及交付依据。把这些能力放在同一个 R2 change 中，按阶段实施，用同一份项目的端到端流程验收。 [R2 开发路线图](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#r2项目树协作与工作接续)
 
 ## What Changes
 
@@ -36,4 +36,4 @@ R2 已交付顶部项目概览、手动接续卡片、树重排、子树移动�
 
 按 2026-11-22 用户裁决，目标日期与时间视图先做交互试验，后续单独设计。多实例显式运行切换留待后续 change。R2 在独立干净环境把 B 配为启动配置实例进行接续验收。 [审阅中的用户裁决](review.md#L86)
 
-模板自动提炼、参数化和文件骨架按 R5 推进。实际不同开发环境的完整试用按 R6 推进。Git 协作由用户在各自工作副本中发起。 [路线图实施安排](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#路线图功能的实施安排建议) · [Git 协作决定](../../../docs/knowledge/decisions.md)
+模板自动提炼、参数化和文件骨架按 R5 推进。实际不同开发环境的完整试用按 R6 推进。Git 协作由用户在各自工作副本中发起。 [路线图实施安排](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#路线图功能的实施安排建议) · [Git 协作决定](../../../../docs/knowledge/decisions.md)

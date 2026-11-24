@@ -1,6 +1,6 @@
 # 2026-11-22 作者交接
 
-作者为 Codex 会话。[提案](proposal.md)、[设计](design.md)、五组增量规范、[任务](tasks.md)与[验证矩阵](validation-matrix.md)已根据第二轮复核修订。GLM（Trae）第二轮复核通过，DSH 第三轮确认通过。实施由用户按[仓库工作流](../../../docs/development/workflow.md)另行安排。 [双审结论](review.md#L345)
+作者为 Codex 会话。[提案](proposal.md)、[设计](design.md)、五组增量规范、[任务](tasks.md)与[验证矩阵](validation-matrix.md)已根据第二轮复核修订。GLM（Trae）第二轮复核通过，DSH 第三轮确认通过。实施由用户按[仓库工作流](../../../../docs/development/workflow.md)另行安排。 [双审结论](review.md#L345)
 
 ## 提案中的范围选择
 

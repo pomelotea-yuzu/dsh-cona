@@ -7,9 +7,9 @@
 ### 范围与方法
 
 - 通读 [proposal](proposal.md)、[design](design.md)、五组[增量 specs](specs/)、[tasks](tasks.md)、[validation-matrix](validation-matrix.md) 与[作者交接](2026-11-22-author-handoff.md)。
-- 对照主 specs：[portable-project-data](../../specs/portable-project-data/spec.md)、[project-overview-resume](../../specs/project-overview-resume/spec.md)、[project-tree-editing](../../specs/project-tree-editing/spec.md)、[project-conversation-context](../../specs/project-conversation-context/spec.md)、[project-command-commit](../../specs/project-command-commit/spec.md)、[project-panel-sync](../../specs/project-panel-sync/spec.md)、[plugin-localization](../../specs/plugin-localization/spec.md)。
+- 对照主 specs：[portable-project-data](../../../specs/portable-project-data/spec.md)、[project-overview-resume](../../../specs/project-overview-resume/spec.md)、[project-tree-editing](../../../specs/project-tree-editing/spec.md)、[project-conversation-context](../../../specs/project-conversation-context/spec.md)、[project-command-commit](../../../specs/project-command-commit/spec.md)、[project-panel-sync](../../../specs/project-panel-sync/spec.md)、[plugin-localization](../../../specs/plugin-localization/spec.md)。
 - 对照源码（本会话逐段读取）：`packages/project-plugin/src/domain/`（`types.ts`、`commands.ts`、`transforms.ts`、`validate.ts`、`presets.ts`、`canonical/plan-fingerprint.ts`）、`application/`（`command-service.ts`、`command-queue.ts`、`work.ts`、`local-state.ts`、`baseline.ts`）、`host/`（`index.ts`、`project-service.ts`、`overview-service.ts`、`instance-runtime-registry.ts`、`project-tools.ts`、`session-directory.ts`）与 `formats/v1/plan-canonicalization.md`。
-- 对照文档：[工作流](../../../docs/development/workflow.md)、[决策](../../../docs/knowledge/decisions.md)、[路线图草案](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md)、[路线图功能设计](../../../docs/product/2026-11-12-project-roadmap-design.md)、[资料可移植设计](../../../docs/architecture/2026-11-12-project-data-portability.md)、[总体架构](../../../docs/architecture/2026-11-11-project-development-architecture.md)。
+- 对照文档：[工作流](../../../../docs/development/workflow.md)、[决策](../../../../docs/knowledge/decisions.md)、[路线图草案](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md)、[路线图功能设计](../../../../docs/product/2026-11-12-project-roadmap-design.md)、[资料可移植设计](../../../../docs/architecture/2026-11-12-project-data-portability.md)、[总体架构](../../../../docs/architecture/2026-11-11-project-development-architecture.md)。
 - 只做静态与自动测试核对，未启动真实 DSH 宿主；五组 specs 的 30 个产品 Scenario 仍全部 `untested`。CI 只验证现有代码，不验证本 change 的未来实现。
 
 ### 复跑校验
@@ -27,7 +27,7 @@
 ### 确认通过项
 
 1. **工件齐备，状态诚实。** proposal／design／五组增量 spec／tasks／validation-matrix／author-handoff 齐全；30 个 Scenario 与 C01–C09、E01–E11、W01–W06、M01–M04 逐一对应，J01–J09 覆盖联合验收；tasks 均保留“交付、完成检查、矩阵证据”三段，没有把计划写成已完成。
-2. **总体方向与既有边界一致。** 公开资料继续以 v1 字节规则和独立复算为准，v2 采用显式启用而非静默升级；Git 只读、不自动 commit／merge；将资料位置迁移建模为同一实例的定位变更，避免把 Git 副本接入误当成迁移；聊天仍区分关联与执行绑定。这些都与[资料可移植设计](../../../docs/architecture/2026-11-12-project-data-portability.md)和[总体架构](../../../docs/architecture/2026-11-11-project-development-architecture.md)的既有方向一致。
+2. **总体方向与既有边界一致。** 公开资料继续以 v1 字节规则和独立复算为准，v2 采用显式启用而非静默升级；Git 只读、不自动 commit／merge；将资料位置迁移建模为同一实例的定位变更，避免把 Git 副本接入误当成迁移；聊天仍区分关联与执行绑定。这些都与[资料可移植设计](../../../../docs/architecture/2026-11-12-project-data-portability.md)和[总体架构](../../../../docs/architecture/2026-11-11-project-development-architecture.md)的既有方向一致。
 3. **R2 前两切片的接口被正确复用。** `ProjectCommandService` 的每实例串行队列、`requestDigest`、持久意图、`allocateIds`、`replay`、双修订和同源回读直接支撑本 change 的幂等与恢复目标；`InstanceRuntimeRegistry`、`conaOverview` 的 owner 准入和多实例概览为资料接入、聊天导航与树入口提供了基础；`treePresets`／`insert-preset` 的现有预设路径可作为用户模板的起点。任务与矩阵对这些机制的引用基本准确。
 4. **联合验收的分层清楚。** A／F／H 分层、固定 DSH `0.2.2-rc.2`、同一验收包、真实 Git 和隔离 profile 的要求，延续 R1／R2 的做法；前两切片与 R1 的历史结论保留在原矩阵，未把历史证据当作本 change 的通过证据。
 5. **仓库门禁与 OpenSpec 严格校验通过。** 本 change 的工件没有触发链接、双语、洁净度或协议门禁；现有 341 项测试未回归。
@@ -55,37 +55,37 @@
 
 #### A1 · 新增规划变更缺少命令／事务契约（须处理）
 
-- **事实。** 现有命令入口是单个 `Command`：[command-service.ts](../../../packages/project-plugin/src/application/command-service.ts#L82-L100) 的联合类型只有 `add-nodes`、`update-node`、`split-node`、`set-dependencies`、`set-node-status`、`move-node`、`insert-preset`、`append-record`；`buildCandidate` 只调用一次 `applyPlanCommand`（[同文件](../../../packages/project-plugin/src/application/command-service.ts#L1069-L1070)），而 `PlanCommand` 也是单命令联合（[commands.ts](../../../packages/project-plugin/src/domain/commands.ts#L88-L105)）。本 change 却要求分组／合并／复制在“同一规划提交中整体接受或拒绝”（[增量 spec](specs/project-tree-editing/spec.md#L3-L20)、tasks 2.1／2.2）、路线图日期和里程碑编辑（[增量 spec](specs/project-roadmap/spec.md#L12-L33)、tasks 4.3／4.4）、撤销／重做（[增量 spec](specs/project-tree-editing/spec.md#L22-L34)、tasks 2.3）。
+- **事实。** 现有命令入口是单个 `Command`：[command-service.ts](../../../../packages/project-plugin/src/application/command-service.ts#L82-L100) 的联合类型只有 `add-nodes`、`update-node`、`split-node`、`set-dependencies`、`set-node-status`、`move-node`、`insert-preset`、`append-record`；`buildCandidate` 只调用一次 `applyPlanCommand`（[同文件](../../../../packages/project-plugin/src/application/command-service.ts#L1069-L1070)），而 `PlanCommand` 也是单命令联合（[commands.ts](../../../../packages/project-plugin/src/domain/commands.ts#L88-L105)）。本 change 却要求分组／合并／复制在“同一规划提交中整体接受或拒绝”（[增量 spec](specs/project-tree-editing/spec.md#L3-L20)、tasks 2.1／2.2）、路线图日期和里程碑编辑（[增量 spec](specs/project-roadmap/spec.md#L12-L33)、tasks 4.3／4.4）、撤销／重做（[增量 spec](specs/project-tree-editing/spec.md#L22-L34)、tasks 2.3）。
 - **影响。** 实现者只有两条路：用多个现有命令分多次提交，违反“整体接受或拒绝”并造成中间修订；或在命令服务之外自定义操作，绕过 `requestDigest`、`replay`、`allocateIds`、`noBusinessChange`、回执和同源回读。两条路都会让 tasks 的“复用现有意图机制”失去可执行口径，矩阵也无法判断一次操作到底推进几次修订。
 - **要求。** 在 design 中给出最小契约：为批量树操作、路线图编辑、撤销／重做分别定义命令类型（或显式的命令数组／复合命令）；说明它们如何进入 `requestDigest`、如何冻结生成 ID、如何判定无业务变化、如何返回原回执、如何与 `OWNER_ONLY_COMMANDS`／Agent 动作映射配合。若选择复合命令，还要说明阶段内失败的整体拒绝和重放语义。tasks 至少补一项“新命令摘要与回执”的验证，矩阵补对应分支。
 
 #### A2 · v2 `plan.roadmap` 与既有变换的保留（须处理）
 
-- **事实。** `Plan` 只有 `nodes` 和 `dependencies`（[types.ts](../../../packages/project-plugin/src/domain/types.ts#L27-L45)）；`addNodes`、`moveNode`、`splitNode`、`setNodeStatus`、`setDependencies`、`instantiateTemplate` 都新建只含这两个字段的 `Plan`（例如 [transforms.ts](../../../packages/project-plugin/src/domain/transforms.ts#L44-L47)、[同文件](../../../packages/project-plugin/src/domain/transforms.ts#L171-L174)、[同文件](../../../packages/project-plugin/src/domain/transforms.ts#L287-L290)）。`applyPlanCommand` 直接把变换结果放回文档并重算指纹（[commands.ts](../../../packages/project-plugin/src/domain/commands.ts#L151-L159)）。本 change 在 design 中把路线图放进 `plan.roadmap`（[design](design.md#L49)），但只在“内置流程实例化”一条 MODIFIED Requirement 里写明“v2 资料 MUST 保留已有路线图字段和引用”（[增量 spec](specs/project-tree-editing/spec.md#L66-L77)）；新增的树编辑、撤销／重做和路线图要求没有普遍要求保留 `roadmap`，矩阵 E01–E07 也只覆盖 v1 树操作。
+- **事实。** `Plan` 只有 `nodes` 和 `dependencies`（[types.ts](../../../../packages/project-plugin/src/domain/types.ts#L27-L45)）；`addNodes`、`moveNode`、`splitNode`、`setNodeStatus`、`setDependencies`、`instantiateTemplate` 都新建只含这两个字段的 `Plan`（例如 [transforms.ts](../../../../packages/project-plugin/src/domain/transforms.ts#L44-L47)、[同文件](../../../../packages/project-plugin/src/domain/transforms.ts#L171-L174)、[同文件](../../../../packages/project-plugin/src/domain/transforms.ts#L287-L290)）。`applyPlanCommand` 直接把变换结果放回文档并重算指纹（[commands.ts](../../../../packages/project-plugin/src/domain/commands.ts#L151-L159)）。本 change 在 design 中把路线图放进 `plan.roadmap`（[design](design.md#L49)），但只在“内置流程实例化”一条 MODIFIED Requirement 里写明“v2 资料 MUST 保留已有路线图字段和引用”（[增量 spec](specs/project-tree-editing/spec.md#L66-L77)）；新增的树编辑、撤销／重做和路线图要求没有普遍要求保留 `roadmap`，矩阵 E01–E07 也只覆盖 v1 树操作。
 - **影响。** 一旦 v2 文档带着日期或里程碑，再执行普通的改标题、改条件、移动、拆分、设状态，当前实现形状会把 `roadmap` 丢掉；`planVersion` 随内容变化，用户会看到日期／里程碑消失，而且校验仍可能通过。E10 只测预设插入，无法覆盖这条路径。
 - **要求。** 把“所有规划变换保留未知的 v2 规划扩展字段”写成显式要求，或由 `Plan` 类型／变换层统一携带 `roadmap`；为 v2 上的树编辑增加矩阵场景（至少覆盖 `update-node`、`move-node`、`set-node-status`、`split-node`、`add-nodes` 各一次），并断言日期、里程碑与引用在编辑后仍在。修改 `transforms` 后还要证明 v1 路径不新增字段、v1 指纹不变。
 
 #### A3 · “被替代”关系没有可机读表示（须处理）
 
-- **事实。** `WorkNode` 没有 `replacedBy` 或等价字段（[types.ts](../../../packages/project-plugin/src/domain/types.ts#L27-L35)）。design 说“源节点以原 ID 在原分支保留为取消及被替代的历史，计划变更记录指明保留节点”（[design](design.md#L25)），“在原节点仍取消且该替代关系未被逆向操作解除时，导航显示替代目标”（[design](design.md#L29)）；增量 spec 也要求“原节点以原 ID 保留为已取消与被替代”（[增量 spec](specs/project-tree-editing/spec.md#L16-L20)），路线图要求“被替代……已有引用无法核实时 MUST 提示待核对”（[增量 spec](specs/project-roadmap/spec.md#L12-L24)）。
+- **事实。** `WorkNode` 没有 `replacedBy` 或等价字段（[types.ts](../../../../packages/project-plugin/src/domain/types.ts#L27-L35)）。design 说“源节点以原 ID 在原分支保留为取消及被替代的历史，计划变更记录指明保留节点”（[design](design.md#L25)），“在原节点仍取消且该替代关系未被逆向操作解除时，导航显示替代目标”（[design](design.md#L29)）；增量 spec 也要求“原节点以原 ID 保留为已取消与被替代”（[增量 spec](specs/project-tree-editing/spec.md#L16-L20)），路线图要求“被替代……已有引用无法核实时 MUST 提示待核对”（[增量 spec](specs/project-roadmap/spec.md#L12-L24)）。
 - **影响。** 如果替代关系只写在自由 Markdown 正文里，导航和路线图无法稳定地知道“原节点被谁替代”，只能猜摘要或同名，违反“不靠相同名称自动续接”的既有原则；撤销时也无法判断替代关系是否已解除。E02／M02 的“待核对”“替代目标”缺少可核对的来源。
 - **要求。** 明确替代关系的表示：v2 节点字段、独立的替代记录 schema，或 `plan-change` 记录中可严格解析的结构。给出读取路径、旧 v1 数据无该字段时的行为、撤销时如何解除替代、以及路线图引用遇到替代时的显示规则；补 E02／M02 的具体断言。
 
 #### A4 · 用户模板与现有预设协议不兼容（须处理）
 
-- **事实。** 当前 `InsertPresetCommand` 的 `templateVersion` 是 `number`，预设目录是同步的 `resolve(templateId, templateVersion)`（[command-service.ts](../../../packages/project-plugin/src/application/command-service.ts#L69-L100)）；`PresetDescriptor.source` 固定为 `builtin`（[presets.ts](../../../packages/project-plugin/src/domain/presets.ts#L12-L13)），`validatePreset` 要求 `source === 'builtin'` 且同时具备 `zh-CN` 与 `en` 两种正文语言（[presets.ts](../../../packages/project-plugin/src/domain/presets.ts#L78-L87)）。但 design 说用户模板“版本用不可变记录 ID 标识”，插入命令要冻结“模板来源、精确版本、内容哈希及目标锚点”（[design](design.md#L33-L35)）；tasks 2.4／2.5 只写“发布并读取用户模板版本”“接入精确用户模板版本”。本 change 没有说明如何把记录 ID、`contentHash`、来源、单语言正文和已发布索引读取映射到现有命令／目录／校验器。
+- **事实。** 当前 `InsertPresetCommand` 的 `templateVersion` 是 `number`，预设目录是同步的 `resolve(templateId, templateVersion)`（[command-service.ts](../../../../packages/project-plugin/src/application/command-service.ts#L69-L100)）；`PresetDescriptor.source` 固定为 `builtin`（[presets.ts](../../../../packages/project-plugin/src/domain/presets.ts#L12-L13)），`validatePreset` 要求 `source === 'builtin'` 且同时具备 `zh-CN` 与 `en` 两种正文语言（[presets.ts](../../../../packages/project-plugin/src/domain/presets.ts#L78-L87)）。但 design 说用户模板“版本用不可变记录 ID 标识”，插入命令要冻结“模板来源、精确版本、内容哈希及目标锚点”（[design](design.md#L33-L35)）；tasks 2.4／2.5 只写“发布并读取用户模板版本”“接入精确用户模板版本”。本 change 没有说明如何把记录 ID、`contentHash`、来源、单语言正文和已发布索引读取映射到现有命令／目录／校验器。
 - **影响。** 直接复用现有 `insert-preset` 会因 `templateVersion` 类型、`source` 校验和双语要求失败；若另加命令又未定义摘要、重放、错误码和预览载荷，预览与提交可能读不同版本，或无法从回执判断生成了哪一批节点。模板正文的 `[cona:template]` 前缀和 schema 也还是未定义的实现细节。
 - **要求。** 在 design 中给出最小协议：用户模板的稳定 ID、版本载体（记录 ID＋内容哈希）、来源字段、正文语言集合、`PresetDescriptor` 或独立模板描述类型、读取入口（同步还是异步）、拒绝码；插入命令的字段、摘要、生成 ID、回执与旧版兼容。明确采用 `plan-change` 记录作为模板版本是否只用于格式兼容，并说明它不会污染普通 plan-change 历史或需要额外过滤。tasks 2.4／2.5 和 E06／E07 同步增加“记录 ID／哈希精确匹配”和“单语言正文”观察点。
 
 #### A5 · Agent 的移动／插入动作未接入现有动作模型（须处理；运行实例切换已移出）
 
-- **事实。** 现有 `WorkAction` 只有 `add`、`update`、`split`、`dependencies`、`record`、`status`（[local-state.ts](../../../packages/project-plugin/src/application/local-state.ts#L203-L206)）；`commandAction` 只把 `move-node` 保守映射为 `update`、`insert-preset` 映射为 `add`（[work.ts](../../../packages/project-plugin/src/application/work.ts#L186-L207)），并在注释中说明结构命令由 owner-only 拒绝（[command-service.ts](../../../packages/project-plugin/src/application/command-service.ts#L276-L286)）；`PLANNING_TYPES` 也不含 `move-node`／`insert-preset`（[project-tools.ts](../../../packages/project-plugin/src/host/project-tools.ts#L164-L199)）。本 change 新增 Agent 的 `move-node`／模板插入（[增量 spec](specs/project-conversation-context/spec.md#L30-L37)、[增量 spec](specs/project-tree-editing/spec.md#L52-L64)），design 只写“各自需要明示动作权限”（[design](design.md#L41)），tasks 3.4 没有给出动作名、目标与位置授权、工具入口或 owner-only 的调整方式。
+- **事实。** 现有 `WorkAction` 只有 `add`、`update`、`split`、`dependencies`、`record`、`status`（[local-state.ts](../../../../packages/project-plugin/src/application/local-state.ts#L203-L206)）；`commandAction` 只把 `move-node` 保守映射为 `update`、`insert-preset` 映射为 `add`（[work.ts](../../../../packages/project-plugin/src/application/work.ts#L186-L207)），并在注释中说明结构命令由 owner-only 拒绝（[command-service.ts](../../../../packages/project-plugin/src/application/command-service.ts#L276-L286)）；`PLANNING_TYPES` 也不含 `move-node`／`insert-preset`（[project-tools.ts](../../../../packages/project-plugin/src/host/project-tools.ts#L164-L199)）。本 change 新增 Agent 的 `move-node`／模板插入（[增量 spec](specs/project-conversation-context/spec.md#L30-L37)、[增量 spec](specs/project-tree-editing/spec.md#L52-L64)），design 只写“各自需要明示动作权限”（[design](design.md#L41)），tasks 3.4 没有给出动作名、目标与位置授权、工具入口或 owner-only 的调整方式。
 - **影响。** Agent 的移动／插入无法用现有 `allowedActions` 表达，owner-only 集合会直接拒绝它们；若只扩 `PLANNING_TYPES` 而不改动作模型，会绕过动作范围和位置校验。用户裁决已把“显式运行实例切换”移出本 change，因此本条只需解决“配置实例上的 Agent 结构动作”，不要求同 host 多实例工具路由；B 在新环境作为配置实例执行即可。
 - **要求。** 为 `move-node`／模板插入定义独立动作名，说明 `commandAction`／`commandTargets`／`OWNER_ONLY_COMMANDS` 如何调整，`project_apply` 的 `PLANNING_TYPES` 如何按动作放行；给出源父组、受影响同级、子树、目的组、根组和模板版本的位置授权检查及稳定错误码。tasks 3.4 和 W04 增加“Agent 使用新动作名”“越权位置被拒”“配置实例内获准写入”的观察点；不再要求 W02 或同 host 切换实例。
 
 #### A6 · 范围扩展（用户已裁决）
 
-- **事实。** 已认可的开发路线图把 R2 的目标／时间视图留待后文安排：R2 段写“以同一规划支撑路线图浏览，具体目标／时间视图按后文安排推进”（[路线图](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#L71)），实施安排又写“目标日期、时间窗口、时间轴拖动和依赖改期策略先做交互试验，再确定进入哪个 change”（[同文件](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#L137)）。本 change 把“目标日期编辑与基础时间展示”直接放进 R2 收尾，并在 proposal 中写成用户还需要的能力（[proposal](proposal.md#L5-L15)），但作者交接把它列为“提案中的范围选择”（[交接](2026-11-22-author-handoff.md#L5-L11)），没有引用新的用户授权或决定记录。另，现有 `project-overview-resume` 要求其他实例“界面 MUST 明示项目工作入口不可用”，本 change 改为可显式切换运行实例（[增量 spec](specs/project-overview-resume/spec.md#L3-L13)），这是对已归档 R2 行为的改变。
+- **事实。** 已认可的开发路线图把 R2 的目标／时间视图留待后文安排：R2 段写“以同一规划支撑路线图浏览，具体目标／时间视图按后文安排推进”（[路线图](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#L71)），实施安排又写“目标日期、时间窗口、时间轴拖动和依赖改期策略先做交互试验，再确定进入哪个 change”（[同文件](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#L137)）。本 change 把“目标日期编辑与基础时间展示”直接放进 R2 收尾，并在 proposal 中写成用户还需要的能力（[proposal](proposal.md#L5-L15)），但作者交接把它列为“提案中的范围选择”（[交接](2026-11-22-author-handoff.md#L5-L11)），没有引用新的用户授权或决定记录。另，现有 `project-overview-resume` 要求其他实例“界面 MUST 明示项目工作入口不可用”，本 change 改为可显式切换运行实例（[增量 spec](specs/project-overview-resume/spec.md#L3-L13)），这是对已归档 R2 行为的改变。
 - **影响。** 若用户没有明确同意，这两项属于把“先试验再确定”的范围提前固化；若用户已经同意，change 应补上依据，避免后续审阅者按旧路线图判断为范围漂移。该问题涉及目标与范围取舍，按工作流应由用户裁决，不应由作者或审阅者自行选边。
 - **用户裁决（2026-11-22）。**
   - **目标日期／基础时间视图不纳入本次 R2。** R2 只保留里程碑与交付引用；目标日期、时间视图和日期交互留待后续独立的规划视图 change，先按已认可路线图做交互试验。若本次仍引入 v2，则只为里程碑交付引入；`targetDates` 可以预留但不进入本 change 的验收，不做 M04。
@@ -99,13 +99,13 @@
 
 #### B1 · 里程碑目标视图内容需对齐已认可设计（建议处理；日期／时间视图已移出）
 
-- **事实。** [路线图功能设计](../../../docs/product/2026-11-12-project-roadmap-design.md)的目标视图包含里程碑、成果、完成条件、关键依赖、实际进展、阻塞、下一步，并可从里程碑打开关联聊天；本 change 的 `project-roadmap` Requirement 只承诺同源快照、定位节点／记录、里程碑与交付来源／确认状态／完成依据（[增量 spec](specs/project-roadmap/spec.md#L3-L24)、[design](design.md#L53)）。按 A6 裁决，目标日期／时间视图已移出，因此本条只剩“里程碑目标视图”的内容范围；M01–M03 也没有“显示依赖／进展／阻塞／下一步”或“打开关联聊天”的观察点。
+- **事实。** [路线图功能设计](../../../../docs/product/2026-11-12-project-roadmap-design.md)的目标视图包含里程碑、成果、完成条件、关键依赖、实际进展、阻塞、下一步，并可从里程碑打开关联聊天；本 change 的 `project-roadmap` Requirement 只承诺同源快照、定位节点／记录、里程碑与交付来源／确认状态／完成依据（[增量 spec](specs/project-roadmap/spec.md#L3-L24)、[design](design.md#L53)）。按 A6 裁决，目标日期／时间视图已移出，因此本条只剩“里程碑目标视图”的内容范围；M01–M03 也没有“显示依赖／进展／阻塞／下一步”或“打开关联聊天”的观察点。
 - **影响。** 容易被读成“目标视图已完成”，但对照已认可设计仍缺关键内容；也可能被实现为只有里程碑列表。
 - **建议。** 二选一：补充里程碑目标视图的依赖／进展／阻塞／下一步和聊天入口，并加场景；或在 proposal 的“后续范围”明确本次只交付里程碑列表与交付来源，不宣称覆盖已认可设计的全部目标视图内容。目标日期／时间视图的交互设计留给后续 change，不再在本条要求。
 
 #### B2 · 里程碑证据与受检版本需要数据模型（建议处理）
 
-- **事实。** 现有完成规则只要求 `done` 节点有非空 `completionCriteria`，并存在指向该节点的 `verification.status === 'pass'` 记录（[validate.ts](../../../packages/project-plugin/src/domain/validate.ts#L518-L534)）；`VerificationBlock` 只有 `status`、`subject`、可选 `scope`、`subjectVersion`（[types.ts](../../../packages/project-plugin/src/domain/types.ts#L65-L75)），没有“逐项条件”的结构。design 要求里程碑显式完成时“核对自身每项条件及可追溯的成果或验证记录，保存依据与受检版本，普通状态写入口同样检查该条件”（[design](design.md#L51)），spec 也要求“达成里程碑 MUST 核对自身条件和证据”（[增量 spec](specs/project-roadmap/spec.md#L12-L24)）。此外，v2 转换会把 `schemaVersion` 从 1 改为 2，从而改变 `planVersion`；旧验证记录的 `subjectVersion` 是否会因此被判定失效，change 没有说明。
+- **事实。** 现有完成规则只要求 `done` 节点有非空 `completionCriteria`，并存在指向该节点的 `verification.status === 'pass'` 记录（[validate.ts](../../../../packages/project-plugin/src/domain/validate.ts#L518-L534)）；`VerificationBlock` 只有 `status`、`subject`、可选 `scope`、`subjectVersion`（[types.ts](../../../../packages/project-plugin/src/domain/types.ts#L65-L75)），没有“逐项条件”的结构。design 要求里程碑显式完成时“核对自身每项条件及可追溯的成果或验证记录，保存依据与受检版本，普通状态写入口同样检查该条件”（[design](design.md#L51)），spec 也要求“达成里程碑 MUST 核对自身条件和证据”（[增量 spec](specs/project-roadmap/spec.md#L12-L24)）。此外，v2 转换会把 `schemaVersion` 从 1 改为 2，从而改变 `planVersion`；旧验证记录的 `subjectVersion` 是否会因此被判定失效，change 没有说明。
 - **影响。** M02 的“自身缺证据时拒绝完成，有独立依据时方可完成”目前只能落到“任意一条 pass 记录”，无法核对逐项条件；v2 转换后若按 `subjectVersion` 比较，可能把仅格式升级误判为全部历史验证过期，影响接续卡片和目标视图的可信度。
 - **建议。** 明确证据模型：是一条 verification 记录覆盖全部条件（用 `scope` 说明），还是按条件拆分；`subjectVersion` 在 v2 转换、普通树编辑和路线图编辑后分别如何计算；`set-node-status` 对里程碑的额外检查如何实现。补 M02／M03 的逐项条件与“仅格式升级不使历史验证变成当前通过”的观察点。
 
@@ -117,7 +117,7 @@
 
 #### B4 · 迁移的排他、状态和本地 schema（建议处理）
 
-- **事实。** design 说迁移“通过现有串行队列封住实例写入”（[design](design.md#L15)），但 `InstanceCommandQueue.run` 只是把任务串行化（[command-queue.ts](../../../packages/project-plugin/src/application/command-queue.ts#L4-L23)），本 change 没有定义迁移任务如何进入该队列、如何在长复制期间阻止新命令、迁移意图在 `InstanceAggregate`／`Registry` 中的字段、状态枚举、取消与重启核对，以及已存在的 `registry.json`／`state.json`（`schemaVersion: 1`）如何兼容新增字段。tasks 1.4／1.5 只写了“建立迁移意图”“四处中断”，没有给出可核对的持久形状。
+- **事实。** design 说迁移“通过现有串行队列封住实例写入”（[design](design.md#L15)），但 `InstanceCommandQueue.run` 只是把任务串行化（[command-queue.ts](../../../../packages/project-plugin/src/application/command-queue.ts#L4-L23)），本 change 没有定义迁移任务如何进入该队列、如何在长复制期间阻止新命令、迁移意图在 `InstanceAggregate`／`Registry` 中的字段、状态枚举、取消与重启核对，以及已存在的 `registry.json`／`state.json`（`schemaVersion: 1`）如何兼容新增字段。tasks 1.4／1.5 只写了“建立迁移意图”“四处中断”，没有给出可核对的持久形状。
 - **影响。** 实现者可能把迁移意图临时放内存或自造文件，重启核对和队列排他无法验证；复制期间的新命令可能穿插，破坏“唯一有效写入位置”。
 - **建议。** 在 design 中列出迁移意图的最小字段与状态机、进入队列的方式、刷新／命令的互斥、取消和恢复规则，以及本机 schema 的版本或兼容读取方式；tasks 1.4／1.5 对应增加“复制期间新命令排队”和“旧聚合无迁移字段”的检查。
 
@@ -129,7 +129,7 @@
 
 #### B6 · 活动 change 未登记到接手索引（建议处理）
 
-- **事实。** 本 change 更新了 [openspec/changes/README.md](../README.md#L10)，但没有更新 [AGENTS.md](../../../AGENTS.md)。前两次 change 的提交都把活动 change 写进 `AGENTS.md`（例如 `5797a89` 增加的“活动 change …”行，归档时再替换）；当前 `AGENTS.md` 只写到 R2 第二切片归档，没有指向本 change。`docs/README.md` 的“R1 活动 change”也仍是旧入口（属既有遗留，可顺带修正）。
+- **事实。** 本 change 更新了 [openspec/changes/README.md](../README.md#L10)，但没有更新 [AGENTS.md](../../../../AGENTS.md)。前两次 change 的提交都把活动 change 写进 `AGENTS.md`（例如 `5797a89` 增加的“活动 change …”行，归档时再替换）；当前 `AGENTS.md` 只写到 R2 第二切片归档，没有指向本 change。`docs/README.md` 的“R1 活动 change”也仍是旧入口（属既有遗留，可顺带修正）。
 - **影响。** 新接手的 Agent 从 `AGENTS.md` 看不到当前活动 change，只能翻 `openspec/changes/README.md`；与仓库既有交接习惯不一致。
 - **建议。** 在 `AGENTS.md` 增加一行活动 change 索引（或明确说明本 change 由 `openspec/changes/README.md` 承接），并在归档时按惯例替换。
 
@@ -185,7 +185,7 @@
 ### 确认通过项
 
 1. **工件齐备，内部引用一致。** 30 个 Scenario、39 个矩阵行、29 项任务的三方引用经本审阅独立重算一致；tasks 的矩阵证据 ID、J 行对归档场景的引用均准确；状态诚实，无预勾选、无以计划冒充实测。
-2. **审 1 A1–A5 的事实基础经源码独立复核全部成立。** 本审阅逐条确认：`PlanCommand` 为单命令联合且 `applyPlanCommand` 单次调用一次变换（[commands.ts](../../../packages/project-plugin/src/domain/commands.ts#L88-L162)）；`Plan` 仅 `{nodes, dependencies}`、`WorkNode` 无替代字段（[types.ts](../../../packages/project-plugin/src/domain/types.ts#L27-L45)）；`PresetDescriptor.source` 固定 `builtin`、`validatePreset` 强制 `zh-CN`＋`en` 双语、`InsertPresetCommand.templateVersion` 为 `number`、目录为同步 `resolve`（[presets.ts](../../../packages/project-plugin/src/domain/presets.ts#L45-L87)、[command-service.ts](../../../packages/project-plugin/src/application/command-service.ts#L73-L123)）；`OWNER_ONLY_COMMANDS`＝{`move-node`,`insert-preset`}（[command-service.ts](../../../packages/project-plugin/src/application/command-service.ts#L92-L93)）、`WorkAction` 不含结构动作（[local-state.ts](../../../packages/project-plugin/src/application/local-state.ts#L204-L206)）、`PLANNING_TYPES` 不含结构命令（[project-tools.ts](../../../packages/project-plugin/src/host/project-tools.ts#L164)）。据此 A1（批量／路线图／撤销重做无命令契约）、A2（v2 `roadmap` 会被现有变换静默丢弃）、A3（替代关系无可机读表示）、A4（用户模板与预设协议不兼容）、A5（Agent 结构动作无法接入现有动作模型）五项必改本审阅同样认定。
+2. **审 1 A1–A5 的事实基础经源码独立复核全部成立。** 本审阅逐条确认：`PlanCommand` 为单命令联合且 `applyPlanCommand` 单次调用一次变换（[commands.ts](../../../../packages/project-plugin/src/domain/commands.ts#L88-L162)）；`Plan` 仅 `{nodes, dependencies}`、`WorkNode` 无替代字段（[types.ts](../../../../packages/project-plugin/src/domain/types.ts#L27-L45)）；`PresetDescriptor.source` 固定 `builtin`、`validatePreset` 强制 `zh-CN`＋`en` 双语、`InsertPresetCommand.templateVersion` 为 `number`、目录为同步 `resolve`（[presets.ts](../../../../packages/project-plugin/src/domain/presets.ts#L45-L87)、[command-service.ts](../../../../packages/project-plugin/src/application/command-service.ts#L73-L123)）；`OWNER_ONLY_COMMANDS`＝{`move-node`,`insert-preset`}（[command-service.ts](../../../../packages/project-plugin/src/application/command-service.ts#L92-L93)）、`WorkAction` 不含结构动作（[local-state.ts](../../../../packages/project-plugin/src/application/local-state.ts#L204-L206)）、`PLANNING_TYPES` 不含结构命令（[project-tools.ts](../../../../packages/project-plugin/src/host/project-tools.ts#L164)）。据此 A1（批量／路线图／撤销重做无命令契约）、A2（v2 `roadmap` 会被现有变换静默丢弃）、A3（替代关系无可机读表示）、A4（用户模板与预设协议不兼容）、A5（Agent 结构动作无法接入现有动作模型）五项必改本审阅同样认定。
 3. **A6 用户裁决已具备且可执行。** 裁决内容与缩减清单写在审 1 节内；本审阅确认 change 工件（proposal/design/specs/tasks/matrix）当前仍含目标日期、时间视图与显式运行切换，`docs/knowledge/decisions.md` 亦未见该裁决记录——作者按缩减清单落实并记录依据的工作仍然待做，本审阅不因裁决已存在而降低该项要求。
 4. **方向与既有边界一致。** Git 只读、副本各自独立实例、公开／本机数据分离、执行绑定与聊天关联分离、v1 字节规则保留并按版本分派，均与主 specs 及归档决定相符；验收分层（A/F/H、固定宿主 `0.2.2-rc.2`、同一安装包、隔离 profile）延续前两个切片做法。
 5. **校验独立复现。** OpenSpec 严格校验、仓库门禁（--staged 含全部拟提交工件）、`pnpm check:ci` 三项均由本审阅在本机独立复跑通过；交接所报 1.17.0、0/0、341/341 与实测一致。
@@ -196,9 +196,9 @@
 |---|---|---|
 | D1 | 建议 | C04 判据「尝试两端写入」语义未定：迁移完成后旧根按设计「原样保留」、显式重新接入旧根作独立副本，矩阵应写明「两端写入」各指什么（插件写入只路由到新定位，还是外部写旧根后两实例如何表现），避免执行者各自解读 |
 | D2 | 建议 | tasks 5.6 要求对 O01–O13、T01–T14 按「历史证据及当前变更影响」补跑，但没有给出判定「受影响」的口径（例如引入 v2 字段、批量命令或撤销机制后哪些既有场景算受影响）；作者按 A2 补 v2 树编辑场景后应同步给出 5.6 的受影响清单或判定方法，否则 J04/J07 的复跑范围不可核对 |
-| D3 | 观察 | [workflow.md](../../../docs/development/workflow.md#L42) 门禁描述仍写「79 项测试」，与当前 341 项不符，属既有文档陈旧、非本 change 缺陷，可顺带更新 |
+| D3 | 观察 | [workflow.md](../../../../docs/development/workflow.md#L42) 门禁描述仍写「79 项测试」，与当前 341 项不符，属既有文档陈旧、非本 change 缺陷，可顺带更新 |
 
-对审 1 B／C 级问题的独立核对：B6 成立——[AGENTS.md](../../../AGENTS.md) 现无活动 change 行，仅 `openspec/changes/README.md` 已登记；C4 的 i18n 缺口本审阅同样发现（W01–W03、W05/W06 及模板列表界面缺中英断言）；B1–B5、C1–C3 的依据经抽查未见事实错误。
+对审 1 B／C 级问题的独立核对：B6 成立——[AGENTS.md](../../../../AGENTS.md) 现无活动 change 行，仅 `openspec/changes/README.md` 已登记；C4 的 i18n 缺口本审阅同样发现（W01–W03、W05/W06 及模板列表界面缺中英断言）；B1–B5、C1–C3 的依据经抽查未见事实错误。
 
 ### 结论
 
@@ -213,7 +213,7 @@
 | 意见 | 复核结果 |
 |---|---|
 | A1–A5（必改） | **全部落实。** A1：设计 §2 命令契约给出 8 个新命令的载荷、摘要、冻结 ID、一次权威头原子发布、无变化处理及 owner 准入，新增 spec Requirement「新规划命令的原子发布及回执」、场景 E12 与任务 2.7。A2：设计 §4 与新增「既有规划变换保留里程碑扩展」Requirement（场景 M05）、任务 4.5 穷举新旧变换的保留测试，E10 补 v2 原值断言。A3：`[cona:replacement]` 结构化记录（`sourceNodeIds`／`replacementNodeId`／`clearsRecordId`）可机读，读端按哈希验证的已发布索引投影，旧 v1 无记录时只显示原状态、不推断替代目标，E02／M02 补撤销解除与替代定位断言。A4：内置 `insert-preset` 原协议保留；用户模板走异步目录与 `insert-user-template`，三元组（模板 ID／版本记录 ID／内容哈希）精确匹配、单语言正文、稳定错误码，且模板记录与普通规划历史、接续与 WorkRun 上下文区分。A5：`move`／`insert` 动作、`commandTargets` 影响范围解析、根组单独授权、稳定拒绝码，并按 A6 限定在配置实例 |
-| A6（用户裁决） | **缩减已落实。** W02／M04 移除；`project-conversation-context` 删去运行实例切换 Requirement；`project-overview-resume` 保留「项目工作入口不可用」；`plan.roadmap` 只含 `milestones`；J09 改为独立干净环境配置 B；裁决记入 [decisions.md](../../../docs/knowledge/decisions.md) N19、[AGENTS.md](../../../AGENTS.md) 活动行、proposal「后续范围」及交接 |
+| A6（用户裁决） | **缩减已落实。** W02／M04 移除；`project-conversation-context` 删去运行实例切换 Requirement；`project-overview-resume` 保留「项目工作入口不可用」；`plan.roadmap` 只含 `milestones`；J09 改为独立干净环境配置 B；裁决记入 [decisions.md](../../../../docs/knowledge/decisions.md) N19、[AGENTS.md](../../../../AGENTS.md) 活动行、proposal「后续范围」及交接 |
 | B1–B6 | **全部落实。** B1 目标视图补齐成果、条件、直接依赖、进展、阻塞、下一步与聊天入口（M01）；B2 `complete-milestone` 逐项证据协议（条件索引／原文／记录 ID／哈希）、受检版本语义、v1 证据保持历史；B3 悬空里程碑／重复项拒绝、取消与替代保留历史、`milestone-node-missing`（M03）；B4 队列＋本机锁、registry schema 2 迁移状态机与唯一切换点、旧聚合兼容（C04／C05）；B5 七个稳定诊断码及可确认回退的 commit 树判据（C02／C03）；B6 AGENTS.md 活动行＋docs/README.md 旧入口修正 |
 | C1–C4 | **全部落实。** C1 撤销限定「同源且已有逆向信息」、旧操作禁用有原因、逆向信息仅本机；C2 术语统一（配置／浏览实例、完成条件、`insert-preset` vs `insert-user-template`）并见设计开头定义；C3 tasks 增加阶段交接表；C4 会话、模板、目标视图 Requirement 及 W01／W06／E06 补中英与回退断言 |
 | D1–D3 | **全部落实。** D1 C04 判据改为「实例命令只落新根、外部改旧根不刷新、显式重接入为独立副本」；D2 设计 §5 与 J07 列出固定复跑清单（O02/O03/O06/O07/O08/O10/O11/O12/O13、T01–T14）及其余 O 行的影响核对方式；D3 workflow.md 改为「插件自动测试」 |
@@ -310,7 +310,7 @@
 
 #### R6 · N19 的行号锚点与旧计数（建议）
 
-- **事实。** [decisions.md](../../../docs/knowledge/decisions.md) N19 链接到 `review.md#L86`；该行当前是 A6 标题，但 review 续写后行号会漂移。首轮 review 正文中的 29 项和旧 E11／W6 计数仍是历史文本，容易被后来读者当成当前状态。
+- **事实。** [decisions.md](../../../../docs/knowledge/decisions.md) N19 链接到 `review.md#L86`；该行当前是 A6 标题，但 review 续写后行号会漂移。首轮 review 正文中的 29 项和旧 E11／W6 计数仍是历史文本，容易被后来读者当成当前状态。
 - **建议。** N19 改用节标题锚点（如 `#a6-范围扩展用户已裁决`）或在正文写“见 review 的 A6 节”；review 开头或复审节保留“首轮计数为历史、修订后为 30 项任务／30 Scenario／39 行”的说明。
 
 ### 复审结论
