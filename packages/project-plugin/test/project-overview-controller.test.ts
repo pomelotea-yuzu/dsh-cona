@@ -116,8 +116,8 @@ test('委托控制器：选中切换时改绑，未选中时 getState 安全', a
   // 给两个实例各自设置不同草稿基线，验证隔离
   aController.select('node-a');
   bController.select('node-b');
-  // load() 自动选中首个可读实例后会触发一次 open()（5.1 自愈），A 的 controller
-  // 不再保证停在 idle；这里以 selectedNodeId 断言委托确实绑到 A 的 controller。
+  // 无监听者时委托不自动 open（自愈只在面板订阅后首绑触发），A 停在 idle；
+  // 以 selectedNodeId 断言委托确实绑到 A 的 controller。
   assert.equal(delegate.getState().selectedNodeId, 'node-a');
   c.select(B);
   // 切换后委托重绑到 B；B 的 controller 与 A 不同
@@ -127,6 +127,35 @@ test('委托控制器：选中切换时改绑，未选中时 getState 安全', a
   bController.select('node-b-2');
   // 委托应把 B 的状态推给订阅者
   assert.ok(states.length >= 1);
+  delegate.dispose();
+});
+
+test('自愈：面板已订阅且未选中时 open 触发概览加载，首绑后自动读取一次快照', async () => {
+  let snapshotReads = 0;
+  const c = new ProjectOverviewController({
+    ...stubChatDeps,
+    listInstances: async () => ({
+      status: 'listed',
+      instances: [{ instanceId: A, projectId: 'p', readable: true }],
+    }),
+    readResumeCard: async () => ({ status: 'empty' }),
+    transportFor: () => ({
+      ...transport(),
+      snapshot: async () => {
+        snapshotReads += 1;
+        return { status: 'unsynced', reason: 'unstable', attempts: 0, detail: 'stub' };
+      },
+    }),
+    newOperationId: () => 'op',
+  });
+  const delegate = new DelegatingPanelController(c);
+  delegate.subscribe(() => {}); // 模拟面板挂载订阅
+  assert.equal(delegate.getState().phase, 'idle'); // 未选中：安全空态，不抛错
+  await delegate.open(); // 面板挂载 effect 调用；此时无选中 → 触发概览加载
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(c.getState().selectedId, A); // 概览加载并自动选中首个可读实例
+  assert.ok(snapshotReads >= 1); // 首绑自愈触发了一次面板读取
+  assert.equal(snapshotReads, 1); // 且只读一次：概览加载本身不读快照
   delegate.dispose();
 });
 

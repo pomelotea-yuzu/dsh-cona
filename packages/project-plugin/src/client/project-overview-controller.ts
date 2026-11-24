@@ -504,10 +504,8 @@ export class ProjectOverviewController {
     if (selected !== null && !stillPresent) {
       void this.loadResumeCard(selected);
       void this.loadRoadmap(selected);
-      // 树面板可能在实例列表加载前已挂载（直接点侧边栏入口）：自动选中后触发
-      // 一次 open()，让面板从加载态自愈；用户显式进入（onEnterTree）会再调 open()，
-      // 两次读取按代际过滤，不产生部分结果。
-      void this.panelController(selected).open();
+      // 树面板的加载由委托控制器在首次绑定（且面板已订阅）时触发 open()，
+      // 概览自身加载不读快照：预览/打开聊天等流程对快照读取次数有硬性契约。
     }
     if (selected !== null) void this.loadChats(selected);
   }
@@ -1694,6 +1692,7 @@ export class DelegatingPanelController implements IPanelController {
   private rebind(): void {
     const next = this.overview.activePanelController();
     if (next === this.bound) return;
+    const firstBind = next !== null && this.bound === null;
     this.unbind?.();
     this.bound = next;
     this.unbind = next === null ? null : next.subscribe((state) => {
@@ -1701,6 +1700,10 @@ export class DelegatingPanelController implements IPanelController {
     });
     if (next !== null) {
       for (const listener of this.listeners) listener(next.getState());
+      // 面板已挂载订阅、且实例在面板挂载后才完成加载选中（如直接点侧边栏入口）
+      // 时，没有人调用过 open()：首次绑定且存在监听者时触发一次读取，面板自愈。
+      // 仅委托触发；概览自身加载不读快照，预览/聊天流程的读取次数契约不受影响。
+      if (firstBind && this.listeners.size > 0) void next.open();
     }
   }
 
