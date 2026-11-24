@@ -39,6 +39,7 @@ function openedRuntime(instanceId: string): RuntimeResult {
     localRoot: '/local',
     created: false,
     baselineEstablished: true,
+    repositoryMaps: [],
   };
   // 表的测试只关心 instance 身份；其余服务用占位，满足 ConaProjectRuntime 形状。
   return { ok: true, value: { instance } as never };

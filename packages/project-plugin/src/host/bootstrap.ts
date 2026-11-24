@@ -10,6 +10,8 @@ import { readSourceBaseline } from '../application/baseline.js';
 import { LocalStateService, repositoryMapsOf, type RegistryEntry } from '../application/local-state.js';
 import { MigrationService } from '../application/migration.js';
 import { createMigrationFiles } from '../adapters/fs/migration-files.js';
+import { readGitStatus } from '../adapters/fs/git-status.js';
+import { createGitHistory } from '../adapters/fs/git-history.js';
 import type { GitPrivateRootPort, LocalRootResolverPort, LocalStateStorePort, SourceFilesPort } from '../application/ports.js';
 import type { Sha256Fn } from '../domain/types.js';
 
@@ -190,10 +192,62 @@ export async function openConfiguredInstance(
   let entry = registered.entry;
   let baselineEstablished = observation !== null;
   if (!upToDate) {
+    // 5.2：已有观察基线时，启动刷新前先做候选预览比较（与 1.2／1.3 的停写协议一致）。
+    // 依赖环在基线读取阶段已拒绝；索引缺失、同 ID 正文改写与历史回退不得由启动期
+    // 静默接纳——回退必须经显式确认（显式确认入口由 CLI `refresh --confirm-fallback` 提供）。
+    let preview: Awaited<ReturnType<typeof deps.localState.previewRefresh>> | null = null;
+    if (observation !== null) {
+      const previewed = await deps.localState.previewRefresh({
+        localDataRoot: localRoot,
+        instanceId: registered.entry.instanceId,
+        source: effectiveRoot,
+      });
+      if (!previewed.ok) {
+        return {
+          status: 'failed',
+          code: previewed.issues[0]?.code ?? 'cona-refresh-failed',
+          message: previewed.issues.map((issue) => issue.message).join('；'),
+          issues: previewed.issues.map((issue) => ({ code: issue.code, message: issue.message })),
+        };
+      }
+      if (previewed.diagnostics.length > 0) {
+        const first = previewed.diagnostics[0]!;
+        return {
+          status: 'failed',
+          code: first.code,
+          message:
+            previewed.fallback !== undefined
+              ? `候选为可核对的历史回退（commit ${previewed.fallback.commit}）；启动期不自动回退，需显式确认后接纳（CLI refresh --confirm-fallback）`
+              : first.message,
+          issues: previewed.diagnostics,
+        };
+      }
+      preview = previewed;
+    }
     const refreshed = await deps.localState.refresh({
       localDataRoot: localRoot,
       instanceId: registered.entry.instanceId,
       baseline: baseline.baseline,
+      // 预览通过时携带候选观察：refresh 在写入锁内重读并与预览逐项比较，预览与
+      // 接纳之间资料再变化时拒绝（source-observation-changed），不覆盖中间变化。
+      ...(preview === null
+        ? {}
+        : {
+            source: effectiveRoot,
+            preview: {
+              headHash: preview.candidate.headHash,
+              records: preview.candidate.records.map((record) => ({
+                recordId: record.recordId,
+                path: record.path,
+                contentHash: record.contentHash,
+                observedHash: record.observedHash,
+              })),
+              diagnostics: preview.diagnostics,
+              ...(preview.fallback === undefined
+                ? {}
+                : { fallback: { commit: preview.fallback.commit, repositoryRoot: preview.fallback.repositoryRoot } }),
+            },
+          }),
     });
     if (!refreshed.ok) {
       return {
@@ -247,6 +301,22 @@ export function createLocalStateService(wiring: HostWiring, notify?: Constructor
     clock: wiring.clock,
     newInstanceId: wiring.newInstanceId,
     ...(notify === undefined ? {} : { notify }),
+    // 5.2：候选预览依赖（与 CLI local 装配同源）——启动期打开实例先做预览比较，
+    // 停写诊断（索引缺失／正文改写／历史回退）不经确认不得自动接纳。
+    readBaseline: (root: string) => readSourceBaseline(wiring.files, root, wiring.sha256, wiring.clock),
+    gitObserve: (root: string) => {
+      const view = readGitStatus(root, { projectFile: 'project.json' });
+      return {
+        available: view.available,
+        repositoryRoot: view.repositoryRoot,
+        headCommit: view.headCommit,
+        branch: view.branch,
+        unmerged: view.unmerged,
+        dirty: view.dirty,
+      };
+    },
+    gitHistory: (root: string) => createGitHistory(root),
+    sha256: wiring.sha256,
   });
 }
 

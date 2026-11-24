@@ -126,6 +126,7 @@ async function setup(name: string): Promise<Fixture> {
     localRoot,
     created: false,
     baselineEstablished: true,
+    repositoryMaps: [],
   };
   const runtime = { ok: true as const, value: { instance, snapshot, command, chats: {} as never, resumeChats: {} as never, work } };
   const adapter = new ProjectToolAdapter({ runtime: async () => runtime });
