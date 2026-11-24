@@ -64,6 +64,56 @@ test('3.1 新建会话：同工作区空白会话优先复用，没有才新建�
   assert.deepEqual(created, ['blank-a', '(new)']);
 });
 
+test('5.4 聊天会话落在宿主可见工作区：按路径复用或创建，create 只带 workspaceId', async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const calls: string[] = [];
+  const attached: string[] = [];
+  const workspace = (workspaceId: string) => ({
+    id: workspaceId,
+    async attachSession(sessionId: string) {
+      attached.push(workspaceId + ':' + sessionId);
+    },
+  });
+  const registry = {
+    async resolveByPath(path: string) {
+      calls.push('resolve:' + path);
+      return path === ROOT_A ? workspace('ws-a') : undefined;
+    },
+    async create(path: string) {
+      calls.push('create:' + path);
+      return workspace('ws-b');
+    },
+  };
+  const ctx = {
+    sessionController: {
+      async list() {
+        return { items: [] };
+      },
+      async create(request: Record<string, unknown>) {
+        requests.push(request);
+        return { sessionId: 'session-ws' };
+      },
+    },
+    get(name: string) {
+      return name === 'workspaceRegistry' ? registry : undefined;
+    },
+  } as unknown as Context;
+
+  const a = sessionDirectory(ctx, ROOT_A);
+  assert.equal(a.ok, true);
+  if (!a.ok) return;
+  assert.equal((await a.directory.createSession()).sessionId, 'session-ws');
+  assert.deepEqual(requests[0], { workspaceId: 'ws-a' }, '复用已登记工作区，不重复创建');
+
+  const b = sessionDirectory(ctx, ROOT_B);
+  assert.equal(b.ok, true);
+  if (!b.ok) return;
+  await b.directory.createSession();
+  assert.deepEqual(requests[1], { workspaceId: 'ws-b' }, '没有工作区时先创建再挂在它下面');
+  assert.deepEqual(calls, ['resolve:' + ROOT_A, 'resolve:' + ROOT_B, 'create:' + ROOT_B]);
+  assert.deepEqual(attached, ['ws-a:session-ws', 'ws-b:session-ws'], '新建会话登记进工作区，否则宿主列表不可见');
+});
+
 test('3.1 宿主未提供 sessionController：稳定拒绝，不抛裸异常给上层', async () => {
   const result = sessionDirectory({} as unknown as Context, ROOT_A);
   assert.equal(result.ok, false);

@@ -21,7 +21,7 @@ import { inspectPrivateRoot } from '../src/adapters/fs/git-guard.js';
 import { ProjectSnapshotService } from '../src/application/snapshot.js';
 import { ProjectCommandService } from '../src/application/command-service.js';
 import { InMemoryChangeStream } from '../src/application/change-stream.js';
-import { ProjectToolAdapter, type ConaToolExec } from '../src/host/project-tools.js';
+import { ProjectToolAdapter, defineProjectTools, type ConaToolExec } from '../src/host/project-tools.js';
 import type { OpenedInstance } from '../src/host/bootstrap.js';
 import type { Sha256Fn } from '../src/domain/types.js';
 
@@ -427,5 +427,15 @@ test('6.3 runtime 不可用：四个工具都以稳定拒绝码返回，不抛�
     const output = (await run()) as { status: string; code: string };
     assert.equal(output.status, 'rejected', `${name} 应稳定拒绝`);
     assert.equal(output.code, 'binding-expired', `${name} 应透传 runtime 拒绝码`);
+  }
+});
+
+test('5.4 project_receipt 输出 schema 覆盖命中回执的 committed 字段', () => {
+  const definitions = defineProjectTools({} as unknown as ProjectToolAdapter);
+  const receipt = definitions.find((item) => item.name === 'project_receipt');
+  assert.ok(receipt, 'project_receipt 已定义');
+  const properties = (receipt.output?.schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+  for (const field of ['status', 'operationId', 'impact', 'planVersion', 'planRevision', 'stateRevision', 'sourceEpoch', 'replayed', 'code', 'message']) {
+    assert.ok(field in properties, `回执 schema 应声明 ${field}`);
   }
 });

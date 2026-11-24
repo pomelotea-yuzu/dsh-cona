@@ -251,6 +251,10 @@ export interface ConaOverviewWorkPrepareRequest {
   reasonScope: 'public' | 'local';
   purpose: string;
   baseline: WorkBaseline;
+  /** 根组重排许可：owner 显式授予；缺省不授权（tasks 3.3）。 */
+  rootGroupAllowed?: boolean;
+  /** 插入模板的精确授权；缺省空授权（tasks 3.3）。 */
+  templates?: import('../application/local-state.js').WorkTemplateAuthorization[];
 }
 
 /**
@@ -901,6 +905,8 @@ export class ConaOverviewService extends TypertRemoteService {
       purpose: request.purpose,
       baseline: { ...request.baseline },
       origin: 'panel',
+      ...(request.rootGroupAllowed === undefined ? {} : { rootGroupAllowed: request.rootGroupAllowed === true }),
+      ...(request.templates === undefined ? {} : { templates: request.templates.map((item) => ({ ...item })) }),
     })
   }
 

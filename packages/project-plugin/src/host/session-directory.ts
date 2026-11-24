@@ -12,8 +12,21 @@ import type { ProjectDocument, Sha256Fn } from '../domain/types.js'
 
 /** 与 dsh-api-session-controller 的 SessionController 运行时形态对齐的最小结构。 */
 interface SessionControllerLike {
-  create(request: { sessionId?: string; cwd?: string }): Promise<{ sessionId: unknown }>;
+  create(request: { sessionId?: string; cwd?: string; workspaceId?: string }): Promise<{ sessionId: unknown }>;
   list(signal?: AbortSignal): Promise<{ items?: ReadonlyArray<Record<string, unknown>> }>;
+}
+
+/** 宿主工作区登记表的最小形态（5.4 H 层实测：会话必须落在已登记工作区里，
+ *  否则 Web UI 的会话列表不收录、`openSession` 导航到空态）。 */
+interface WorkspaceLike {
+  /** 宿主 Workspace 实体的身份字段是 `id`（不是工作区视图的 workspaceId）。 */
+  id: string;
+  /** 让新建会话进入该工作区；宿主会话列表与导航都以这份记账为准。 */
+  attachSession(sessionId: string): Promise<void>;
+}
+interface WorkspaceRegistryLike {
+  resolveByPath(path: string): Promise<WorkspaceLike | undefined>;
+  create(path: string, title?: string): Promise<WorkspaceLike>;
 }
 
 export type SessionDirectoryResult =
@@ -31,6 +44,18 @@ export function sessionDirectory(ctx: Context, cwd: string): SessionDirectoryRes
   if (controller === undefined) {
     return { ok: false, message: '宿主未提供 sessionController 服务（inject 缺失或宿主版本不符）' };
   }
+  // 可选依赖：拿不到工作区登记表时退回只按 cwd 新建（旧宿主行为）。
+  const context = ctx as Context & { get?: <T>(name: string) => T | undefined };
+  const workspaces = typeof context.get === 'function'
+    ? context.get<WorkspaceRegistryLike>('workspaceRegistry')
+    : undefined;
+  /** 让本实例资料根成为宿主可见工作区；同路径幂等复用。 */
+  async function workspaceOf(): Promise<WorkspaceLike | undefined> {
+    if (workspaces === undefined) return undefined;
+    const existing = await workspaces.resolveByPath(cwd);
+    if (existing !== undefined) return existing;
+    return workspaces.create(cwd);
+  }
   return {
     ok: true,
     directory: {
@@ -39,14 +64,27 @@ export function sessionDirectory(ctx: Context, cwd: string): SessionDirectoryRes
         const blank = items.find(
           (item) => item['blank'] === true && item['cwd'] === cwd && typeof item['sessionId'] === 'string',
         );
+        // create 只接受 workspaceId 或 cwd 之一：有工作区时用 workspaceId（其路径即 cwd）。
+        const workspace = await workspaceOf();
         const request =
           blank !== undefined
-            ? { sessionId: blank['sessionId'] as string, cwd }
-            : { cwd };
+            ? { sessionId: blank['sessionId'] as string, ...(workspace === undefined ? { cwd } : { workspaceId: workspace.id }) }
+            : workspace === undefined
+              ? { cwd }
+              : { workspaceId: workspace.id };
         const value = await controller.create(request);
         const sessionId = value?.sessionId;
         if (typeof sessionId !== 'string' || sessionId === '') {
           throw new Error('宿主 create 未返回有效 sessionId');
+        }
+        // 会话只会因工作区记账才出现在宿主会话列表、才能被 openSession 导航；
+        // 宿主 sessionController.create 本身不记账（5.4 H 层实测）。
+        if (workspace !== undefined) {
+          try {
+            await workspace.attachSession(sessionId);
+          } catch (error) {
+            console.warn(`[dsh-cona-project] 会话 ${sessionId} 未能登记到工作区 ${workspace.id}：${(error as Error).message}`);
+          }
         }
         return { sessionId };
       },

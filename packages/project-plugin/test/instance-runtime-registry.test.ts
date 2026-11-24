@@ -93,6 +93,21 @@ test('不同实例各自装配，A 的运行时不被 B 覆盖', async () => {
   }
 });
 
+test('5.4 宿主异步装配后回填配置实例：工作入口归属与不可释放语义生效', async () => {
+  const rows: RegistryEntry[] = [entry(A, '/projects/a'), entry(B, '/projects/b')];
+  const registry = new InstanceRuntimeRegistry({
+    listEntries: async () => rows,
+    open: async (input) => openedRuntime(input.instanceId),
+    describeLocation: (root) => root,
+  });
+  assert.equal(registry.configuredInstanceId(), undefined, '异步打开前未知');
+  registry.setConfigured(A, async () => openedRuntime(A));
+  assert.equal(registry.configuredInstanceId(), A);
+  assert.equal((await registry.overviewRows()).find((row) => row.instanceId === A)?.configured, true);
+  assert.equal((await registry.overviewRows()).find((row) => row.instanceId === B)?.configured, false);
+  assert.equal(registry.release(A), false, '配置实例不因闲置回收释放');
+});
+
 test('3.1 实例行标注配置归属：只有启动配置实例 configured=true（含不可读行）', async () => {
   const reg = new InstanceRuntimeRegistry({
     listEntries: async () => [entry(A, '/projects/a'), entry(B, '/projects/b')],

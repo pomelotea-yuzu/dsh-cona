@@ -623,7 +623,9 @@ export function defineProjectTools(adapter: ProjectToolAdapter): ConaToolDefinit
         required: ['operationId'],
       },
       output: {
-        schema: REJECTED_SCHEMA,
+        // 命中回执会带 committed 字段（impact/planVersion/replayed…），只声明 rejected
+        // 形状会让真实宿主的输出校验把成功回执判成 schema 错误（5.4 真实 Agent 实测）。
+        schema: COMMITTED_SCHEMA,
         render(_args, value) { return renderJson(value); },
       },
       execute: (args, exec) => adapter.receipt(args, exec),

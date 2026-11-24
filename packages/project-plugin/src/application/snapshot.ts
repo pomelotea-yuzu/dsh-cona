@@ -301,8 +301,12 @@ export class ProjectSnapshotService {
     }
 
     // 迟到的旧代际请求：先核对代际再读任何内容。
+    // 0 是概览等一次性 owner 读的哨兵（未建立订阅），读到的就是当前内容，
+    // 不构成“旧连接快照覆盖新状态”；只有明确声明了更早正代际的订阅请求才拒绝。
+    // 5.4 H 层实测：真实宿主里面板订阅推进代际后，概览的工作预览／接续保存
+    // 全部以 0 请求，被误判 stale-connection，功能不可用。
     const latest = this.deps.stream.latestGeneration(request.instanceId);
-    if (latest !== null && request.connectionGeneration < latest) {
+    if (latest !== null && request.connectionGeneration > 0 && request.connectionGeneration < latest) {
       return rejection(
         'stale-connection',
         `连接代际 ${request.connectionGeneration} 已被 ${latest} 取代；请按新代际重新订阅后回读`,

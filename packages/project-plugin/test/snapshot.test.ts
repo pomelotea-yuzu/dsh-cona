@@ -442,6 +442,13 @@ test('先订阅再回读：提交通知可读，刷新后代际替换并关闭�
   assert.equal(stale.status, 'rejected', JSON.stringify(stale));
   assert.equal(stale.status === 'rejected' ? stale.code : '', 'stale-connection');
 
+  // 一次性 owner 读（概览的工作预览／接续保存）声明 0＝无订阅，读当前内容，
+  // 不因面板订阅已推进代际而被拒（5.4 H 层实测修复）。
+  const oneShot = expectSnapshot(
+    await snapshots(ctx).read(OWNER, { instanceId: ctx.instanceId, connectionGeneration: 0 }),
+  );
+  assert.equal(oneShot.sourceEpoch, 2, '一次性 owner 读取当前内容');
+
   const after = expectSnapshot(
     await snapshots(ctx).read(OWNER, {
       instanceId: ctx.instanceId,

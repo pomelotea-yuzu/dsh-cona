@@ -65,12 +65,25 @@ export interface InstanceRuntimeRegistryDeps {
  */
 export class InstanceRuntimeRegistry {
   private readonly runtimes = new Map<string, Promise<RuntimeResult>>();
+  /** 启动配置实例 id；宿主在实际打开成功后回填（异步装配，构造时未知）。 */
+  private configuredId: string | undefined;
 
   constructor(private readonly deps: InstanceRuntimeRegistryDeps) {
     const configured = deps.configured;
     if (configured !== undefined) {
+      this.configuredId = configured.instanceId;
       this.runtimes.set(configured.instanceId, configured.runtime());
     }
+  }
+
+  /**
+   * 宿主装配完成后登记配置实例（R2 5.4 实测发现：构造时只注入 runtime 不够，
+   * `configuredInstanceId()` 为空会让真实宿主的项目工作入口一律判为不可用）。
+   * 重复调用以最后一次为准，仍复用同一 runtime promise。
+   */
+  setConfigured(instanceId: string, runtime: () => Promise<RuntimeResult>): void {
+    this.configuredId = instanceId;
+    this.register(instanceId, runtime());
   }
 
   /** 取（或懒装配）指定实例的运行时；未登记实例由调用方先做准入，不在本层放行。 */
@@ -99,7 +112,7 @@ export class InstanceRuntimeRegistry {
 
   /** 释放某实例的运行时（闲置回收/刷新）；配置实例的任何释放请求都被忽略。 */
   release(instanceId: string): boolean {
-    if (this.deps.configured?.instanceId === instanceId) return false;
+    if (this.configuredId === instanceId) return false;
     return this.runtimes.delete(instanceId);
   }
 
@@ -109,7 +122,7 @@ export class InstanceRuntimeRegistry {
    */
   async overviewRows(): Promise<OverviewInstanceRow[]> {
     const entries = await this.deps.listEntries();
-    const configuredId = this.deps.configured?.instanceId;
+    const configuredId = this.configuredId;
     const rows: OverviewInstanceRow[] = [];
     for (const entry of entries) {
       const configured = configuredId === entry.instanceId;
@@ -149,7 +162,7 @@ export class InstanceRuntimeRegistry {
 
   /** 宿主启动配置实例 id；无配置实例时 undefined。项目工作入口只对它可用。 */
   configuredInstanceId(): string | undefined {
-    return this.deps.configured?.instanceId;
+    return this.configuredId;
   }
 
   /** 已登记实例 id 集合（供定向访问的准入判断）。 */

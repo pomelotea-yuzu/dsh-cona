@@ -473,9 +473,11 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
     open: openInstanceRuntime,
     describeLocation: (root) => describeRoot(root).displayPath,
   })
-  // 配置实例 A 的运行时注入表中，与概览/既有 Remote 共享同一个 promise。
+  // 配置实例 A 的运行时注入表中，与概览/既有 Remote 共享同一个 promise；
+  // 同时回填 configured 归属——工作入口只对这个实例可用（5.4 H 层实测修复：
+  // 此前 registry 构造时未传 configured，真实宿主把它一律标成浏览实例）。
   void shared().then((result) => {
-    if (result.ok) instanceRegistry.register(result.value.instance.instanceId, shared())
+    if (result.ok) instanceRegistry.setConfigured(result.value.instance.instanceId, shared)
   })
 
   // 宿主事件自动订阅（tasks 6.6）：真实 inbox／turn 事件经 work-events 适配器
