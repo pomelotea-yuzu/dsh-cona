@@ -18,7 +18,9 @@ R2 首切片 `openspec/changes/archive/2026-11-20-add-project-overview-and-resum
 
 R2 第二切片 `openspec/changes/archive/2026-11-22-add-project-tree-editing-and-composition/` 已于 2026-11-22 归档：增量 spec `project-tree-editing`（6 Req／14 Scenario）并入主 `openspec/specs/`、纯新增未改既有规范；17 项 tasks 全部勾选，矩阵 T01/T02/T03/T05/T06/T07/T08/T09/T10/T14 为 `pass`，T04（B 无建聊天入口，Session 分句）、T11（H 层中断/迟到响应）、T13（无 verification 记录可核）保持 `untested`，T12 真实 Agent 分句因 profile 未登录 `blocked`（owner 侧 7/7 有 H 证据）。固定 DSH `0.2.2-rc.2` 宿主实测包 sha256 `8c4f26ce…08ff17ddd`，焦点恢复缺陷于 4.x 修复；逐条见该归档的 validation-matrix 与 [收尾核对](openspec/changes/archive/2026-11-22-add-project-tree-editing-and-composition/implementation/2026-11-22-archive-final-audit.md)。
 
-R2 收尾 `openspec/changes/archive/2026-11-24-complete-r2-project-workflow/` 已于 2026-11-24 归档：五份增量 specs 并入主 `openspec/specs/`（新增 `project-roadmap`，更新其余四份），全部实施任务 5.1–5.8 勾选，J01／J08／J09 `pass`，J04／J07 因 5.6 未做的 H 分句保持 `untested` 不放宽。完整 `pnpm check:ci` 已由用户真终端通过（Node 24.21.0／pnpm 12.18.0）；归档后 OpenSpec 严格校验 10/10。最终验收包 sha256 `7dcc48b3…`；见 [归档核对](openspec/changes/archive/2026-11-24-complete-r2-project-workflow/implementation/2026-11-24-archive-final-audit.md) 与 [交接](openspec/changes/archive/2026-11-24-complete-r2-project-workflow/implementation/2026-11-24-handoff.md)。**当前无活动 change**，逐条状态以归档的 tasks 与 validation-matrix 为准。
+R2 收尾 `openspec/changes/archive/2026-11-24-complete-r2-project-workflow/` 已于 2026-11-24 归档：五份增量 specs 并入主 `openspec/specs/`（新增 `project-roadmap`，更新其余四份），全部实施任务 5.1–5.8 勾选，J01／J08／J09 `pass`，J04／J07 因 5.6 未做的 H 分句保持 `untested` 不放宽。完整 `pnpm check:ci` 已由用户真终端通过（Node 24.21.0／pnpm 12.18.0）；归档后 OpenSpec 严格校验 10/10。最终验收包 sha256 `7dcc48b3…`；见 [归档核对](openspec/changes/archive/2026-11-24-complete-r2-project-workflow/implementation/2026-11-24-archive-final-audit.md) 与 [交接](openspec/changes/archive/2026-11-24-complete-r2-project-workflow/implementation/2026-11-24-handoff.md)。逐条状态以归档的 tasks 与 validation-matrix 为准。
+
+当前活动 change 为 [add-project-analysis](openspec/changes/add-project-analysis/proposal.md)，涵盖 R3 首切片项目分析与复盘，以及 GitHub Actions／Gitee Go 共同的 Git 测试夹具故障。2026-11-25 已完成 DSH 和 GLM 复核及提交前修订，实施待安排。
 
 ## 权威性
 
