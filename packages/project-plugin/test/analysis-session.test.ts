@@ -34,6 +34,8 @@ class FakeAnalysisSession implements AnalysisSessionPort {
   sessions: DirectorySession[] = [];
   promptCalls: Array<{ sessionId: string; requestId: string; text: string }> = [];
   promptError: Error | null = null;
+  cancelCalls: string[] = [];
+  cancelError: Error | null = null;
 
   async createAnalysisSession(input: { cwd: string; agentPreset: string }): Promise<{ sessionId: string; agentPreset?: string }> {
     this.calls.push(input);
@@ -49,6 +51,12 @@ class FakeAnalysisSession implements AnalysisSessionPort {
   async promptFirstMessage(input: { sessionId: string; requestId: string; text: string }): Promise<{ accepted: true }> {
     this.promptCalls.push(input);
     if (this.promptError !== null) throw this.promptError;
+    return { accepted: true };
+  }
+
+  async cancelSession(input: { sessionId: string }): Promise<{ accepted: true }> {
+    this.cancelCalls.push(input.sessionId);
+    if (this.cancelError !== null) throw this.cancelError;
     return { accepted: true };
   }
 }
@@ -109,6 +117,7 @@ function makeHarness(options?: {
   planVersion?: string | (() => Promise<{ ok: true; planVersion: string } | { ok: false; code: string; message: string }>);
   analyses?: unknown;
   hooks?: AnalysisSessionServiceDeps['hooks'];
+  onTerminal?: AnalysisSessionServiceDeps['onTerminal'];
 }): Harness {
   const localRoot = mkdtempSync(path.join(artifacts, 'analysis-session-'));
   const repo = path.join(localRoot, 'repo');
@@ -144,6 +153,7 @@ function makeHarness(options?: {
     newAnalysisId: () => `analysis-${++counter}`,
     agentPreset: 'cona-project-analysis',
     ...(options?.hooks === undefined ? {} : { hooks: options.hooks }),
+    ...(options?.onTerminal === undefined ? {} : { onTerminal: options.onTerminal }),
   });
   return { service, scope, session, execution, store, localRoot, repo };
 }
@@ -477,4 +487,146 @@ test('4.3 终态或未持久化绑定时拒绝发送', async () => {
   assert.equal(denied.status, 'rejected');
   if (denied.status === 'rejected') assert.equal(denied.code, 'analysis-terminal');
   assert.equal(h.session.promptCalls.length, 0);
+});
+
+test('4.5 停止请求只落请求并交给宿主；真实终态前不再接受新提交', async () => {
+  const h = makeHarness();
+  const started = await h.service.start({ operationId: 'op-stop', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started.status, 'committed');
+  if (started.status !== 'committed') return;
+  const analysisId = started.value.analysis.analysisId;
+  await h.service.sendFirstMessage(analysisId);
+
+  const stopped = await h.service.stop(analysisId);
+  assert.equal(stopped.status, 'committed');
+  if (stopped.status !== 'committed') return;
+  assert.equal(stopped.value.requested, true);
+  assert.deepEqual(h.session.cancelCalls, [started.value.analysis.sessionId]);
+  const record = await h.service.get(analysisId);
+  assert.equal(record.status, 'ok');
+  if (record.status === 'ok') {
+    assert.equal(typeof record.analysis.stopRequestedAt, 'string');
+    assert.equal(record.analysis.status, 'running', '停止请求不假装已结束');
+  }
+
+  const again = await h.service.stop(analysisId);
+  assert.equal(again.status, 'committed');
+  if (again.status === 'committed') assert.equal(again.value.requested, false);
+  assert.equal(h.session.cancelCalls.length, 1);
+
+  const denied = await h.service.sendFirstMessage(analysisId);
+  assert.equal(denied.status, 'rejected');
+  if (denied.status === 'rejected') assert.equal(denied.code, 'analysis-stopping');
+});
+
+test('4.5 turn/end 同步：完成记 completed，异常记 interrupted，终态释放绑定', async () => {
+  const terminals: string[] = [];
+  const h = makeHarness({ onTerminal: (record) => terminals.push(record.analysisId) });
+  const started = await h.service.start({ operationId: 'op-end', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started.status, 'committed');
+  if (started.status !== 'committed') return;
+  const analysisId = started.value.analysis.analysisId;
+  await h.service.sendFirstMessage(analysisId);
+
+  const ended = await h.service.handleTurnEnd({ sessionId: started.value.analysis.sessionId!, kind: 'completed' });
+  assert.equal(ended.status, 'terminal');
+  if (ended.status === 'terminal') {
+    assert.equal(ended.analysis.status, 'completed');
+    assert.equal(ended.analysis.endReason, 'completed');
+    assert.equal(ended.analysis.binding?.terminal, true);
+    assert.equal(typeof ended.analysis.endedAt, 'string');
+  }
+  assert.deepEqual(terminals, [analysisId]);
+
+  const repeat = await h.service.handleTurnEnd({ sessionId: started.value.analysis.sessionId!, kind: 'completed' });
+  assert.equal(repeat.status, 'terminal');
+  assert.equal(terminals.length, 1, '重复终态不再触发副作用');
+
+  const denied = await h.service.sendFirstMessage(analysisId);
+  assert.equal(denied.status, 'rejected');
+  if (denied.status === 'rejected') assert.equal(denied.code, 'analysis-terminal');
+
+  const h2 = makeHarness();
+  const started2 = await h2.service.start({ operationId: 'op-end-err', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started2.status, 'committed');
+  if (started2.status !== 'committed') return;
+  const interrupted = await h2.service.handleTurnEnd({ sessionId: started2.value.analysis.sessionId!, kind: 'error' });
+  assert.equal(interrupted.status, 'terminal');
+  if (interrupted.status === 'terminal') {
+    assert.equal(interrupted.analysis.status, 'interrupted');
+    assert.equal(interrupted.analysis.endReason, 'error');
+  }
+});
+
+test('4.5 停止后的 turn/end 记 stopped；未知 Session 忽略', async () => {
+  const h = makeHarness();
+  const started = await h.service.start({ operationId: 'op-stop-end', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started.status, 'committed');
+  if (started.status !== 'committed') return;
+  await h.service.stop(started.value.analysis.analysisId);
+  const ended = await h.service.handleTurnEnd({ sessionId: started.value.analysis.sessionId!, kind: 'aborted' });
+  assert.equal(ended.status, 'terminal');
+  if (ended.status === 'terminal') {
+    assert.equal(ended.analysis.status, 'interrupted');
+    assert.equal(ended.analysis.endReason, 'stopped');
+  }
+  assert.deepEqual(await h.service.handleTurnEnd({ sessionId: 'session-unknown', kind: 'completed' }), { status: 'ignored' });
+});
+
+
+test('4.6 恢复：有 Session 的未终态记录转中断并标历史，无 Session 的草稿保留', async () => {
+  const h = makeHarness();
+  const started = await h.service.start({ operationId: 'op-recover-1', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started.status, 'committed');
+  if (started.status !== 'committed') return;
+  const analysisId = started.value.analysis.analysisId;
+  await h.service.sendFirstMessage(analysisId);
+
+  // 手工插入一条没有 Session 的 prepared 草稿。
+  const aggregate = await h.store.readAggregate(h.localRoot, INSTANCE_ID);
+  assert.ok(aggregate !== null);
+  if (aggregate === null) return;
+  const draft: AnalysisRecord = {
+    ...started.value.analysis,
+    analysisId: 'analysis-draft',
+    requestId: 'op-draft',
+    sessionId: null,
+    status: 'prepared',
+  };
+  await h.store.writeAggregate(h.localRoot, { ...aggregate, analyses: [...(aggregate.analyses ?? []), draft] });
+
+  const terminals: string[] = [];
+  const recovered = new AnalysisSessionService({
+    localRoot: h.localRoot,
+    instanceId: INSTANCE_ID,
+    store: h.store,
+    queue: new InstanceCommandQueue(),
+    scope: h.scope,
+    planBaseline: async () => ({ ok: true, planVersion: 'plan-v1' }),
+    session: new FakeAnalysisSession(),
+    execution: new FakeExecution(),
+    clock,
+    newAnalysisId: () => 'analysis-next',
+    agentPreset: 'cona-project-analysis',
+    onTerminal: (record) => terminals.push(record.analysisId),
+  });
+  const result = await recovered.recover();
+  assert.deepEqual(result, { interrupted: 1, historical: 1 });
+  assert.deepEqual(terminals, [analysisId]);
+
+  const interrupted = await recovered.get(analysisId);
+  assert.equal(interrupted.status, 'ok');
+  if (interrupted.status === 'ok') {
+    assert.equal(interrupted.analysis.status, 'interrupted');
+    assert.equal(interrupted.analysis.endReason, 'aborted');
+    assert.equal(interrupted.analysis.binding?.terminal, true);
+  }
+  const keptDraft = await recovered.get('analysis-draft');
+  assert.equal(keptDraft.status, 'ok');
+  if (keptDraft.status === 'ok') assert.equal(keptDraft.analysis.status, 'prepared');
+
+  // 已终态记录只标历史，不再重复中断。
+  await recovered.handleTurnEnd({ sessionId: started.value.analysis.sessionId!, kind: 'completed' });
+  const again = await recovered.recover();
+  assert.deepEqual(again, { interrupted: 0, historical: 1 });
 });

@@ -8,6 +8,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import {
   apply,
   installAnalysisScope,
+  markAnalysisSessionHistorical,
   preStepDecision,
   requestIdOf,
 } from '../src/host/analysis-scope.js';
@@ -167,4 +168,22 @@ test('2.x-q 工具辅助：requestIdOf 只取 user 消息 rpcId，preStepDecisio
   assert.equal(requestIdOf({ messages: [{ source: { kind: 'user', rpcId: '' } }] }), null);
   assert.deepEqual(preStepDecision({ kind: 'deny', reason: 'x' }), { kind: 'reject' });
   assert.deepEqual(preStepDecision({ kind: 'allow' }), { kind: 'enter', messages: [] });
+});
+
+
+test('2.x-4.6 历史分析 Session 的新输入与续步都被 pre-step 拒绝', async () => {
+  const h = harness();
+  const current = { value: binding() };
+  markAnalysisSessionHistorical('sess-historical');
+  const install = installAnalysisScope(h.ctx, () => current.value);
+  const step = h.steps[0]!;
+  const next = async () => ({ kind: 'enter' as const, messages: [] });
+
+  const first = await step({ agent: { id: 'sess-historical' }, step: 1, messages: [{ source: { kind: 'user', rpcId: 'rpc-1' } }] }, next);
+  assert.equal(first.kind, 'reject');
+  const continuation = await step({ agent: { id: 'sess-historical' }, step: 2, messages: [{ source: { kind: 'model' } }] }, next);
+  assert.equal(continuation.kind, 'reject');
+  const normal = await step({ agent: { id: 'sess-1' }, step: 1, messages: [{ source: { kind: 'user', rpcId: 'rpc-1' } }] }, next);
+  assert.equal(normal.kind, 'enter');
+  install.dispose();
 });

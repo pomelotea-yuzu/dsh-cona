@@ -47,8 +47,10 @@
   - 2026-11-28：`promptFirstMessage` 以 `requestId` 作 `source.rpcId`；发送前经 `AnalysisExecutionPort.prepare` 核对保护并落 `sending`，成功后落 `running`。发送抛错先按同一 `requestId` 查 `user/message`／`inbox/spliced`，已到达回读为 recovered，未到达留 `unknown` 且不自动重发；显式 retry 复用同号。`reconcile` 对创建未知只给候选、不重建。真宿主探针验证 accepted、recovered 与未接能力时不派发，见[第 4 组记录](implementation/2026-11-28-4.x-analysis-session.md)。
 - [x] 4.4 按真实消息认领绑定身份。只在核对过的原生执行器、允许工具和活动绑定下读取或保存，拒绝错误 Session、已换源、停止或无绑定调用。普通 Session 独立对照，分析局部注册工具也须走守卫（A04、A05、A07）。
   - 2026-11-28：`createAnalysisExecutionPort` 串起能力注册、活动绑定登记与 `verifyAnalysisExecution`；同一 (analysisId, sessionId) 幂等，核对失败释放绑定。守卫按实际 SessionId 判允许/无绑定/错误 Session；真宿主验证允许工具成功、普通 Session `unknown tool`、释放绑定 `analysis-binding-missing`、终态 `analysis-terminal`。真实四个工具属第 5 组，见[第 4 组记录](implementation/2026-11-28-4.x-analysis-session.md)。
-- [ ] 4.5 同步宿主运行、停止请求和真实 `turn/end`。注入取消与提交交错以及迟到工具调用，核对报告发布点与未形成报告的终态（A07、A10）。
-- [ ] 4.6 恢复本机分析归属与历史回读。测试完成、中断、重连、重启后打开旧会话及直接继续输入；核对宿主拒绝进入模型、旧绑定失效且历史可回看（A03、A05、A07、A10）。
+- [x] 4.5 同步宿主运行、停止请求和真实 `turn/end`。注入取消与提交交错以及迟到工具调用，核对报告发布点与未形成报告的终态（A07、A10）。
+  - 2026-11-28：`stop` 先落 `stopRequestedAt` 再调宿主 cancel，停止后拒绝新提交；`handleTurnEnd` 按 completed／error／stopped 落终态并置绑定 terminal；`analysis-events` 订阅真实 `session/event` 的 turn/end。测试 4 项、真宿主恢复探针见[第 4 组记录](implementation/2026-11-28-4.x-analysis-session.md)。
+- [x] 4.6 恢复本机分析归属与历史回读。测试完成、中断、重连、重启后打开旧会话及直接继续输入；核对宿主拒绝进入模型、旧绑定失效且历史可回看（A03、A05、A07、A10）。
+  - 2026-11-28：`recover` 把有 Session 的未终态记录转 `interrupted`、置终态并标历史；`analysis-scope` 的 pre-step 对历史 Session 首步／续步一律拒绝；历史记录可 `get`／`list`。真宿主以换新服务模拟重启：2 条转中断、旧会话 followup 0 step 且 `turn/end blocked`。真实进程重启留 8.1，见[第 4 组记录](implementation/2026-11-28-4.x-analysis-session.md)。
 
 ## 5. 私有报告和来源
 

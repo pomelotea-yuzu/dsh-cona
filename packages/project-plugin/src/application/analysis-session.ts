@@ -66,6 +66,8 @@ export interface AnalysisSessionServiceDeps {
   readonly agentPreset: string;
   /** 测试故障注入；生产不传。 */
   readonly hooks?: { readonly beforeAggregateReplace?: PublishHooksPort };
+  /** 记录进入终态后的同步副作用（宿主释放绑定、标记历史）；失败不影响已落盘终态。 */
+  readonly onTerminal?: (record: AnalysisRecord) => void;
 }
 
 /** 分析记录服务：每实例一个，与命令／聊天共用实例队列。 */
@@ -229,6 +231,9 @@ export class AnalysisSessionService {
       if (record.binding === null || !record.binding.persisted) {
         return { status: 'rejected' as const, code: 'analysis-binding-not-persisted', message: '本机关联尚未落盘，不发送分析消息' };
       }
+      if (record.stopRequestedAt !== undefined) {
+        return { status: 'rejected' as const, code: 'analysis-stopping', message: '已收到停止请求，不再接受新的分析提交' };
+      }
       const sessionId = record.sessionId;
       if (record.status === 'running') {
         return { status: 'committed' as const, value: { sent: true, recovered: false, reused: true }, stateRevision: read.aggregate.revisions.state };
@@ -376,6 +381,51 @@ export class AnalysisSessionService {
     });
   }
 
+  /**
+   * 启动恢复（tasks 4.6）：本机记录先读回；有实际 Session 且未终态的分析在宿主重启后
+   * 一律转 `interrupted` 并释放绑定，旧 Session 只作历史。没有 Session 的草稿保留，
+   * 不把没有宿主对象的记录伪装成历史。
+   */
+  async recover(): Promise<{ readonly interrupted: number; readonly historical: number }> {
+    return this.deps.queue.run(this.deps.instanceId, async () => {
+      const read = await this.readAggregate();
+      if ('outcome' in read) return { interrupted: 0, historical: 0 };
+      const records = analysisRecordsOf(read.aggregate.analyses);
+      const now = this.deps.clock();
+      let interrupted = 0;
+      let historical = 0;
+      const next = records.map((record) => {
+        if (record.sessionId === null) return record;
+        historical += 1;
+        if (ANALYSIS_TERMINAL_STATUSES.includes(record.status)) return record;
+        interrupted += 1;
+        return {
+          ...record,
+          status: 'interrupted' as const,
+          binding: record.binding === null ? null : { ...record.binding, terminal: true },
+          endedAt: now,
+          endReason: 'aborted' as const,
+          detail: '宿主重启：旧分析只作历史',
+          updatedAt: now,
+        };
+      });
+      if (interrupted > 0) {
+        const saved = await this.persist(read.aggregate, next);
+        if (saved.status !== 'committed') return { interrupted: 0, historical: 0 };
+      }
+      // 终态／恢复的记录都要在作用域注册表里标历史，使旧 Session 的新输入在 pre-step 被拒。
+      for (const record of next) {
+        if (record.sessionId === null) continue;
+        try {
+          this.deps.onTerminal?.(record);
+        } catch {
+          // 历史标记失败不阻断启动；记录状态已落盘。
+        }
+      }
+      return { interrupted, historical };
+    });
+  }
+
   /** 读取单条分析记录（只读；不改变状态）。 */
   async get(analysisId: string): Promise<{ status: 'ok'; analysis: AnalysisRecord } | { status: 'rejected'; code: string; message: string }> {
     if (typeof analysisId !== 'string' || analysisId === '') {
@@ -421,6 +471,105 @@ export class AnalysisSessionService {
       return { outcome: { status: 'rejected', code: 'binding-expired', message: '本机注册表中没有该实例' } };
     }
     return { aggregate };
+  }
+
+  /**
+   * owner 停止请求（tasks 4.5）：只把停止请求交给宿主并落 `stopRequestedAt`；
+   * 真实终态仍由 turn/end 决定，不在此处假装已结束。
+   */
+  async stop(analysisId: string): Promise<AnalysisOutcome<{ readonly requested: boolean; readonly terminal: boolean }>> {
+    if (typeof analysisId !== 'string' || analysisId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 analysisId' };
+    }
+    return this.deps.queue.run(this.deps.instanceId, async () => {
+      const read = await this.readAggregate();
+      if ('outcome' in read) {
+        const outcome = read.outcome;
+        if (outcome.status === 'committed') return { status: 'rejected' as const, code: 'analysis-read-failed', message: '读取分析记录失败' };
+        return { status: 'rejected' as const, code: outcome.code, message: outcome.message };
+      }
+      const records = analysisRecordsOf(read.aggregate.analyses);
+      const record = records.find((item) => item.analysisId === analysisId);
+      if (record === undefined) return { status: 'rejected' as const, code: 'analysis-not-found', message: '本机没有该分析记录' };
+      if (ANALYSIS_TERMINAL_STATUSES.includes(record.status)) {
+        return { status: 'committed' as const, value: { requested: false, terminal: true }, stateRevision: read.aggregate.revisions.state };
+      }
+      if (record.stopRequestedAt !== undefined) {
+        return { status: 'committed' as const, value: { requested: false, terminal: false }, stateRevision: read.aggregate.revisions.state };
+      }
+      if (record.sessionId === null) {
+        return { status: 'rejected' as const, code: 'analysis-session-missing', message: '尚未登记实际 Session，无法发送停止请求' };
+      }
+      const now = this.deps.clock();
+      const stopping: AnalysisRecord = { ...record, stopRequestedAt: now, updatedAt: now };
+      const saved = await this.persist(read.aggregate, replaceRecord(records, stopping));
+      if (saved.status !== 'committed') return saved;
+      try {
+        await this.deps.session.cancelSession({ sessionId: record.sessionId });
+      } catch (error) {
+        return {
+          status: 'rejected' as const,
+          code: 'analysis-stop-unconfirmed',
+          message: `停止请求结果未知：${(error as Error).message}`,
+        };
+      }
+      return { status: 'committed' as const, value: { requested: true, terminal: false }, stateRevision: saved.stateRevision };
+    });
+  }
+
+  /**
+   * 真实 turn/end 同步（tasks 4.5）：只按宿主终态改记录；`completed` 记完成，
+   * 其余记中断。已收到停止请求时 endReason 记 stopped，不把异常终止写成完成。
+   */
+  async handleTurnEnd(input: {
+    readonly sessionId: string;
+    readonly kind: 'completed' | 'aborted' | 'error';
+  }): Promise<
+    | { readonly status: 'terminal'; readonly analysis: AnalysisRecord }
+    | { readonly status: 'ignored' }
+    | { readonly status: 'rejected'; readonly code: string; readonly message: string }
+  > {
+    if (typeof input.sessionId !== 'string' || input.sessionId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 sessionId' };
+    }
+    return this.deps.queue.run(this.deps.instanceId, async () => {
+      const read = await this.readAggregate();
+      if ('outcome' in read) {
+        const outcome = read.outcome;
+        if (outcome.status === 'committed') return { status: 'rejected' as const, code: 'analysis-read-failed', message: '读取分析记录失败' };
+        return { status: 'rejected' as const, code: outcome.code, message: outcome.message };
+      }
+      const records = analysisRecordsOf(read.aggregate.analyses);
+      const record = records.find((item) => item.sessionId === input.sessionId);
+      if (record === undefined) return { status: 'ignored' as const };
+      if (ANALYSIS_TERMINAL_STATUSES.includes(record.status)) {
+        return { status: 'terminal' as const, analysis: record };
+      }
+      const now = this.deps.clock();
+      const endReason: AnalysisRecord['endReason'] = input.kind === 'completed'
+        ? 'completed'
+        : record.stopRequestedAt !== undefined
+          ? 'stopped'
+          : input.kind === 'error' ? 'error' : 'aborted';
+      const terminal: AnalysisRecord = {
+        ...record,
+        status: input.kind === 'completed' ? 'completed' : 'interrupted',
+        binding: record.binding === null ? null : { ...record.binding, terminal: true },
+        endedAt: now,
+        endReason,
+        updatedAt: now,
+      };
+      const saved = await this.persist(read.aggregate, replaceRecord(records, terminal));
+      if (saved.status !== 'committed') {
+        return { status: 'rejected' as const, code: saved.code, message: saved.message };
+      }
+      try {
+        this.deps.onTerminal?.(terminal);
+      } catch {
+        // 终态已落盘；宿主副作用失败不回滚历史。
+      }
+      return { status: 'terminal' as const, analysis: terminal };
+    });
   }
 
   /** 发送完成：落 running 与 sentAt；返回统一的 committed 结果。 */

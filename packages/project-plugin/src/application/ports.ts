@@ -129,6 +129,8 @@ export interface AnalysisSessionPort {
     readonly requestId: string;
     readonly text: string;
   }): Promise<{ readonly accepted: true }>;
+  /** 请求宿主取消当前活动 turn；真实终态仍以 turn/end 为准（4.5）。 */
+  cancelSession(input: { readonly sessionId: string }): Promise<{ readonly accepted: true }>;
 }
 
 /** 分析能力注册端口（tasks 4.4）：在分析 Agent 自己的 scope 注册四个允许能力。 */

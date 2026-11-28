@@ -316,6 +316,8 @@ export interface AnalysisRecord {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly sentAt?: string;
+  /** 已收到 owner 停止请求；真实终态仍由 turn/end 决定（4.5）。 */
+  readonly stopRequestedAt?: string;
   readonly endedAt?: string;
   readonly endReason?: 'completed' | 'aborted' | 'error' | 'stopped';
   readonly detail?: string;
@@ -371,6 +373,7 @@ export function analysisRecordsOf(value: unknown): AnalysisRecord[] {
       createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
       updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
       ...(typeof record.sentAt === 'string' ? { sentAt: record.sentAt } : {}),
+      ...(typeof record.stopRequestedAt === 'string' ? { stopRequestedAt: record.stopRequestedAt } : {}),
       ...(typeof record.endedAt === 'string' ? { endedAt: record.endedAt } : {}),
       ...(record.endReason === 'completed' || record.endReason === 'aborted'
         || record.endReason === 'error' || record.endReason === 'stopped' ? { endReason: record.endReason } : {}),

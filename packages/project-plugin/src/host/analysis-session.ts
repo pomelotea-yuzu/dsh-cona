@@ -22,6 +22,7 @@ interface SessionControllerLike {
     mode: 'queue' | 'steer';
     content: readonly { type: 'text'; text: string }[];
   }, signal: AbortSignal): Promise<{ accepted?: unknown }>;
+  cancel?(request: { sessionId: string }): { accepted?: unknown } | Promise<{ accepted?: unknown }>;
 }
 
 interface AgentLike {
@@ -63,6 +64,9 @@ export function unavailableAnalysisSessionPort(message: string): AnalysisSession
       throw new Error(message);
     },
     async promptFirstMessage() {
+      throw new Error(message);
+    },
+    async cancelSession() {
       throw new Error(message);
     },
   };
@@ -143,6 +147,13 @@ export function analysisSessionPort(ctx: Context): AnalysisSessionPortResult {
           mode: 'queue',
           content: [{ type: 'text', text: input.text }],
         }, new AbortController().signal);
+        return { accepted: true as const };
+      },
+      async cancelSession(input) {
+        if (typeof controller.cancel !== 'function') {
+          throw new Error('宿主 sessionController 未提供 cancel（版本不符）');
+        }
+        await controller.cancel({ sessionId: input.sessionId });
         return { accepted: true as const };
       },
     },

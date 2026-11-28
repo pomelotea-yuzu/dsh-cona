@@ -121,6 +121,8 @@ export function installAnalysisScope(ctx: Context, bindingOf: BindingProvider): 
       const upstream = await next();
       if (upstream.kind !== 'enter') return upstream;
       const sessionId = typeof payload.agent?.id === 'string' ? payload.agent.id : undefined;
+      // 历史分析只作回看：无论是否有旧绑定、无论第几步，都不再进入模型。
+      if (isAnalysisSessionHistorical(sessionId)) return { kind: 'reject' };
       const binding = bindingOf(sessionId);
       if (binding === undefined) {
         // 无分析绑定：普通工作步骤不被本 scope 拦截（分析 scope 只服务分析会话）。
@@ -147,6 +149,22 @@ export function installAnalysisScope(ctx: Context, bindingOf: BindingProvider): 
     dispose: () => disposers.forEach((d) => d()),
     ready: true,
   };
+}
+
+// ---------------------------------------------------------------------------
+// 历史分析 Session：重启后旧分析只作历史，pre-step 必须拒绝其新输入。
+// 由 Host 在恢复记录时登记；只按实际 SessionId 判断，不从消息参数取身份。
+
+const historicalSessions = new Set<string>();
+
+/** 标记一个分析 Session 已结束／已失效；之后其新步骤不再进入模型。 */
+export function markAnalysisSessionHistorical(sessionId: string): void {
+  if (typeof sessionId === 'string' && sessionId !== '') historicalSessions.add(sessionId);
+}
+
+/** 该 Session 是否已登记为历史分析；未知返回 false。 */
+export function isAnalysisSessionHistorical(sessionId: string | undefined): boolean {
+  return sessionId !== undefined && historicalSessions.has(sessionId);
 }
 
 // ---------------------------------------------------------------------------

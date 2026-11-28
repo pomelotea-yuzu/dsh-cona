@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import type { Context } from '@deepseek-ai/cordis';
 import { analysisSessionPort } from '../src/host/analysis-session.js';
 import { agentPromptAccepted, unavailableAnalysisExecutionPort } from '../src/host/analysis-execution-port.js';
+import { attachAnalysisEventObservers } from '../src/host/analysis-events.js';
+import type { RuntimeResult } from '../src/host/project-service.js';
 
 interface CreateRequest {
   sessionId?: string;
@@ -23,6 +25,7 @@ function harness(options?: {
 }) {
   const creates: CreateRequest[] = [];
   const prompts: Array<{ request: Record<string, unknown>; signal: AbortSignal }> = [];
+  const cancels: string[] = [];
   const attached: string[] = [];
   const workspaces = options?.workspaces === false ? undefined : {
     async resolveByPath() {
@@ -64,6 +67,10 @@ function harness(options?: {
         prompts.push({ request, signal });
         return { accepted: true };
       },
+      cancel(request: { sessionId: string }) {
+        cancels.push(request.sessionId);
+        return { accepted: true };
+      },
     }),
   };
   const ctx = {
@@ -72,7 +79,7 @@ function harness(options?: {
       return name === 'workspaceRegistry' ? workspaces : undefined;
     },
   } as unknown as Context;
-  return { ctx, creates, prompts, attached };
+  return { ctx, creates, prompts, cancels, attached };
 }
 
 test('4.2 分析创建使用 workspaceId + 专用 preset，且不传 sessionId', async () => {
@@ -152,6 +159,50 @@ test('4.3 首条消息使用 requestId 与 queue 模式发送；缺 prompt 时�
       /prompt/,
     );
   }
+});
+
+test('4.5 停止请求调用宿主 cancel；缺 cancel 时明确失败', async () => {
+  const h = harness();
+  const result = analysisSessionPort(h.ctx);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  await result.port.cancelSession({ sessionId: 'session-1' });
+  assert.deepEqual(h.cancels, ['session-1']);
+
+  const missing = analysisSessionPort(harness({ noPrompt: true }).ctx);
+  assert.equal(missing.ok, true);
+  if (missing.ok) {
+    await assert.rejects(missing.port.cancelSession({ sessionId: 'session-1' }), /cancel/);
+  }
+});
+
+test('4.5 turn/end 事件转到分析记录；非终态事件忽略', async () => {
+  const calls: Array<{ sessionId: string; kind: string }> = [];
+  let listener: ((session: unknown, event: unknown) => void) | undefined;
+  const ctx = {
+    on(_name: string, handler: (session: unknown, event: unknown) => void) {
+      listener = handler;
+      return () => true;
+    },
+  } as unknown as Context;
+  const runtime = {
+    ok: true as const,
+    value: {
+      analysisSession: {
+        async handleTurnEnd(input: { sessionId: string; kind: string }) {
+          calls.push(input);
+          return { status: 'ignored' as const };
+        },
+      },
+    },
+  } as unknown as RuntimeResult;
+  const dispose = attachAnalysisEventObservers(ctx, async () => runtime);
+  assert.ok(listener !== undefined);
+  listener?.({ id: 'session-1' }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+  listener?.({ id: 'session-1' }, { type: 'turn/start' });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(calls, [{ sessionId: 'session-1', kind: 'completed' }]);
+  dispose();
 });
 
 test('4.3 按 Agent 事件核对 requestId：user/message 与 inbox/spliced 都算已接受', async () => {

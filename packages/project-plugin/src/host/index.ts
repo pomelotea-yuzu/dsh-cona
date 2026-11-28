@@ -45,6 +45,8 @@ import { ProjectToolAdapter, defineProjectTools, type ConaToolDefinition, type C
 import { planNodeView, sessionDirectory, unavailableSessionDirectory } from './session-directory.js'
 import { analysisSessionPort, unavailableAnalysisSessionPort } from './analysis-session.js'
 import { createAnalysisExecutionPort, unavailableAnalysisCapabilityPort } from './analysis-execution-service.js'
+import { markAnalysisSessionHistorical, releaseAnalysisBinding } from './analysis-scope.js'
+import { attachAnalysisEventObservers } from './analysis-events.js'
 
 export const name = 'dsh-cona-project'
 
@@ -418,6 +420,20 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       clock,
       newAnalysisId: () => randomUUID(),
       agentPreset: 'cona-project-analysis',
+      onTerminal: (record) => {
+        if (record.sessionId !== null) {
+          releaseAnalysisBinding(record.sessionId)
+          markAnalysisSessionHistorical(record.sessionId)
+        }
+      },
+    })
+    // 启动恢复：旧分析只作历史，pre-step 拒绝其新输入（4.6）。
+    void analysisSession.recover().then((result) => {
+      if (result.historical > 0) {
+        console.log(`[dsh-cona-project] 分析恢复：${result.historical} 条有 Session 的记录按历史处理（本次中断 ${result.interrupted}）`)
+      }
+    }).catch(() => {
+      // 恢复失败由下次读取暴露；不阻断宿主启动。
     })
     const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, resumeChats, recordReader, observeWorkCopy: observeWorkCopyFor(instance), analysis, analysisSession }
     return { ok: true, value }
@@ -528,6 +544,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
   // 转到 WorkService 的消息准入映射，工具侧据此取得活动 WorkRun 绑定。
   // 仍绑定配置实例 A，浏览其他实例不改变事件与工具的执行目标。
   attachWorkEventObservers(ctx, shared)
+  attachAnalysisEventObservers(ctx, shared)
 
   ctx.plugin(ConaProjectService, {
     runtime: shared,
