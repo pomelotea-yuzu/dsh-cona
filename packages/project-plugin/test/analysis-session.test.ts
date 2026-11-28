@@ -16,7 +16,8 @@ import { InstanceCommandQueue } from '../src/application/command-queue.js';
 import { AnalysisScopeService } from '../src/application/analysis-scope.js';
 import { AnalysisSessionService, analysisSelectionOf, type AnalysisSessionServiceDeps } from '../src/application/analysis-session.js';
 import { analysisRecordsOf, type InstanceAggregate } from '../src/application/local-state.js';
-import type { AnalysisSessionPort, DirectorySession } from '../src/application/ports.js';
+import type { AnalysisExecutionPort, AnalysisSessionPort, DirectorySession } from '../src/application/ports.js';
+import type { AnalysisRecord } from '../src/application/local-state.js';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const artifacts = path.join(packageRoot, 'artifacts');
@@ -30,6 +31,9 @@ class FakeAnalysisSession implements AnalysisSessionPort {
   calls: Array<{ cwd: string; agentPreset: string }> = [];
   results: Array<{ sessionId: string; agentPreset?: string }> = [];
   error: Error | null = null;
+  sessions: DirectorySession[] = [];
+  promptCalls: Array<{ sessionId: string; requestId: string; text: string }> = [];
+  promptError: Error | null = null;
 
   async createAnalysisSession(input: { cwd: string; agentPreset: string }): Promise<{ sessionId: string; agentPreset?: string }> {
     this.calls.push(input);
@@ -39,7 +43,28 @@ class FakeAnalysisSession implements AnalysisSessionPort {
   }
 
   async listSessions(): Promise<readonly DirectorySession[]> {
-    return [];
+    return this.sessions;
+  }
+
+  async promptFirstMessage(input: { sessionId: string; requestId: string; text: string }): Promise<{ accepted: true }> {
+    this.promptCalls.push(input);
+    if (this.promptError !== null) throw this.promptError;
+    return { accepted: true };
+  }
+}
+
+class FakeExecution implements AnalysisExecutionPort {
+  ready = true;
+  accepted: boolean | 'unknown' = false;
+  prepareCalls = 0;
+
+  async prepare(_record: AnalysisRecord): Promise<{ ready: true } | { ready: false; code: string; message: string }> {
+    this.prepareCalls += 1;
+    return this.ready ? { ready: true as const } : { ready: false as const, code: 'analysis-execution-unavailable', message: 'not ready' };
+  }
+
+  async promptAccepted(): Promise<boolean | 'unknown'> {
+    return this.accepted;
   }
 }
 
@@ -74,6 +99,7 @@ interface Harness {
   service: AnalysisSessionService;
   scope: AnalysisScopeService;
   session: FakeAnalysisSession;
+  execution: FakeExecution;
   store: LocalStateStore;
   localRoot: string;
   repo: string;
@@ -91,6 +117,7 @@ function makeHarness(options?: {
   writeAggregateFixture(localRoot, options?.analyses);
   const store = new LocalStateStore({ clock });
   const session = new FakeAnalysisSession();
+  const execution = new FakeExecution();
   const scope = new AnalysisScopeService({
     instanceId: INSTANCE_ID,
     sourceGeneration: 1,
@@ -112,12 +139,13 @@ function makeHarness(options?: {
     scope,
     planBaseline,
     session,
+    execution,
     clock,
     newAnalysisId: () => `analysis-${++counter}`,
     agentPreset: 'cona-project-analysis',
     ...(options?.hooks === undefined ? {} : { hooks: options.hooks }),
   });
-  return { service, scope, session, store, localRoot, repo };
+  return { service, scope, session, execution, store, localRoot, repo };
 }
 
 test('4.1 记录先落盘、旧聚合无 analyses 可读、首次保存推进状态修订', async () => {
@@ -268,4 +296,185 @@ test('4.1 analyses 损坏条目读取归一化：坏项被跳过，不影响其�
   assert.deepEqual(records.map((record) => record.analysisId), ['a-good']);
   const aggregate: Pick<InstanceAggregate, 'analyses'> = { analyses: undefined };
   assert.deepEqual(analysisRecordsOf(aggregate.analyses), []);
+});
+
+test('4.3 首消息：保护通过后用 operationId 作 rpcId 并落 running', async () => {
+  const h = makeHarness();
+  const started = await h.service.start({ operationId: 'op-send', repositoryId: 'repo', scope: { kind: 'directory', path: 'src' } });
+  assert.equal(started.status, 'committed');
+  if (started.status !== 'committed') return;
+  const analysisId = started.value.analysis.analysisId;
+
+  const sent = await h.service.sendFirstMessage(analysisId);
+  assert.equal(sent.status, 'committed');
+  if (sent.status !== 'committed') return;
+  assert.equal(sent.value.sent, true);
+  assert.equal(h.session.promptCalls.length, 1);
+  assert.equal(h.session.promptCalls[0]?.requestId, 'op-send');
+  assert.match(h.session.promptCalls[0]?.text ?? '', /src/);
+  const record = (await h.service.get(analysisId));
+  assert.equal(record.status, 'ok');
+  if (record.status !== 'ok') return;
+  assert.equal(record.analysis.status, 'running');
+  assert.equal(record.analysis.binding?.protected, true);
+  assert.equal(typeof record.analysis.sentAt, 'string');
+
+  // 已 running：重复调用回读，不重复发送。
+  const again = await h.service.sendFirstMessage(analysisId);
+  assert.equal(again.status, 'committed');
+  if (again.status === 'committed') assert.equal(again.value.reused, true);
+  assert.equal(h.session.promptCalls.length, 1);
+});
+
+test('4.3 保护未就绪：不发送，记录保持 created', async () => {
+  const h = makeHarness();
+  h.execution.ready = false;
+  const started = await h.service.start({ operationId: 'op-unprotected', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started.status, 'committed');
+  if (started.status !== 'committed') return;
+  const sent = await h.service.sendFirstMessage(started.value.analysis.analysisId);
+  assert.equal(sent.status, 'rejected');
+  if (sent.status === 'rejected') assert.equal(sent.code, 'analysis-execution-unavailable');
+  assert.equal(h.session.promptCalls.length, 0);
+  const record = await h.service.get(started.value.analysis.analysisId);
+  assert.equal(record.status, 'ok');
+  if (record.status === 'ok') assert.equal(record.analysis.status, 'created');
+});
+
+test('4.3 发送异常且查询未接受：unknown 不自动重发；显式 retry 复用同号', async () => {
+  const h = makeHarness();
+  const started = await h.service.start({ operationId: 'op-lost-send', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started.status, 'committed');
+  if (started.status !== 'committed') return;
+  const analysisId = started.value.analysis.analysisId;
+  h.session.promptError = new Error('response lost');
+  h.execution.accepted = false;
+
+  const first = await h.service.sendFirstMessage(analysisId);
+  assert.equal(first.status, 'rejected');
+  if (first.status === 'rejected') assert.equal(first.code, 'analysis-send-unknown');
+  assert.equal(h.session.promptCalls.length, 1);
+
+  const automatic = await h.service.sendFirstMessage(analysisId);
+  assert.equal(automatic.status, 'rejected');
+  if (automatic.status === 'rejected') assert.equal(automatic.code, 'analysis-send-unconfirmed');
+  assert.equal(h.session.promptCalls.length, 1, '未查清不自动重发');
+
+  h.session.promptError = null;
+  const retry = await h.service.sendFirstMessage(analysisId, { retry: true });
+  assert.equal(retry.status, 'committed');
+  assert.equal(h.session.promptCalls.length, 2);
+  assert.equal(h.session.promptCalls[1]?.requestId, 'op-lost-send', '重试复用同一请求标识');
+  const record = await h.service.get(analysisId);
+  assert.equal(record.status, 'ok');
+  if (record.status === 'ok') assert.equal(record.analysis.status, 'running');
+});
+
+test('4.3 发送异常但宿主已接受：核对回读为 running，不重发', async () => {
+  const h = makeHarness();
+  const started = await h.service.start({ operationId: 'op-recover', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started.status, 'committed');
+  if (started.status !== 'committed') return;
+  const analysisId = started.value.analysis.analysisId;
+  h.session.promptError = new Error('response lost');
+  h.execution.accepted = true;
+
+  const sent = await h.service.sendFirstMessage(analysisId);
+  assert.equal(sent.status, 'committed');
+  if (sent.status === 'committed') assert.equal(sent.value.recovered, true);
+  assert.equal(h.session.promptCalls.length, 1);
+  const record = await h.service.get(analysisId);
+  assert.equal(record.status, 'ok');
+  if (record.status === 'ok') assert.equal(record.analysis.status, 'running');
+});
+
+test('4.3 启动未知核对：唯一候选收养，多候选需选择，无候选不猜', async () => {
+  const h = makeHarness();
+  h.session.error = new Error('create response lost');
+  const lost = await h.service.start({ operationId: 'op-reconcile-create', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(lost.status, 'rejected');
+  const records = await h.service.list();
+  const record = records[0];
+  assert.ok(record !== undefined);
+  if (record === undefined) return;
+  const createdAt = Date.parse(record.createdAt);
+
+  h.session.sessions = [
+    { sessionId: 'cand-1', blank: true, running: false, updatedAt: createdAt + 1, cwd: record.repositoryRoot },
+  ];
+  const adopted = await h.service.reconcile(record.analysisId);
+  assert.equal(adopted.status, 'adopted');
+  if (adopted.status === 'adopted') assert.equal(adopted.analysis.sessionId, 'cand-1');
+
+  const h2 = makeHarness();
+  h2.session.error = new Error('create response lost');
+  const lost2 = await h2.service.start({ operationId: 'op-reconcile-multi', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(lost2.status, 'rejected');
+  const record2 = (await h2.service.list())[0]!;
+  const created2 = Date.parse(record2.createdAt);
+  h2.session.sessions = [
+    { sessionId: 'cand-a', blank: true, running: false, updatedAt: created2 + 1, cwd: record2.repositoryRoot },
+    { sessionId: 'cand-b', blank: true, running: false, updatedAt: created2 + 2, cwd: record2.repositoryRoot },
+  ];
+  const choice = await h2.service.reconcile(record2.analysisId);
+  assert.equal(choice.status, 'needs-choice');
+  if (choice.status === 'needs-choice') assert.deepEqual(choice.candidates, ['cand-a', 'cand-b']);
+
+  const h3 = makeHarness();
+  h3.session.error = new Error('create response lost');
+  await h3.service.start({ operationId: 'op-reconcile-none', repositoryId: 'repo', scope: { kind: 'root' } });
+  const record3 = (await h3.service.list())[0]!;
+  const none = await h3.service.reconcile(record3.analysisId);
+  assert.equal(none.status, 'not-found');
+  assert.equal(h3.session.calls.length, 1, '核对不自动再建 Session');
+});
+
+test('4.3 发送未知核对：已接受转 running，未接受退回 created', async () => {
+  const h = makeHarness();
+  const started = await h.service.start({ operationId: 'op-reconcile-send', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started.status, 'committed');
+  if (started.status !== 'committed') return;
+  const analysisId = started.value.analysis.analysisId;
+  h.session.promptError = new Error('response lost');
+  h.execution.accepted = false;
+  await h.service.sendFirstMessage(analysisId);
+
+  h.execution.accepted = true;
+  const running = await h.service.reconcile(analysisId);
+  assert.equal(running.status, 'running');
+  const record = await h.service.get(analysisId);
+  assert.equal(record.status, 'ok');
+  if (record.status === 'ok') assert.equal(record.analysis.status, 'running');
+
+  const h2 = makeHarness();
+  const started2 = await h2.service.start({ operationId: 'op-reconcile-send-2', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started2.status, 'committed');
+  if (started2.status !== 'committed') return;
+  h2.session.promptError = new Error('response lost');
+  h2.execution.accepted = false;
+  await h2.service.sendFirstMessage(started2.value.analysis.analysisId);
+  const rolled = await h2.service.reconcile(started2.value.analysis.analysisId);
+  assert.equal(rolled.status, 'created');
+  const record2 = await h2.service.get(started2.value.analysis.analysisId);
+  assert.equal(record2.status, 'ok');
+  if (record2.status === 'ok') assert.equal(record2.analysis.status, 'created');
+});
+
+test('4.3 终态或未持久化绑定时拒绝发送', async () => {
+  const h = makeHarness();
+  const started = await h.service.start({ operationId: 'op-terminal', repositoryId: 'repo', scope: { kind: 'root' } });
+  assert.equal(started.status, 'committed');
+  if (started.status !== 'committed') return;
+  const analysisId = started.value.analysis.analysisId;
+  // 直接改写记录为终态，模拟宿主已结束。
+  const aggregate = await h.store.readAggregate(h.localRoot, INSTANCE_ID);
+  assert.ok(aggregate !== null);
+  if (aggregate === null) return;
+  const analyses = (aggregate.analyses ?? []).map((item) =>
+    item.analysisId === analysisId ? { ...item, status: 'completed' as const } : item);
+  await h.store.writeAggregate(h.localRoot, { ...aggregate, analyses });
+  const denied = await h.service.sendFirstMessage(analysisId);
+  assert.equal(denied.status, 'rejected');
+  if (denied.status === 'rejected') assert.equal(denied.code, 'analysis-terminal');
+  assert.equal(h.session.promptCalls.length, 0);
 });

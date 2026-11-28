@@ -16,7 +16,7 @@ import {
   type InstanceAggregate,
 } from './local-state.js';
 import type { AnalysisSelection, AnalysisScopeService } from './analysis-scope.js';
-import type { AnalysisSessionPort, LocalStateStorePort, PublishHooksPort } from './ports.js';
+import type { AnalysisExecutionPort, AnalysisSessionPort, LocalStateStorePort, PublishHooksPort } from './ports.js';
 import type { ScopeSelection } from '../domain/analysis.js';
 
 export type AnalysisOutcome<S> =
@@ -58,6 +58,8 @@ export interface AnalysisSessionServiceDeps {
     { readonly ok: true; readonly planVersion: string } | { readonly ok: false; readonly code: string; readonly message: string }
   >;
   readonly session: AnalysisSessionPort;
+  /** 派发前保护核对与首消息接受查询（4.3-4.4）。 */
+  readonly execution: AnalysisExecutionPort;
   readonly clock: () => string;
   readonly newAnalysisId: () => string;
   /** 固定分析 preset 标识（与 cordis.patch.yml 一致）。 */
@@ -200,6 +202,180 @@ export class AnalysisSessionService {
     });
   }
 
+  /**
+   * 发送首条分析消息（tasks 4.3）。派发前先经保护端口核对执行器/守卫并注册能力；
+   * 发送前落 `sending`，成功后落 `running`。宿主报错后先查询同一 requestId 是否已到达，
+   * 未查清时保留 unknown 且不自动重发；显式 retry 只在查询确认未到达后复用同一 requestId。
+   */
+  async sendFirstMessage(
+    analysisId: string,
+    options: { readonly retry?: boolean } = {},
+  ): Promise<AnalysisOutcome<{ readonly sent: boolean; readonly recovered: boolean; readonly reused: boolean }>> {
+    if (typeof analysisId !== 'string' || analysisId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 analysisId' };
+    }
+    return this.deps.queue.run(this.deps.instanceId, async () => {
+      const read = await this.readAggregate();
+      if ('outcome' in read) return read.outcome;
+      const records = analysisRecordsOf(read.aggregate.analyses);
+      const record = records.find((item) => item.analysisId === analysisId);
+      if (record === undefined) return { status: 'rejected' as const, code: 'analysis-not-found', message: '本机没有该分析记录' };
+      if (ANALYSIS_TERMINAL_STATUSES.includes(record.status)) {
+        return { status: 'rejected' as const, code: 'analysis-terminal', message: '该分析已结束，只可回看，不再接受新消息' };
+      }
+      if (record.sessionId === null) {
+        return { status: 'rejected' as const, code: 'analysis-session-missing', message: '尚未登记实际 Session；请先核对启动结果' };
+      }
+      if (record.binding === null || !record.binding.persisted) {
+        return { status: 'rejected' as const, code: 'analysis-binding-not-persisted', message: '本机关联尚未落盘，不发送分析消息' };
+      }
+      const sessionId = record.sessionId;
+      if (record.status === 'running') {
+        return { status: 'committed' as const, value: { sent: true, recovered: false, reused: true }, stateRevision: read.aggregate.revisions.state };
+      }
+      if (record.status === 'sending' || record.status === 'unknown') {
+        const accepted = await this.deps.execution.promptAccepted(sessionId, record.requestId);
+        if (accepted === true) {
+          return this.finishSend(read.aggregate, records, record, { recovered: true, reused: true });
+        }
+        if (accepted === 'unknown') {
+          return {
+            status: 'rejected' as const,
+            code: 'analysis-send-unconfirmed',
+            message: '上次发送结果无法核对；不自动重发，请稍后显式重试',
+          };
+        }
+        if (options.retry !== true) {
+          return {
+            status: 'rejected' as const,
+            code: 'analysis-send-unconfirmed',
+            message: '上次发送未被宿主接受；不自动重发，显式重试可复用同一请求标识',
+          };
+        }
+        // 查询确认未到达：允许显式 retry，仍使用原 requestId（不换号）。
+      }
+
+      const prepared = await this.deps.execution.prepare(record);
+      if (!prepared.ready) {
+        return { status: 'rejected' as const, code: prepared.code, message: prepared.message };
+      }
+
+      const now = this.deps.clock();
+      const sending: AnalysisRecord = {
+        ...record,
+        status: 'sending',
+        binding: { ...(record.binding ?? { persisted: true, terminal: false, version: 1 }), protected: true },
+        updatedAt: now,
+      };
+      const sendingSaved = await this.persist(read.aggregate, replaceRecord(records, sending));
+      if (sendingSaved.status !== 'committed') return sendingSaved;
+
+      try {
+        await this.deps.session.promptFirstMessage({
+          sessionId,
+          requestId: record.requestId,
+          text: firstMessageText(record),
+        });
+      } catch (error) {
+        const accepted = await this.deps.execution.promptAccepted(sessionId, record.requestId);
+        if (accepted === true) {
+          return this.finishSend(
+            { ...read.aggregate, revisions: { ...read.aggregate.revisions, state: sendingSaved.stateRevision } },
+            replaceRecord(records, sending),
+            sending,
+            { recovered: true, reused: false },
+          );
+        }
+        const detail = `首条消息发送结果未知：${(error as Error).message}`;
+        const unknown: AnalysisRecord = { ...sending, status: 'unknown', detail, updatedAt: this.deps.clock() };
+        await this.persist(
+          { ...read.aggregate, revisions: { ...read.aggregate.revisions, state: sendingSaved.stateRevision } },
+          replaceRecord(records, unknown),
+        );
+        return { status: 'rejected' as const, code: 'analysis-send-unknown', message: detail };
+      }
+      return this.finishSend(
+        { ...read.aggregate, revisions: { ...read.aggregate.revisions, state: sendingSaved.stateRevision } },
+        replaceRecord(records, sending),
+        sending,
+        { recovered: false, reused: false },
+      );
+    });
+  }
+
+  /**
+   * 启动／发送结果核对（tasks 4.3）。创建结果未知时只在宿主列表里找候选，不自动再建；
+   * 发送结果未知时只查询同一 requestId，查清前保持原状态。
+   */
+  async reconcile(analysisId: string): Promise<
+    | { readonly status: 'adopted'; readonly analysis: AnalysisRecord; readonly candidates: readonly string[] }
+    | { readonly status: 'running'; readonly analysis: AnalysisRecord; readonly candidates: readonly string[] }
+    | { readonly status: 'created'; readonly analysis: AnalysisRecord; readonly candidates: readonly string[] }
+    | { readonly status: 'needs-choice'; readonly analysis: AnalysisRecord; readonly candidates: readonly string[] }
+    | { readonly status: 'not-found'; readonly analysis: AnalysisRecord; readonly candidates: readonly string[] }
+    | { readonly status: 'unconfirmed'; readonly analysis: AnalysisRecord; readonly candidates: readonly string[] }
+    | { readonly status: 'rejected'; readonly code: string; readonly message: string }
+  > {
+    if (typeof analysisId !== 'string' || analysisId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 analysisId' };
+    }
+    return this.deps.queue.run(this.deps.instanceId, async () => {
+      const read = await this.readAggregate();
+      if ('outcome' in read) {
+        const outcome = read.outcome;
+        if (outcome.status === 'committed') return { status: 'rejected' as const, code: 'analysis-read-failed', message: '读取分析记录失败' };
+        return { status: 'rejected' as const, code: outcome.code, message: outcome.message };
+      }
+      const records = analysisRecordsOf(read.aggregate.analyses);
+      const record = records.find((item) => item.analysisId === analysisId);
+      if (record === undefined) return { status: 'rejected' as const, code: 'analysis-not-found', message: '本机没有该分析记录' };
+
+      if (record.sessionId === null) {
+        const sessions = await this.deps.session.listSessions();
+        const createdMs = Date.parse(record.createdAt);
+        const candidates = sessions
+          .filter((session) => session.blank && session.cwd === record.repositoryRoot
+            && Number.isFinite(createdMs) && session.updatedAt >= createdMs)
+          .map((session) => session.sessionId);
+        if (candidates.length !== 1) {
+          return {
+            status: candidates.length > 1 ? 'needs-choice' as const : 'not-found' as const,
+            analysis: record,
+            candidates,
+          };
+        }
+        const sessionId = candidates[0] as string;
+        const adopted: AnalysisRecord = {
+          ...record,
+          sessionId,
+          status: 'created',
+          binding: { persisted: true, protected: false, terminal: false, version: 1 },
+          updatedAt: this.deps.clock(),
+        };
+        const saved = await this.persist(read.aggregate, replaceRecord(records, adopted));
+        if (saved.status !== 'committed') return { status: 'rejected' as const, code: saved.code, message: saved.message };
+        return { status: 'adopted' as const, analysis: adopted, candidates };
+      }
+
+      if (record.status === 'sending' || record.status === 'unknown') {
+        const accepted = await this.deps.execution.promptAccepted(record.sessionId, record.requestId);
+        if (accepted === true) {
+          const done = await this.finishSend(read.aggregate, records, record, { recovered: true, reused: false });
+          if (done.status !== 'committed') return { status: 'rejected' as const, code: done.code, message: done.message };
+          return { status: 'running' as const, analysis: done.value.analysis, candidates: [] };
+        }
+        if (accepted === false) {
+          const rolled: AnalysisRecord = { ...record, status: 'created', detail: undefined, updatedAt: this.deps.clock() };
+          const saved = await this.persist(read.aggregate, replaceRecord(records, rolled));
+          if (saved.status !== 'committed') return { status: 'rejected' as const, code: saved.code, message: saved.message };
+          return { status: 'created' as const, analysis: rolled, candidates: [] };
+        }
+        return { status: 'unconfirmed' as const, analysis: record, candidates: [] };
+      }
+      return { status: 'running' as const, analysis: record, candidates: [] };
+    });
+  }
+
   /** 读取单条分析记录（只读；不改变状态）。 */
   async get(analysisId: string): Promise<{ status: 'ok'; analysis: AnalysisRecord } | { status: 'rejected'; code: string; message: string }> {
     if (typeof analysisId !== 'string' || analysisId === '') {
@@ -245,6 +421,29 @@ export class AnalysisSessionService {
       return { outcome: { status: 'rejected', code: 'binding-expired', message: '本机注册表中没有该实例' } };
     }
     return { aggregate };
+  }
+
+  /** 发送完成：落 running 与 sentAt；返回统一的 committed 结果。 */
+  private async finishSend(
+    aggregate: InstanceAggregate,
+    records: readonly AnalysisRecord[],
+    record: AnalysisRecord,
+    outcome: { readonly recovered: boolean; readonly reused: boolean },
+  ): Promise<AnalysisOutcome<{ readonly sent: boolean; readonly recovered: boolean; readonly reused: boolean; readonly analysis: AnalysisRecord }>> {
+    const running: AnalysisRecord = {
+      ...record,
+      status: 'running',
+      sentAt: record.sentAt ?? this.deps.clock(),
+      updatedAt: this.deps.clock(),
+      detail: undefined,
+    };
+    const saved = await this.persist(aggregate, replaceRecord(records, running));
+    if (saved.status !== 'committed') return saved;
+    return {
+      status: 'committed' as const,
+      value: { sent: true, recovered: outcome.recovered, reused: outcome.reused, analysis: running },
+      stateRevision: saved.stateRevision,
+    };
   }
 
   /** 聚合替换 + stateRevision 推进；unknown-state 时与命令层同样进入隔离。 */
@@ -336,4 +535,27 @@ function validateStart(request: StartAnalysisRequest): AnalysisOutcome<never> | 
     return { status: 'rejected', code: 'operation-mismatch', message: 'expectedFingerprint 必须是字符串' };
   }
   return null;
+}
+
+
+/** 替换一条记录；找不到时不追加。 */
+function replaceRecord(records: readonly AnalysisRecord[], record: AnalysisRecord): AnalysisRecord[] {
+  return records.map((item) => (item.analysisId === record.analysisId ? record : item));
+}
+
+/** 首条分析消息正文：只给逻辑身份与冻结范围，不注入机器绝对路径。 */
+export function firstMessageText(record: AnalysisRecord): string {
+  const scope = record.scope.kind === 'root'
+    ? '仓库根'
+    : `${record.scope.kind === 'file' ? '文件' : '目录'} ${record.scope.path}`;
+  return [
+    '请对本项目做一次只读分析。',
+    `项目实例：${record.instanceId}`,
+    `逻辑仓库：${record.repositoryId}`,
+    `分析范围：${scope}`,
+    `起始观察：${record.observation.entries} 个文件，完整=${record.observation.complete ? '是' : '否'}，指纹=${record.observation.fingerprint}`,
+    `规划版本：${record.planVersion}`,
+    '只使用 cona_analysis_background、cona_analysis_scope_files、cona_analysis_verification、cona_analysis_save_report。',
+    '先看背景与范围，再按实际读取生成报告；不要写文件、不要执行代码。若保护或范围不可用，直接说明原因。',
+  ].join('\n');
 }

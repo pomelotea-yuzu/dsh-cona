@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Context } from '@deepseek-ai/cordis';
 import { analysisSessionPort } from '../src/host/analysis-session.js';
+import { agentPromptAccepted, unavailableAnalysisExecutionPort } from '../src/host/analysis-execution-port.js';
 
 interface CreateRequest {
   sessionId?: string;
@@ -18,8 +19,10 @@ function harness(options?: {
   invalidSessionId?: boolean;
   preset?: string;
   attachThrows?: boolean;
+  noPrompt?: boolean;
 }) {
   const creates: CreateRequest[] = [];
+  const prompts: Array<{ request: Record<string, unknown>; signal: AbortSignal }> = [];
   const attached: string[] = [];
   const workspaces = options?.workspaces === false ? undefined : {
     async resolveByPath() {
@@ -56,6 +59,12 @@ function harness(options?: {
         ],
       };
     },
+    ...(options?.noPrompt === true ? {} : {
+      async prompt(request: Record<string, unknown>, signal: AbortSignal) {
+        prompts.push({ request, signal });
+        return { accepted: true };
+      },
+    }),
   };
   const ctx = {
     sessionController,
@@ -63,7 +72,7 @@ function harness(options?: {
       return name === 'workspaceRegistry' ? workspaces : undefined;
     },
   } as unknown as Context;
-  return { ctx, creates, attached };
+  return { ctx, creates, prompts, attached };
 }
 
 test('4.2 分析创建使用 workspaceId + 专用 preset，且不传 sessionId', async () => {
@@ -118,6 +127,60 @@ test('4.2 工作区登记失败不冒充创建失败，但保留可诊断警告'
   const created = await result.port.createAnalysisSession({ cwd: '/repo', agentPreset: 'cona-project-analysis' });
   assert.equal(created.sessionId, 'session-1');
   assert.deepEqual(h.attached, []);
+});
+
+test('4.3 首条消息使用 requestId 与 queue 模式发送；缺 prompt 时明确失败', async () => {
+  const h = harness();
+  const result = analysisSessionPort(h.ctx);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  await result.port.promptFirstMessage({ sessionId: 'session-1', requestId: 'op-1', text: '分析范围 src' });
+  assert.equal(h.prompts.length, 1);
+  assert.deepEqual(h.prompts[0]?.request, {
+    sessionId: 'session-1',
+    requestId: 'op-1',
+    mode: 'queue',
+    content: [{ type: 'text', text: '分析范围 src' }],
+  });
+  assert.equal(h.prompts[0]?.signal.aborted, false);
+
+  const missing = analysisSessionPort(harness({ noPrompt: true }).ctx);
+  assert.equal(missing.ok, true);
+  if (missing.ok) {
+    await assert.rejects(
+      missing.port.promptFirstMessage({ sessionId: 'session-1', requestId: 'op-1', text: 'x' }),
+      /prompt/,
+    );
+  }
+});
+
+test('4.3 按 Agent 事件核对 requestId：user/message 与 inbox/spliced 都算已接受', async () => {
+  const events = [
+    { type: 'user/message', data: { source: { kind: 'user', rpcId: 'op-a' } } },
+    { type: 'agent/inbox/spliced', data: { inserted: [{ source: { kind: 'user', rpcId: 'op-b' } }] } },
+    { type: 'user/message', data: { source: { kind: 'system', rpcId: 'op-a' } } },
+  ];
+  const ctx = {
+    get(name: string) {
+      if (name !== 'agents') return undefined;
+      return { get: () => ({ session: { snapshotEvents: () => events } }) };
+    },
+  } as unknown as Context;
+  const accepted = agentPromptAccepted(ctx);
+  assert.equal(await accepted('session-1', 'op-a'), true);
+  assert.equal(await accepted('session-1', 'op-b'), true);
+  assert.equal(await accepted('session-1', 'op-missing'), false);
+
+  const unknown = agentPromptAccepted({ get: () => undefined } as unknown as Context);
+  assert.equal(await unknown('session-1', 'op-a'), 'unknown');
+});
+
+test('4.3 保护端口未接入时拒绝派发并保持查询未知', async () => {
+  const port = unavailableAnalysisExecutionPort('未接入');
+  const prepared = await port.prepare({} as never);
+  assert.equal(prepared.ready, false);
+  if (!prepared.ready) assert.equal(prepared.code, 'analysis-execution-unavailable');
+  assert.equal(await port.promptAccepted('session-1', 'op-1'), 'unknown');
 });
 
 test('4.2 目录不可用时返回明确原因；listSessions 过滤无效条目', async () => {

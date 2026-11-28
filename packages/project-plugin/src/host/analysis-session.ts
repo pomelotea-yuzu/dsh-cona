@@ -16,6 +16,28 @@ interface SessionControllerLike {
     agentPreset?: string;
   }): Promise<{ sessionId: unknown; agentPreset?: unknown }>;
   list(signal?: AbortSignal): Promise<{ items?: ReadonlyArray<Record<string, unknown>> }>;
+  prompt?(request: {
+    sessionId: string;
+    requestId: string;
+    mode: 'queue' | 'steer';
+    content: readonly { type: 'text'; text: string }[];
+  }, signal: AbortSignal): Promise<{ accepted?: unknown }>;
+}
+
+interface AgentLike {
+  readonly id?: unknown;
+  readonly session?: {
+    snapshotEvents?(): ReadonlyArray<{
+      readonly type?: unknown;
+      readonly data?: {
+        readonly source?: { readonly kind?: unknown; readonly rpcId?: unknown };
+        readonly inserted?: ReadonlyArray<{ readonly source?: { readonly kind?: unknown; readonly rpcId?: unknown } }>;
+      };
+    }>;
+  };
+}
+interface AgentsLike {
+  get(sessionId: string): AgentLike | undefined;
 }
 
 interface WorkspaceLike {
@@ -38,6 +60,9 @@ export function unavailableAnalysisSessionPort(message: string): AnalysisSession
       throw new Error(message);
     },
     async listSessions() {
+      throw new Error(message);
+    },
+    async promptFirstMessage() {
       throw new Error(message);
     },
   };
@@ -107,6 +132,18 @@ export function analysisSessionPort(ctx: Context): AnalysisSessionPortResult {
           });
         }
         return out;
+      },
+      async promptFirstMessage(input) {
+        if (typeof controller.prompt !== 'function') {
+          throw new Error('宿主 sessionController 未提供 prompt（版本不符）');
+        }
+        await controller.prompt({
+          sessionId: input.sessionId,
+          requestId: input.requestId,
+          mode: 'queue',
+          content: [{ type: 'text', text: input.text }],
+        }, new AbortController().signal);
+        return { accepted: true as const };
       },
     },
   };

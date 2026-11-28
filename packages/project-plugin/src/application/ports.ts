@@ -6,6 +6,7 @@ import type { ProjectDocument, Sha256Fn, ValidationIssue } from '../domain/types
 import type { AnalysisLimits, ObservationEntry, ObservationExclusion, ObservationIssue, ScopeSelection } from '../domain/analysis.js';
 import type { LocationIssue, LocationKind, LocationPlan, LocationRequest } from './location.js';
 import type {
+  AnalysisRecord,
   InstanceAggregate,
   LocalRootPlan,
   LocalRootView,
@@ -119,6 +120,31 @@ export interface AnalysisSessionPort {
   }): Promise<{ readonly sessionId: string; readonly agentPreset?: string }>;
   /** 只读列举宿主可见会话；用于启动结果未知时的显式核对，不 resume。 */
   listSessions(): Promise<readonly DirectorySession[]>;
+  /**
+   * 发送首条分析消息，source.rpcId 使用调用方提供的 requestId。
+   * 宿主接受即返回；抛错表示结果未知，调用方必须先用 listSessions／promptAccepted 核对。
+   */
+  promptFirstMessage(input: {
+    readonly sessionId: string;
+    readonly requestId: string;
+    readonly text: string;
+  }): Promise<{ readonly accepted: true }>;
+}
+
+/** 分析执行的保护端口（tasks 4.3-4.4）：派发前核对执行器/守卫并注册本轮能力。 */
+export interface AnalysisExecutionPort {
+  /**
+   * 在发送首条消息前调用：核对原生执行器、可见工具集与守卫，并（由实现方）注册
+   * 本轮四个分析能力。返回 ready=false 时调用方不得发送。
+   */
+  prepare(record: AnalysisRecord): Promise<
+    { readonly ready: true } | { readonly ready: false; readonly code: string; readonly message: string }
+  >;
+  /**
+   * 查询宿主是否已接受同一 requestId 的 user 消息。
+   * true／false 为已核对结论；'unknown' 表示当前无法核对，调用方不得自动重发。
+   */
+  promptAccepted(sessionId: string, requestId: string): Promise<boolean | 'unknown'>;
 }
 
 /** 目标节点的有来源摘要（6.4 运行上下文）：只取请求的节点，不注入整棵树。 */
