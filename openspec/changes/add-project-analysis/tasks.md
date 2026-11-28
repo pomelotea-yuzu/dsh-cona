@@ -12,14 +12,14 @@
 
 ## 2. 固定宿主接入验证
 
-> 2026-11-28 阶段进展：静态核对、keyless 机制探针（17 项测试）与接入模块代码已落地，完整门禁 546/546；cordis.patch.yml 的 preset 声明已写但未在真宿主加载验证。真实宿主实测未做，下列三项不勾选、A03/A04/A05/A07 保持 `untested`，见[实施记录](implementation/2026-11-28-2.x-host-connection.md)。
+> 2026-11-28 阶段进展：静态核对、keyless 机制探针与接入模块已落地，并在隔离 profile 的真 DSH `0.2.2-rc.2` 上部分实测（preset 注册、实际会话与作用域、守卫、pre-step、原生/PTC 执行器对照）；实测同时修复 `ctx.effect` 立即释放保护与随包 patch 缺 `config` 两处问题。模型回合、范围语义（3.x/5.x）与重启时序（4.x/6.x）未做，下列三项不勾选、A03/A04/A05/A07 保持 `untested`，见[真宿主记录](implementation/2026-11-28-2.x-real-host.md)与[阶段记录](implementation/2026-11-28-2.x-host-connection.md)。
 
 - [ ] 2.1 验证随包的 `cordis.patch.yml` 如何向 DSH `0.2.2-rc.2` 注册分析 preset，组装原生执行器和分析作用域接入模块。隔离 profile 实测实际 preset、有效作用域、工作区挂载、消息认领、工具主体与宿主终态；注册表缺失、ID 冲突或声明加载／解析失败时核对不可用诊断（A03、A05）。
-  - 2026-11-28：preset 声明与 analysis-scope 子模块已写，YAML 解析通过；宿主实际加载／ID 诊断／子路径解析待真 DSH 实测。
+  - 2026-11-28 真宿主（隔离 profile，DSH 0.2.2-rc.2）：roster 含 `cona-project-analysis`；`create({cwd, agentPreset})` 返回实际 preset 与 cwd；可见工具仅四个允许名；headless 缺 `agentPresets`/`sessionController` 时 preset 行 `pending` 诊断；重复 ID 报 `Duplicate agent preset` 且原条目保留。缺 Host 入口的「不可用」显示（3.x/7.x）与模型回合，见[真宿主记录](implementation/2026-11-28-2.x-real-host.md)。
 - [ ] 2.2 在启用 PTC 的隔离对照和普通原生环境验证分析选择原生执行器、普通 Session 使用其原组合。用合成文件测试保留的 PTC 执行入口、通用代码执行、Shell、文件写入和代理转发。记录分派、执行正文未进入、范围外读取未返回、范围内外写入未生效；标注沙箱模式和拒绝所在层（A04、A05）。
-  - 2026-11-28：keyless 已验证 restrict/guard 的会话隔离与允许集、执行器注册/释放机制；PTC 对照、正文未进入、合成文件未改属 H 分句待实测。
+  - 2026-11-28 真宿主：分析 Session 选中 `NativeToolExecutor`、PTC Session 选中 `PtcExecutor`；守卫在正文前拒绝 `bash`/`write`/`run_code`（`analysis-tool-not-allowed`），夹具文件哈希不变；PTC 会话 `run_code` 到达 code-run 层（本进程沙箱内返回 `sandbox-unavailable`）。范围外读取与真实分析工具语义属 3.x/5.x，未测，见[真宿主记录](implementation/2026-11-28-2.x-real-host.md)。
 - [ ] 2.3 验证实际执行器无法核对、守卫不可用、关联未持久化或启动响应丢失时，后台不会派发无保护请求；验证 `agent/pre-step` 在正常完成、中断和重启后的原会话上拦截新输入（A03、A05、A07）。
-  - 2026-11-28：纯逻辑层已验证 fail-closed 与 pre-step 判定；真实 `agent/pre-step` 事件与重启时序待实测。
+  - 2026-11-28 真宿主：无绑定/未持久化时守卫 fail-closed；真实 `agent/pre-step` 对错误 `rpcId` 与终止绑定均返回 `turn/end blocked` 且无 `step/start`、未进模型；匹配 `rpcId` 的回合进到模型层后因隔离 home 无凭证 `MISSING_CREDENTIAL`。启动响应丢失与重启后历史会话属 4.x/6.x，未测，见[真宿主记录](implementation/2026-11-28-2.x-real-host.md)。
 
 ## 3. 本机范围和受检内容观察
 

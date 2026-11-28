@@ -173,6 +173,10 @@ export function apply(ctx: Context): void {
   } else {
     console.log('[cona-project-analysis] 分析作用域保护已建立');
   }
-  // cordis 插件的清理：作用域卸载时自动释放守卫/restrict/pre-step。
-  (ctx as Context & { effect?: (fn: () => void) => void }).effect?.(() => install.dispose());
+  // cordis 的 effect 会立刻执行传入的工厂并收集其返回的释放函数
+  // （见 cordis Fiber.effect / 本仓 `ctx.effect(() => () => dispose())` 用法）。
+  // 因此必须返回释放函数本身；直接 `.effect(() => install.dispose())` 会在
+  // 安装完成时立即释放 guard/restrict/pre-step（真宿主实测暴露）。
+  const effect = (ctx as Context & { effect?: (factory: () => () => void) => () => void }).effect;
+  if (effect !== undefined) effect.call(ctx, () => () => install.dispose());
 }

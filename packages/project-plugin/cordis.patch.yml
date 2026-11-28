@@ -6,6 +6,11 @@
 - insert:
     - id: cona-project
       name: dsh-cona-project
+      # Config 是 z.object（字段全可选），但 loader 只给未配置行传 undefined，
+      # resolveConfig 会 parse(undefined) 报 ValidationError；显式空对象让
+      # 未配置实例也能激活（2026-11-28 真宿主实测暴露）。profile 可按 id 覆盖
+      # 该 config 提供 projectRoot 等设置。
+      config: {}
 
 - insert:
     - id: cona-project-analysis-preset

@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Context } from '@deepseek-ai/cordis';
 import {
+  apply,
   installAnalysisScope,
   preStepDecision,
   requestIdOf,
@@ -112,6 +113,24 @@ test('2.x-p 上游依赖缺失或安装失败时 ready=false，不留下半装�
   const guardFail = harness({ guardThrows: true });
   assert.equal(installAnalysisScope(guardFail.ctx, () => undefined).ready, false);
   assert.equal(guardFail.guards.length, 0);
+});
+
+test('2.x-r apply 按 cordis effect 语义安装：保护保持到卸载，不立即释放', () => {
+  const h = harness();
+  const disposers: Array<() => void> = [];
+  (h.ctx as unknown as { effect: (factory: () => () => void) => () => void }).effect = (factory) => {
+    // cordis Fiber.effect 立即执行工厂并收集其返回的释放函数（真宿主语义）。
+    const disposer = factory();
+    disposers.push(disposer);
+    return () => disposer();
+  };
+  apply(h.ctx);
+  assert.equal(h.guards.length, 1, 'apply 后守卫必须仍在');
+  assert.equal(h.steps.length, 1, 'apply 后 pre-step 必须仍在');
+  assert.deepEqual([...(h.allowed ?? [])].sort(), [...ANALYSIS_ALLOWED_TOOLS].sort());
+  assert.equal((h as { disposed: number }).disposed, 0, 'apply 不得立即释放保护');
+  for (const dispose of disposers) dispose();
+  assert.equal((h as { disposed: number }).disposed >= 3, true, '作用域卸载时才释放');
 });
 
 test('2.x-q 工具辅助：requestIdOf 只取 user 消息 rpcId，preStepDecision 转拒绝', () => {
