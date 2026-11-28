@@ -4,11 +4,13 @@
 
 ## 1. 恢复 GitHub Actions 与 Gitee Go
 
-- [ ] 1.1 从两个附件核对唯一失败用例和运行工具链。用原源码及 Node 24.21.0 对比 `init.defaultBranch=master` 与 `main`，记录基线、结果和实测 Git 版本；Gitee 附件明确记为 Git 版本未知（CI01）。
-- [ ] 1.2 在 `setupGit()` 的 `git init` 后、首次提交前用 `git symbolic-ref HEAD refs/heads/<夹具分支>` 固定初始分支，与测试切回使用同一常量。核对真实未合并索引、预览失败状态和 `git-unmerged` 诊断（CI01）。
-- [ ] 1.3 记录所用 `git --version`、Node 24.21.0／pnpm 12.18.0。重新编译插件和测试，在 `master`、`main` 各跑定向用例，再跑完整 `pnpm check:ci`（CI01）。
+- [x] 1.1 从两个附件核对唯一失败用例和运行工具链。用原源码及 Node 24.21.0 对比 `init.defaultBranch=master` 与 `main`，记录基线、结果和实测 Git 版本；Gitee 附件明确记为 Git 版本未知（CI01）。（2026-11-28：修改前复现 `master` exit 1／0-1、`main` exit 0／1-1；Git `2.54.0 (Apple Git-157)`、Node `v24.21.0`、pnpm `12.18.0`，见[实施记录](implementation/2026-11-28-1.x-ci-fixture.md)）
+- [x] 1.2 在 `setupGit()` 的 `git init` 后、首次提交前用 `git symbolic-ref HEAD refs/heads/<夹具分支>` 固定初始分支，与测试切回使用同一常量。核对真实未合并索引、预览失败状态和 `git-unmerged` 诊断（CI01）。（2026-11-28：已增加 `git ls-files -u` 非空断言并保留原预览诊断，见[实施记录](implementation/2026-11-28-1.x-ci-fixture.md#修复)）
+- [x] 1.3 记录所用 `git --version`、Node 24.21.0／pnpm 12.18.0。重新编译插件和测试，在 `master`、`main` 各跑定向用例，再跑完整 `pnpm check:ci`（CI01）。（2026-11-28：两组定向均 1/1；完整门禁 exit 0、529/529，见[实施记录](implementation/2026-11-28-1.x-ci-fixture.md#修复后验证)）
 - [ ] 1.4 在 GitHub Actions 版本步骤打印 `git --version`。用户同步或授权同步后，记录包含修复的 commit、run ID、三项工具版本与门禁结论；发现相关失败时修复并复跑（CI02）。
+  - 2026-11-28：本地版本输出已补；尚未提交／同步，远程 run 与实测版本待取证，见[实施记录](implementation/2026-11-28-1.x-ci-fixture.md#远程边界与后续)。
 - [ ] 1.5 在 Gitee Go 门禁前打印 `git --version`，确认夹具只依赖已具备的 `init` 和 `symbolic-ref`。独立记录包含修复的 commit、流水线、三项工具版本和门禁结论（CI03）。
+  - 2026-11-28：本地版本输出与夹具依赖核对已完成；尚未提交／同步，远程流水线与实测版本待取证，见[实施记录](implementation/2026-11-28-1.x-ci-fixture.md#远程边界与后续)。
 
 ## 2. 固定宿主接入验证
 

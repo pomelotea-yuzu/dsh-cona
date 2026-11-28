@@ -27,6 +27,7 @@ const SAMPLE_NODE_ID = '00000000-0000-4000-8000-000000000002';
 const REPO_ID = '00000000-0000-4000-8000-00000000c205';
 const R1 = '00000000-0000-4000-8000-00000000c231';
 const R2 = '00000000-0000-4000-8000-00000000c232';
+const FIXTURE_BRANCH = 'main';
 
 interface CliJson {
   ok?: boolean;
@@ -118,6 +119,7 @@ function setupGit(name: string): {
   addRecord(source, R1, '# R1 原文\n');
   const r1OriginalPath = readDoc(source).records.find((record) => record.id === R1)!.path;
   git(source, ['init', '--quiet']);
+  git(source, ['symbolic-ref', 'HEAD', `refs/heads/${FIXTURE_BRANCH}`]);
   git(source, ['add', '.']);
   git(source, ['commit', '--quiet', '-m', 'c1: 只有 R1']);
   const c1 = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: source, encoding: 'utf8' }).trim();
@@ -402,7 +404,7 @@ test('1.3 git-unmerged：真实合并冲突遗留拒绝预览，先解决冲突�
   addRecord(ctx.source, R1, conflictBody + '分支 X\n');
   git(ctx.source, ['add', '.']);
   git(ctx.source, ['commit', '--quiet', '-m', 'x']);
-  git(ctx.source, ['checkout', '--quiet', 'main']);
+  git(ctx.source, ['checkout', '--quiet', FIXTURE_BRANCH]);
   addRecord(ctx.source, R1, conflictBody + '分支主\n');
   git(ctx.source, ['add', '.']);
   git(ctx.source, ['commit', '--quiet', '-m', 'main']);
@@ -413,6 +415,11 @@ test('1.3 git-unmerged：真实合并冲突遗留拒绝预览，先解决冲突�
     mergeFailed = true;
   }
   assert.equal(mergeFailed, true, '夹具应制造出真实合并冲突');
+  assert.notEqual(
+    execFileSync('git', ['ls-files', '-u'], { cwd: ctx.source, encoding: 'utf8' }).trim(),
+    '',
+    '合并失败后应遗留真实未合并索引',
+  );
 
   const preview = run(['preview-refresh', '--local-root', ctx.localRoot, '--instance', ctx.instanceId, '--source', ctx.source]);
   assert.equal(preview.status, 1);

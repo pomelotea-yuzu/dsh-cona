@@ -43,7 +43,7 @@ stages:
           - >-
             (curl -fsSL https://npmmirror.com/mirrors/node/v24.21.0/node-v24.21.0-linux-x64.tar.gz -o /tmp/node.tar.gz
             || wget -q https://npmmirror.com/mirrors/node/v24.21.0/node-v24.21.0-linux-x64.tar.gz -O /tmp/node.tar.gz)
-            && tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 && node -v
+            && tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 && git --version && node -v
             && npm i -g pnpm@12.18.0 --allow-scripts=pnpm --registry=https://registry.npmmirror.com
             && export PATH="$(npm prefix -g)/bin:$PATH" && pnpm -v
             && pnpm install --frozen-lockfile && pnpm check:ci

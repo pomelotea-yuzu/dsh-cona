@@ -42,7 +42,7 @@ jobs:
           cache: pnpm
 
       - name: Report versions
-        run: node -v && pnpm -v
+        run: git --version && node -v && pnpm -v
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

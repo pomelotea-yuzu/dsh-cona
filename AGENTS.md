@@ -20,7 +20,7 @@ R2 第二切片 `openspec/changes/archive/2026-11-22-add-project-tree-editing-an
 
 R2 收尾 `openspec/changes/archive/2026-11-24-complete-r2-project-workflow/` 已于 2026-11-24 归档：五份增量 specs 并入主 `openspec/specs/`（新增 `project-roadmap`，更新其余四份），全部实施任务 5.1–5.8 勾选，J01／J08／J09 `pass`，J04／J07 因 5.6 未做的 H 分句保持 `untested` 不放宽。完整 `pnpm check:ci` 已由用户真终端通过（Node 24.21.0／pnpm 12.18.0）；归档后 OpenSpec 严格校验 10/10。最终验收包 sha256 `7dcc48b3…`；见 [归档核对](openspec/changes/archive/2026-11-24-complete-r2-project-workflow/implementation/2026-11-24-archive-final-audit.md) 与 [交接](openspec/changes/archive/2026-11-24-complete-r2-project-workflow/implementation/2026-11-24-handoff.md)。逐条状态以归档的 tasks 与 validation-matrix 为准。
 
-当前活动 change 为 [add-project-analysis](openspec/changes/add-project-analysis/proposal.md)，涵盖 R3 首切片项目分析与复盘，以及 GitHub Actions／Gitee Go 共同的 Git 测试夹具故障。2026-11-25 已完成 DSH 和 GLM 复核及提交前修订，实施待安排。
+当前活动 change 为 [add-project-analysis](openspec/changes/add-project-analysis/proposal.md)，涵盖 R3 首切片项目分析与复盘，以及 GitHub Actions／Gitee Go 共同的 Git 测试夹具故障。2026-11-25 已完成 DSH 和 GLM 复核及提交前修订；2026-11-28 已开始实施，1.1–1.3 完成，1.4／1.5 待修复提交同步后补齐远程证据，其余实施待安排。
 
 ## 权威性
 
