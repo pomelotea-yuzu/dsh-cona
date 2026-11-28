@@ -135,6 +135,14 @@ function byteLength(text: string): number {
   return utf8Bytes(text).length;
 }
 
+/** 文本行数（与 sliceText 同一口径：末尾换行不额外算一行）。 */
+export function textLineCount(text: string): number {
+  if (text === '') return 1;
+  const lines = text.split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return Math.max(1, lines.length);
+}
+
 /** 一次读取实际交付的文本片段与行范围（1 起、含首尾）。 */
 export interface TextSlice {
   readonly text: string;

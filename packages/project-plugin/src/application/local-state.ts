@@ -259,6 +259,8 @@ export interface InstanceAggregate {
   repositoryMaps?: RepositoryMap[];
   /** 本机分析记录（4.1）；旧聚合归一化为空数组；不进入公开资料。 */
   analyses?: AnalysisRecord[];
+  /** 分析报告终稿（5.2）；旧聚合归一化为空数组；不进入公开资料。 */
+  analysisReports?: AnalysisReportRecord[];
 }
 
 /** 本机分析状态（tasks 4.1）：从 owner 确认到终态的稳定阶段。 */
@@ -322,6 +324,101 @@ export interface AnalysisRecord {
   readonly endReason?: 'completed' | 'aborted' | 'error' | 'stopped';
   readonly detail?: string;
   readonly previousAnalysisId?: string;
+}
+
+/** 报告中一条已核对的文件引用（来自实际交付的读取凭证）。 */
+export interface ReportFileCitation {
+  readonly path: string;
+  readonly fullHash: string;
+  readonly deliveredHash: string;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly deliveredBytes: number;
+  readonly totalLines: number;
+  readonly truncated: boolean;
+}
+
+/** 报告中一条已核对的验证记录引用。 */
+export interface ReportVerificationCitation {
+  readonly recordId: string;
+  readonly contentHash: string;
+  readonly subject: { readonly kind: 'node' | 'record'; readonly id: string };
+  readonly subjectVersion?: string;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly deliveredHash: string;
+  readonly deliveredBytes: number;
+  readonly truncated: boolean;
+}
+
+/** 规划背景引用：只锚定启动时冻结的 planVersion。 */
+export interface ReportPlanCitation {
+  readonly planVersion: string;
+}
+
+export type ReportCitation =
+  | ({ readonly kind: 'file' } & ReportFileCitation)
+  | ({ readonly kind: 'verification' } & ReportVerificationCitation)
+  | ({ readonly kind: 'plan' } & ReportPlanCitation);
+
+export interface ReportFact {
+  readonly text: string;
+  readonly citations: readonly ReportCitation[];
+}
+
+/** 报告覆盖：按保存时实际交付的凭证与当前范围观察计算。 */
+export interface ReportCoverage {
+  readonly observedFiles: number;
+  readonly readFiles: number;
+  readonly completeFiles: number;
+  readonly fragments: number;
+  readonly onlyEnumerated: number;
+  readonly unreadable: number;
+  readonly excluded: number;
+  readonly verificationRead: number;
+  readonly truncated: boolean;
+  readonly observationComplete: boolean;
+  readonly basis: 'current' | 'changed' | 'uncheckable';
+  readonly fingerprint: string;
+}
+
+/** 一轮分析的唯一报告终稿（本机私有；不进入公开资料）。 */
+export interface AnalysisReportRecord {
+  readonly reportId: string;
+  readonly analysisId: string;
+  readonly instanceId: string;
+  readonly repositoryId: string;
+  readonly scope: ScopeSelection;
+  readonly planVersion: string;
+  readonly sourceGeneration: number;
+  readonly requestId: string;
+  /** 规范化载荷哈希；同号重试据此判断同载荷／异载荷。 */
+  readonly payloadHash: string;
+  readonly createdAt: string;
+  readonly summary: string;
+  readonly facts: readonly ReportFact[];
+  readonly inferences: readonly string[];
+  readonly suggestions: readonly string[];
+  readonly coverage: ReportCoverage;
+}
+
+/** 旧聚合没有 analysisReports（5.x 前未定形）；读取时归一化。 */
+export function analysisReportsOf(value: unknown): AnalysisReportRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is AnalysisReportRecord => {
+    if (item === null || typeof item !== 'object') return false;
+    const record = item as Partial<AnalysisReportRecord>;
+    return typeof record.reportId === 'string' && record.reportId !== ''
+      && typeof record.analysisId === 'string' && record.analysisId !== ''
+      && typeof record.instanceId === 'string'
+      && typeof record.requestId === 'string'
+      && typeof record.payloadHash === 'string'
+      && typeof record.summary === 'string'
+      && Array.isArray(record.facts)
+      && Array.isArray(record.inferences)
+      && Array.isArray(record.suggestions)
+      && record.coverage !== null && typeof record.coverage === 'object';
+  });
 }
 
 /** 旧聚合没有 analyses（4.1 前未定形）；读取时归一化，不静默改写磁盘。 */

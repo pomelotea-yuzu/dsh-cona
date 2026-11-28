@@ -164,6 +164,8 @@ export interface ConaProjectRuntime {
   analysis?: import('../application/analysis-scope.js').AnalysisScopeService;
   /** 每实例分析 Session 生命周期（4.1-4.2）：本机记录、专用 preset 新建与关联登记。 */
   analysisSession?: import('../application/analysis-session.js').AnalysisSessionService;
+  /** 每实例分析报告服务（5.2-5.4）：保存、列表/详情与来源复核。 */
+  analysisReports?: import('../application/analysis-report.js').AnalysisReportService;
 }
 
 export type RuntimeResult =

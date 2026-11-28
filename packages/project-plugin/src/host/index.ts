@@ -20,6 +20,8 @@ import { InstanceCommandQueue } from '../application/command-queue.js'
 import { ConversationService } from '../application/conversations.js'
 import { AnalysisScopeService, type AnalysisRepositoryMapping } from '../application/analysis-scope.js'
 import { AnalysisSessionService } from '../application/analysis-session.js'
+import { AnalysisVerificationService } from '../application/analysis-verification.js'
+import { AnalysisReportService } from '../application/analysis-report.js'
 import { ResumeChatService } from '../application/resume-chat.js'
 import { WorkService } from '../application/work.js'
 import { InMemoryChangeStream, notificationForCommit, notificationForRefresh } from '../application/change-stream.js'
@@ -44,7 +46,9 @@ import { OWNER_CONTEXT } from './owner-admission.js'
 import { ProjectToolAdapter, defineProjectTools, type ConaToolDefinition, type ConaToolExec, type ConaToolsRegistry } from './project-tools.js'
 import { planNodeView, sessionDirectory, unavailableSessionDirectory } from './session-directory.js'
 import { analysisSessionPort, unavailableAnalysisSessionPort } from './analysis-session.js'
-import { createAnalysisExecutionPort, unavailableAnalysisCapabilityPort } from './analysis-execution-service.js'
+import { createAnalysisExecutionPort } from './analysis-execution-service.js'
+import { createAnalysisCapabilityPort } from './analysis-capabilities.js'
+import { DEFAULT_ANALYSIS_LIMITS } from '../domain/analysis.js'
 import { markAnalysisSessionHistorical, releaseAnalysisBinding } from './analysis-scope.js'
 import { attachAnalysisEventObservers } from './analysis-events.js'
 
@@ -397,6 +401,40 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       sha256,
       clock,
     })
+    const baselineDoc = async () => {
+      const result = await readSourceBaseline(files, instance.sourceRoot, sha256, clock)
+      if (!result.ok) {
+        const first = result.issues[0]
+        return { ok: false as const, code: first?.code ?? 'invalid-project', message: first?.message ?? '资料不可读' }
+      }
+      return { ok: true as const, doc: result.doc }
+    }
+    const verification = new AnalysisVerificationService({
+      baseline: baselineDoc,
+      readRecord: recordReader.readRecord,
+      sha256,
+      limits: DEFAULT_ANALYSIS_LIMITS,
+    })
+    const reports = new AnalysisReportService({
+      localRoot: instance.localRoot,
+      instanceId: instance.instanceId,
+      store,
+      queue,
+      scope: analysis,
+      verification,
+      baseline: baselineDoc,
+      sha256,
+      clock,
+      newReportId: () => randomUUID(),
+    })
+    const capabilities = createAnalysisCapabilityPort({
+      scope: analysis,
+      verification,
+      reports,
+      baseline: baselineDoc,
+      sha256,
+      limits: DEFAULT_ANALYSIS_LIMITS,
+    })
     const sessionPort = analysisSessionPort(ctx)
     const analysisSession = new AnalysisSessionService({
       localRoot: instance.localRoot,
@@ -413,10 +451,8 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
         return { ok: true as const, planVersion: result.baseline.planVersion }
       },
       session: sessionPort.ok ? sessionPort.port : unavailableAnalysisSessionPort(sessionPort.message),
-      // 4.4 的保护链路已接好；四个能力的真实工具属第 5 组，当前占位拒绝派发。
-      execution: createAnalysisExecutionPort(ctx, {
-        capabilities: unavailableAnalysisCapabilityPort('四个分析能力尚未注册；首条分析消息不派发'),
-      }),
+      // 第 5 组：四个真实能力在派发前注册到分析 Agent 自己的 scope。
+      execution: createAnalysisExecutionPort(ctx, { capabilities }),
       clock,
       newAnalysisId: () => randomUUID(),
       agentPreset: 'cona-project-analysis',
@@ -435,7 +471,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
     }).catch(() => {
       // 恢复失败由下次读取暴露；不阻断宿主启动。
     })
-    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, resumeChats, recordReader, observeWorkCopy: observeWorkCopyFor(instance), analysis, analysisSession }
+    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, resumeChats, recordReader, observeWorkCopy: observeWorkCopyFor(instance), analysis, analysisSession, analysisReports: reports }
     return { ok: true, value }
   }
 

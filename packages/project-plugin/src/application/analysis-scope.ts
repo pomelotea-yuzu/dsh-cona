@@ -11,6 +11,7 @@ import {
   resolveAnalysisLimits,
   scopeContainsPath,
   sliceText,
+  textLineCount,
   type AnalysisLimits,
   type ObservationEntry,
   type ObservationExclusion,
@@ -83,6 +84,8 @@ export interface FileReadCredential {
   readonly startLine: number;
   readonly endLine: number;
   readonly deliveredBytes: number;
+  /** 读取时整份文件的行数；用于判断是否完整读过。 */
+  readonly totalLines: number;
   readonly truncated: boolean;
 }
 
@@ -250,6 +253,7 @@ export class AnalysisScopeService {
       startLine: sliced.slice.startLine,
       endLine: sliced.slice.endLine,
       deliveredBytes: sliced.slice.bytes,
+      totalLines: textLineCount(decoded.text),
       truncated: sliced.slice.truncated,
     };
     return {
