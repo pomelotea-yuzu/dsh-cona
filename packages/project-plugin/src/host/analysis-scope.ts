@@ -7,13 +7,13 @@
 //   3. 记录实际安装状态，任何一步无法建立都以 fail-closed 呈现（入口显示不可用）。
 //
 // 执行器由 preset 的兄弟子插件 @deepseek-ai/dsh-tool-executor-native 在同 scope 提供；
-// 可见工具由宿主侧分析能力模块提供。本文件只 import 已声明依赖 cordis/dsh-tools，
+// 四个分析能力由 Host 在分析 Session 自己的 agent scope 注册（rc.2 的 restrict 只裁剪
+// 继承工具，见下方的可见性说明）。本文件只 import 已声明依赖 cordis/dsh-tools，
 // 不直接 import dsh-agent/dsh-agent-preset 的类型（其 .d.ts 会触发 face merge 冲突，
 // 前因见 host/index.ts 注），全部用最小运行形态接口表达。
 
 import type { Context } from '@deepseek-ai/cordis';
 import {
-  ANALYSIS_ALLOWED_TOOLS,
   decideAnalysisStepEntry,
   decideAnalysisToolUse,
   sessionIdOf,
@@ -88,8 +88,15 @@ export function installAnalysisScope(ctx: Context, bindingOf: BindingProvider): 
   }
 
   try {
-    // 可见性限制：分析 scope 只暴露允许工具；restrict 在 scope 内是合法的。
-    disposers.push(withCtx.tools.restrict({ allow: ANALYSIS_ALLOWED_TOOLS }));
+    // 可见性限制：隐藏本作用域从部署/父作用域继承的全部工具。
+    //
+    // rc.2 的 `restrict` 只认「继承的全局工具」名（`view(scope).restrictableNames`），
+    // 且限制会作用于该链上的一切继承项；在 preset 作用域里注册的分析工具同样是
+    // 后代 Agent 的继承项，因此不能靠 `allow: [四个分析工具]` 保留它们——真宿主实测
+    // 会把四个工具一并遮掉（2026-11-28 scope 记录）。反过来说，分析工具注册在
+    // **分析 Session 自己的 agent scope** 时才属于该视图的 own 层，不受本限制影响。
+    // 所以这里用空 allow 只裁剪继承工具，四个能力名仍由守卫的允许集兜底。
+    disposers.push(withCtx.tools.restrict({ allow: [] }));
   } catch (error) {
     return { dispose: () => disposers.forEach((d) => d()), ready: false, refusal: `analysis-restrict-failed:${(error as Error).message}` };
   }

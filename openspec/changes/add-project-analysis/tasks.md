@@ -12,14 +12,17 @@
 
 ## 2. 固定宿主接入验证
 
-> 2026-11-28 阶段进展：静态核对、keyless 机制探针与接入模块已落地，并在隔离 profile 的真 DSH `0.2.2-rc.2` 上部分实测（preset 注册、实际会话与作用域、守卫、pre-step、原生/PTC 执行器对照）；实测同时修复 `ctx.effect` 立即释放保护与随包 patch 缺 `config` 两处问题。模型回合、范围语义（3.x/5.x）与重启时序（4.x/6.x）未做，下列三项不勾选、A03/A04/A05/A07 保持 `untested`，见[真宿主记录](implementation/2026-11-28-2.x-real-host.md)与[阶段记录](implementation/2026-11-28-2.x-host-connection.md)。
+> 2026-11-28 阶段进展：静态核对、keyless 机制探针与接入模块已落地，并在隔离 profile 的真 DSH `0.2.2-rc.2` 上部分实测（preset 注册、实际会话与作用域、守卫、pre-step、原生/PTC 执行器对照）；实测同时修复 `ctx.effect` 立即释放保护与随包 patch 缺 `config` 两处问题。同期实测定案允许能力注册位置（分析 Session 的 agent scope）并新增 Host 侧执行前核对，见[作用域记录](implementation/2026-11-28-2.x-scope-and-executor.md)。模型回合、范围语义（3.x/5.x）与重启时序（4.x/6.x）未做，下列三项不勾选、A03/A04/A05/A07 保持 `untested`，见[真宿主记录](implementation/2026-11-28-2.x-real-host.md)与[阶段记录](implementation/2026-11-28-2.x-host-connection.md)。
 
 - [ ] 2.1 验证随包的 `cordis.patch.yml` 如何向 DSH `0.2.2-rc.2` 注册分析 preset，组装原生执行器和分析作用域接入模块。隔离 profile 实测实际 preset、有效作用域、工作区挂载、消息认领、工具主体与宿主终态；注册表缺失、ID 冲突或声明加载／解析失败时核对不可用诊断（A03、A05）。
   - 2026-11-28 真宿主（隔离 profile，DSH 0.2.2-rc.2）：roster 含 `cona-project-analysis`；`create({cwd, agentPreset})` 返回实际 preset 与 cwd；可见工具仅四个允许名；headless 缺 `agentPresets`/`sessionController` 时 preset 行 `pending` 诊断；重复 ID 报 `Duplicate agent preset` 且原条目保留。缺 Host 入口的「不可用」显示（3.x/7.x）与模型回合，见[真宿主记录](implementation/2026-11-28-2.x-real-host.md)。
+  - 2026-11-28 补：rc.2 的 `restrict` 只裁剪继承工具；preset 作用域注册的分析能力会被同一限制遮掉，故四个能力由 Host 注册在分析 Session 的 agent scope（preset 层只留原生执行器与守卫/限制/准入）。真宿主对照见[作用域记录](implementation/2026-11-28-2.x-scope-and-executor.md)。
 - [ ] 2.2 在启用 PTC 的隔离对照和普通原生环境验证分析选择原生执行器、普通 Session 使用其原组合。用合成文件测试保留的 PTC 执行入口、通用代码执行、Shell、文件写入和代理转发。记录分派、执行正文未进入、范围外读取未返回、范围内外写入未生效；标注沙箱模式和拒绝所在层（A04、A05）。
   - 2026-11-28 真宿主：分析 Session 选中 `NativeToolExecutor`、PTC Session 选中 `PtcExecutor`；守卫在正文前拒绝 `bash`/`write`/`run_code`（`analysis-tool-not-allowed`），夹具文件哈希不变；PTC 会话 `run_code` 到达 code-run 层（本进程沙箱内返回 `sandbox-unavailable`）。真实模型回合下，绑定会话调用允许集工具成功、无绑定调用返回 `analysis-binding-missing` 且夹具未执行。范围外读取与真实分析工具语义属 3.x/5.x，未测，见[真宿主记录](implementation/2026-11-28-2.x-real-host.md)。
+  - 2026-11-28 补：新增 Host 侧 `verifyAnalysisExecution`；真宿主中分析 Session 恰见四个允许名、普通 Session 0 个、PTC Session 核对拒绝 `analysis-executor-not-native:PtcExecutor`；允许工具真实分派成功，`bash`/`run_code` 在正文前拒绝，普通 Session 调用为 `UNKNOWN_TOOL`。见[作用域记录](implementation/2026-11-28-2.x-scope-and-executor.md)。
 - [ ] 2.3 验证实际执行器无法核对、守卫不可用、关联未持久化或启动响应丢失时，后台不会派发无保护请求；验证 `agent/pre-step` 在正常完成、中断和重启后的原会话上拦截新输入（A03、A05、A07）。
   - 2026-11-28 真宿主：无绑定/未持久化时守卫 fail-closed；真实 `agent/pre-step` 对错误 `rpcId` 与终止绑定均返回 `turn/end blocked` 且无 `step/start`、未进模型；普通 API key 下匹配 `rpcId` 的真实模型回合完成（工具调用 + 续步 `ok`）；实测修复「续步被当未认领拦截」缺陷（step>1 放行，终态仍全拒）。启动响应丢失与重启后历史会话属 4.x/6.x，未测，见[真宿主记录](implementation/2026-11-28-2.x-real-host.md)。
+  - 2026-11-28 补：`verifyAnalysisExecution` 对 PTC 执行器、能力缺失、守卫缺失、未持久化、终态均 fail-closed；错误 `rpcId` 0 个 `step/start`，正确 `rpcId` 进入第 1 步（隔离 home 无凭证以 `MISSING_CREDENTIAL` 结束）；终态绑定下允许工具也被 `analysis-terminal` 拒绝。见[作用域记录](implementation/2026-11-28-2.x-scope-and-executor.md)。
 
 ## 3. 本机范围和受检内容观察
 

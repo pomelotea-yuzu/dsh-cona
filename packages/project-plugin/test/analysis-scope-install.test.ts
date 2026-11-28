@@ -66,12 +66,14 @@ function binding(overrides: Partial<AnalysisBinding> = {}): AnalysisBinding {
   };
 }
 
-test('2.x-m 安装完整：restrict 允许集、guard、pre-step 全部接上，dispose 释放', () => {
+test('2.x-m 安装完整：restrict 隐藏全部继承工具、guard、pre-step 接上，dispose 释放', () => {
   const h = harness();
   const current = { value: binding() };
   const install = installAnalysisScope(h.ctx, () => current.value);
   assert.equal(install.ready, true);
-  assert.deepEqual([...h.allowed ?? []].sort(), [...ANALYSIS_ALLOWED_TOOLS].sort());
+  // 空 allow：分析能力由 Host 注册在 Agent 自己的 scope（own 层不受 restrict 影响），
+  // 这里只负责把 preset 继承来的所有全局工具遮掉。详见 analysis-scope.ts 注。
+  assert.deepEqual(h.allowed, []);
   assert.equal(h.guards.length, 1);
   assert.equal(h.steps.length, 1);
   install.dispose();
@@ -153,7 +155,7 @@ test('2.x-r apply 按 cordis effect 语义安装：保护保持到卸载，不�
   apply(h.ctx);
   assert.equal(h.guards.length, 1, 'apply 后守卫必须仍在');
   assert.equal(h.steps.length, 1, 'apply 后 pre-step 必须仍在');
-  assert.deepEqual([...(h.allowed ?? [])].sort(), [...ANALYSIS_ALLOWED_TOOLS].sort());
+  assert.deepEqual(h.allowed, [], 'restrict 只裁剪继承工具');
   assert.equal((h as { disposed: number }).disposed, 0, 'apply 不得立即释放保护');
   for (const dispose of disposers) dispose();
   assert.equal((h as { disposed: number }).disposed >= 3, true, '作用域卸载时才释放');

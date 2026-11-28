@@ -25,7 +25,7 @@ import { ToolsService, RUN_CODE_NAME, type ToolDefinition, type ToolExecutor, ty
 
 type Scope = { ctx: Context; key: object };
 type ScopeFns = {
-  createScope: (ctx: Context, key: object) => Scope;
+  createScope: (ctx: Context, key: object, options?: { parent?: object }) => Scope;
   scopeOf: (ctx: Context) => unknown;
 };
 
@@ -191,4 +191,46 @@ test('2.x-e restrict 只裁剪被限制作用域的可见工具，另一会话�
   assert.deepEqual(afterB, ['cona_read', 'shell'], '普通会话保留原组合');
   dispose();
   assert.deepEqual(names(ctx, agentA), ['cona_read', 'shell']);
+});
+
+test('2.x-z preset 作用域的 restrict 只裁剪继承工具；agent 自己注册的分析能力仍可见', async () => {
+  // 这条是 2.x「允许工具注册位置」的机制判定：分析 preset 在 preset 作用域装
+  // restrict({allow: []}) 与 guard，四个分析能力由 Host 注册在分析 Agent 自己的
+  // agent scope。rc.2 把「被查看 scope 的 own 层注册」排除在限制之外，所以：
+  //   - 全局工具（继承）被遮掉；
+  //   - 本 Agent 的分析能力仍可见；
+  //   - 兄弟 Agent 看不到别的 Agent 注册的能力。
+  const ctx = await mountTools();
+  const scope = await importScope();
+  ctx.tools.register(tool('cona_global'));
+
+  const presetKey = { id: 'preset-analysis' };
+  let preset!: Context;
+  await ctx.plugin(Object.assign((inner: Context) => {
+    preset = scope.createScope(inner, presetKey).ctx;
+  }, { inject: ['tools', 'systemPrompt'] }));
+
+  const agentKey = { id: 'agent-analysis' };
+  const siblingKey = { id: 'agent-sibling' };
+  let agentCtx!: Context;
+  let siblingCtx!: Context;
+  // 显式绑定 parent：真实 host 由 registry 调 bindScopeParent 把 agent scope
+  // 接到 preset revision 的 scope 下，createScope 本身不会自动继承。
+  const mountAgent = (key: object, assign: (value: Context) => void) => Object.assign((inner: Context) => {
+    assign(scope.createScope(inner, key, { parent: presetKey }).ctx);
+  }, { inject: ['tools', 'systemPrompt'] });
+  await preset.plugin(mountAgent(agentKey, (value) => { agentCtx = value; }));
+  await preset.plugin(mountAgent(siblingKey, (value) => { siblingCtx = value; }));
+
+  preset.tools.restrict({ allow: [] });
+  agentCtx.tools.register(tool('cona_analysis_scope_files'));
+
+  const names = (key: object): string[] => ctx.tools.definitions(key as never).map((t) => t.name).sort();
+  assert.deepEqual(names(agentKey), ['cona_analysis_scope_files'], 'own 层分析能力不受 preset restrict 影响');
+  assert.deepEqual(names(siblingKey), [], '继承全局工具被遮掉，兄弟 Agent 看不到该能力');
+  assert.deepEqual(
+    ctx.tools.definitions().map((t) => t.name).sort(),
+    ['cona_global'],
+    '全局视图只有全局工具，scoped 注册不泄漏到根视图',
+  );
 });
