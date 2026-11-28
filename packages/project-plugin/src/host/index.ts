@@ -44,7 +44,7 @@ import { OWNER_CONTEXT } from './owner-admission.js'
 import { ProjectToolAdapter, defineProjectTools, type ConaToolDefinition, type ConaToolExec, type ConaToolsRegistry } from './project-tools.js'
 import { planNodeView, sessionDirectory, unavailableSessionDirectory } from './session-directory.js'
 import { analysisSessionPort, unavailableAnalysisSessionPort } from './analysis-session.js'
-import { agentPromptAccepted } from './analysis-execution-port.js'
+import { createAnalysisExecutionPort, unavailableAnalysisCapabilityPort } from './analysis-execution-service.js'
 
 export const name = 'dsh-cona-project'
 
@@ -411,15 +411,10 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
         return { ok: true as const, planVersion: result.baseline.planVersion }
       },
       session: sessionPort.ok ? sessionPort.port : unavailableAnalysisSessionPort(sessionPort.message),
-      execution: {
-        // 4.3 先接上「保护未就绪不派发」：四个能力与 verify 接入属 4.4／第 5 组。
-        prepare: async () => ({
-          ready: false as const,
-          code: 'analysis-capabilities-unavailable',
-          message: '四个分析能力尚未注册；首条分析消息不派发',
-        }),
-        promptAccepted: agentPromptAccepted(ctx),
-      },
+      // 4.4 的保护链路已接好；四个能力的真实工具属第 5 组，当前占位拒绝派发。
+      execution: createAnalysisExecutionPort(ctx, {
+        capabilities: unavailableAnalysisCapabilityPort('四个分析能力尚未注册；首条分析消息不派发'),
+      }),
       clock,
       newAnalysisId: () => randomUUID(),
       agentPreset: 'cona-project-analysis',

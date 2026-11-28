@@ -131,6 +131,18 @@ export interface AnalysisSessionPort {
   }): Promise<{ readonly accepted: true }>;
 }
 
+/** 分析能力注册端口（tasks 4.4）：在分析 Agent 自己的 scope 注册四个允许能力。 */
+export interface AnalysisCapabilityPort {
+  /**
+   * 注册本轮四个分析能力；实现方必须只在分析 Agent 的 scope 注册（不得全局），
+   * 同一 Session 重复注册应幂等或由调用方去重。失败给稳定原因，调用方不派发消息。
+   */
+  register(input: {
+    readonly agent: unknown;
+    readonly record: AnalysisRecord;
+  }): Promise<{ readonly ok: true } | { readonly ok: false; readonly code: string; readonly message: string }>;
+}
+
 /** 分析执行的保护端口（tasks 4.3-4.4）：派发前核对执行器/守卫并注册本轮能力。 */
 export interface AnalysisExecutionPort {
   /**
