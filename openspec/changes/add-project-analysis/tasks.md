@@ -88,4 +88,4 @@
 - [x] 8.2 在同项目分别走重启后回读、同 HEAD 内代码改动、规划变化和再次分析。核对历史与新报告可见、共享数据未包含私有资料、中文英文及回退，逐条登记证据和未测／受阻分句（A10–A17）。
   - 2026-11-28：重启后旧报告仍 `current` 且会话 `present`；同 HEAD 修改 `src/a.ts` 后类别 `files-modified`；新增规划节点并重算 planVersion 后重启刷新到代际 3，旧报告类别 `source-generation`＋`plan`；复盘生成新 analysis／Session／报告 `ffc3fa64…`，新报告 `current`、旧报告保留，两轮 ID 不同。公开 `project.json` 无 `analyses`／`analysisReports`、无报告摘要与分析/会话 ID。中英固定文案由 `check:locale` 核对；第三语言实际显示、混合覆盖与 UI 导航未测，见[第 8 组记录](implementation/2026-11-28-8.x-real-host-delivery.md#82-重启变化与复盘a10a16-部分)。
 - [ ] 8.3 以交付提交执行 OpenSpec 严格校验、完整 `pnpm check:ci`，并按 GitHub Actions 与 Gitee Go 分别核对最终门禁。归档前核对本地门禁、两条远程和固定宿主结果均能追溯到各自实际提交及环境（CI01–CI03）。
-  - 2026-11-28：OpenSpec 严格校验 change 1/1、specs 10/10；完整 `pnpm check:ci` exit 0、插件 635/635。**GitHub Actions 与 Gitee Go 未运行**：交付提交未 push（待用户明确授权），CI02／CI03 的 run ID／流水线标识与三项工具版本未取，任务保持未勾选。
+  - 2026-11-28：交付提交 `f47ab59`（本地，未 push）；OpenSpec 严格校验 change 1/1、specs 10/10；完整 `pnpm check:ci` exit 0、插件 635/635。**GitHub Actions 与 Gitee Go 未运行**：交付提交未 push（待用户明确授权），CI02／CI03 的 run ID／流水线标识与三项工具版本未取，任务保持未勾选。
