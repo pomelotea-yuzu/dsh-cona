@@ -5,8 +5,8 @@
 | ID | 环境 | 验收与证据 | 状态 |
 |---|---|---|---|
 | CI01 | 本地 Node 24.21.0／pnpm 12.18.0 | 记录 Git 版本。用 `master`、`main` 复跑同一用例，修复后两种配置都产生未合并索引，返回 `git-unmerged`。完整 `pnpm check:ci` 通过。 | `pass`（2026-11-28：Git 2.54.0，定向 2/2、全量 529/529，见[实施记录](implementation/2026-11-28-1.x-ci-fixture.md)） |
-| CI02 | GitHub Actions | 记录修复及交付提交的 run ID、`git --version`、Node／pnpm 和完整门禁结论。 | `untested`（版本输出已补，待提交同步后取远程证据） |
-| CI03 | Gitee Go | 记录修复及交付提交的流水线标识、`git --version`、Node／pnpm 和完整 `pnpm check:ci` 结论。 | `untested`（版本输出已补，待提交同步后取远程证据） |
+| CI02 | GitHub Actions | 记录修复及交付提交的 run ID、`git --version`、Node／pnpm 和完整门禁结论。 | `pass`（2026-11-28：提交 `cbbd4f5` 已同步，用户真终端确认门禁通过；run ID 与三项工具版本实测值未取，见[实施记录](implementation/2026-11-28-1.x-ci-fixture.md#远程边界与后续)） |
+| CI03 | Gitee Go | 记录修复及交付提交的流水线标识、`git --version`、Node／pnpm 和完整 `pnpm check:ci` 结论。 | `pass`（2026-11-28：同一提交 `cbbd4f5` 已同步，用户真终端确认门禁通过；流水线标识与三项工具版本实测值未取，见[实施记录](implementation/2026-11-28-1.x-ci-fixture.md#远程边界与后续)） |
 | A01 | 自动、固定宿主 | 从已有项目打开范围预览，分别取消和确认。比对实际新 Session、专用 preset、实例、工作副本和初始基线。先置入已关联的普通空白会话，确认分析未复用、未改变其关联。取消路径无新会话和分析消息。 | `untested` |
 | A02 | 自动、真实文件、固定宿主 | 同项目两副本切换，测试缺映射及预览后工作副本或规划改变，旧请求不能使用另一副本或旧基线，记录 UI 诊断。 | `untested` |
 | A03 | 自动、固定宿主 | 记录真实 `attachSession`、请求标识和宿主消息计数。重复确认、响应丢失及关联未落盘时核对唯一分析和发送状态。 | `untested` |
