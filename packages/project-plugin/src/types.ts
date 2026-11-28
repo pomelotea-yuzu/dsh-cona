@@ -151,3 +151,37 @@ export type {
   MigrationListOpResult,
   LocalIssueView,
 } from './host/overview-service.js'
+// 7.1-7.3：项目分析与复盘（conaOverview analysis* 边界类型）。
+export type {
+  AnalysisRepositoryRowView,
+  AnalysisRunView,
+  AnalysisOverviewOutcome,
+  AnalysisPreviewView,
+  AnalysisPreviewOutcome,
+  AnalysisStartOutcome,
+  AnalysisSendOutcome,
+  AnalysisStopOutcome,
+  AnalysisSourceView,
+  AnalysisReportOutcome,
+  AnalysisSessionTargetOutcome,
+  AnalysisCurrentSourceOutcome,
+  AnalysisReviewPreviewOutcome,
+  AnalysisReviewStartOutcome,
+} from './host/overview-service.js'
+export type { ScopeSelection } from './domain/analysis.js'
+export type {
+  AnalysisObservationSnapshot,
+  AnalysisReportRecord,
+  AnalysisStartObservation,
+  AnalysisStatus,
+  ReportBasisChange,
+  ReportBasisChangeKind,
+  ReportBasisSnapshot,
+  ReportBasisStatus,
+  ReportCitation,
+  ReportCoverage,
+  ReportFact,
+  ReportFileCitation,
+  ReportPlanCitation,
+  ReportVerificationCitation,
+} from './application/local-state.js'

@@ -22,6 +22,7 @@ import { AnalysisScopeService, type AnalysisRepositoryMapping } from '../applica
 import { AnalysisSessionService } from '../application/analysis-session.js'
 import { AnalysisVerificationService } from '../application/analysis-verification.js'
 import { AnalysisReportService } from '../application/analysis-report.js'
+import { AnalysisReviewService } from '../application/analysis-review.js'
 import { ResumeChatService } from '../application/resume-chat.js'
 import { WorkService } from '../application/work.js'
 import { InMemoryChangeStream, notificationForCommit, notificationForRefresh } from '../application/change-stream.js'
@@ -409,6 +410,18 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       }
       return { ok: true as const, doc: result.doc }
     }
+    /** 当前规划版本：预览后确认的基线核对与复盘预览共用。 */
+    const planVersionOf = async (): Promise<
+      | { ok: true; planVersion: string }
+      | { ok: false; code: string; message: string }
+    > => {
+      const result = await readSourceBaseline(files, instance.sourceRoot, sha256, clock)
+      if (!result.ok) {
+        const first = result.issues[0]
+        return { ok: false as const, code: first?.code ?? 'invalid-project', message: first?.message ?? '资料不可读' }
+      }
+      return { ok: true as const, planVersion: result.baseline.planVersion }
+    }
     const verification = new AnalysisVerificationService({
       baseline: baselineDoc,
       readRecord: recordReader.readRecord,
@@ -442,14 +455,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       store,
       queue,
       scope: analysis,
-      planBaseline: async () => {
-        const result = await readSourceBaseline(files, instance.sourceRoot, sha256, clock)
-        if (!result.ok) {
-          const first = result.issues[0]
-          return { ok: false as const, code: first?.code ?? 'invalid-project', message: first?.message ?? '资料不可读' }
-        }
-        return { ok: true as const, planVersion: result.baseline.planVersion }
-      },
+      planBaseline: planVersionOf,
       session: sessionPort.ok ? sessionPort.port : unavailableAnalysisSessionPort(sessionPort.message),
       // 第 5 组：四个真实能力在派发前注册到分析 Agent 自己的 scope。
       execution: createAnalysisExecutionPort(ctx, { capabilities }),
@@ -463,6 +469,8 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
         }
       },
     })
+    // 第 6 组：从历史报告重新确认范围并复盘；与首次分析共用同一发起通路。
+    const analysisReview = new AnalysisReviewService({ reports, sessions: analysisSession, scope: analysis })
     // 启动恢复：旧分析只作历史，pre-step 拒绝其新输入（4.6）。
     void analysisSession.recover().then((result) => {
       if (result.historical > 0) {
@@ -471,7 +479,7 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
     }).catch(() => {
       // 恢复失败由下次读取暴露；不阻断宿主启动。
     })
-    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, resumeChats, recordReader, observeWorkCopy: observeWorkCopyFor(instance), analysis, analysisSession, analysisReports: reports }
+    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, resumeChats, recordReader, observeWorkCopy: observeWorkCopyFor(instance), analysis, analysisSession, analysisReports: reports, analysisReview, analysisPlanVersion: planVersionOf }
     return { ok: true, value }
   }
 
@@ -613,4 +621,4 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
 // host loader 可能以模块对象或 apply 函数两种形态登记插件，两层都声明。
 ;(apply as unknown as { inject: string[] }).inject = ['tools', 'sessionController']
 
-export const inject = ['tools', 'sessionController']
+export const inject = ['tools', 'sessionController', 'agents']

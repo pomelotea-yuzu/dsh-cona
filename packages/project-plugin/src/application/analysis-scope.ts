@@ -309,7 +309,8 @@ export class AnalysisScopeService {
     }
     const inspected = await this.deps.files.inspectRepository(map.absolutePath);
     if (!inspected.ok) {
-      return { ok: false, code: 'analysis-mapping-changed', message: `仓库映射当前不可用：${inspected.message}` };
+      // 映射条目还在，但工作副本当前不可用：无法核对，不当作映射被改。
+      return { ok: false, code: 'analysis-mapping-unavailable', message: `仓库映射当前不可用：${inspected.message}` };
     }
     if (inspected.root !== selection.repositoryRoot
       || this.mappingHash(map.repositoryId, inspected.root) !== selection.mappingHash) {

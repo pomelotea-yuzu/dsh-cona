@@ -41,6 +41,16 @@ import type {
   MigrationOpResult,
   MigrationPreviewOpResult,
   MigrationListOpResult,
+  AnalysisOverviewOutcome,
+  AnalysisPreviewOutcome,
+  AnalysisStartOutcome,
+  AnalysisSendOutcome,
+  AnalysisStopOutcome,
+  AnalysisReportOutcome,
+  AnalysisSessionTargetOutcome,
+  AnalysisCurrentSourceOutcome,
+  AnalysisReviewPreviewOutcome,
+  AnalysisReviewStartOutcome,
 } from '../host/overview-service.js'
 import type { LocationKind } from '../application/location.js'
 import type { RoadmapEnableImpact, RoadmapStateView } from '../application/command-service.js'
@@ -380,6 +390,66 @@ function registerSource(request: { sourceRoot: string; sourceKind: LocationKind;
   )
 }
 
+// ---------- 7.1-7.3：项目分析与复盘 ----------
+
+function analysisOverview(instanceId: string): Promise<AnalysisOverviewOutcome> {
+  return callOverview<AnalysisOverviewOutcome>('analysisOverview', { instanceId }, (code, message) => ({ status: 'rejected', code, message }));
+}
+
+function analysisPreview(
+  instanceId: string,
+  request: { repositoryId: string; scope: Parameters<NonNullable<import('./project-overview-controller.js').OverviewControllerDeps['previewAnalysis']>>[1]['scope'] },
+): Promise<AnalysisPreviewOutcome> {
+  return callOverview<AnalysisPreviewOutcome>('analysisPreview', { instanceId, ...request }, (code, message) => ({ status: 'rejected', code, message }));
+}
+
+function analysisStart(
+  instanceId: string,
+  request: Parameters<NonNullable<import('./project-overview-controller.js').OverviewControllerDeps['startAnalysis']>>[1],
+): Promise<AnalysisStartOutcome> {
+  return callOverview<AnalysisStartOutcome>('analysisStart', { instanceId, ...request }, (code, message) => ({ status: 'rejected', code, message }));
+}
+
+function analysisSend(
+  instanceId: string,
+  request: { analysisId: string; retry?: boolean },
+): Promise<AnalysisSendOutcome> {
+  return callOverview<AnalysisSendOutcome>('analysisSend', { instanceId, ...request }, (code, message) => ({ status: 'rejected', code, message }));
+}
+
+function analysisStop(
+  instanceId: string,
+  request: { analysisId: string },
+): Promise<AnalysisStopOutcome> {
+  return callOverview<AnalysisStopOutcome>('analysisStop', { instanceId, ...request }, (code, message) => ({ status: 'rejected', code, message }));
+}
+
+function analysisReport(instanceId: string, reportId: string): Promise<AnalysisReportOutcome> {
+  return callOverview<AnalysisReportOutcome>('analysisReport', { instanceId, reportId }, (code, message) => ({ status: 'rejected', code, message }));
+}
+
+function analysisSessionTarget(instanceId: string, analysisId: string): Promise<AnalysisSessionTargetOutcome> {
+  return callOverview<AnalysisSessionTargetOutcome>('analysisSessionTarget', { instanceId, analysisId }, (code, message) => ({ status: 'rejected', code, message }));
+}
+
+function analysisCurrentSource(
+  instanceId: string,
+  request: { reportId: string; citationIndex: number },
+): Promise<AnalysisCurrentSourceOutcome> {
+  return callOverview<AnalysisCurrentSourceOutcome>('analysisCurrentSource', { instanceId, ...request }, (code, message) => ({ status: 'rejected', code, message }));
+}
+
+function analysisReviewPreview(instanceId: string, reportId: string): Promise<AnalysisReviewPreviewOutcome> {
+  return callOverview<AnalysisReviewPreviewOutcome>('analysisReviewPreview', { instanceId, reportId }, (code, message) => ({ status: 'rejected', code, message }));
+}
+
+function analysisReviewStart(
+  instanceId: string,
+  request: Parameters<NonNullable<import('./project-overview-controller.js').OverviewControllerDeps['startAnalysisReview']>>[1],
+): Promise<AnalysisReviewStartOutcome> {
+  return callOverview<AnalysisReviewStartOutcome>('analysisReviewStart', { instanceId, ...request }, (code, message) => ({ status: 'rejected', code, message }));
+}
+
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, dictionaries), 'dsh-cona-project: dictionaries')
   const t = ctx.locale.bind(NS)
@@ -416,6 +486,17 @@ export function apply(ctx: ClientContext): void {
     // 4.2：路线图状态与启用预览（确认经 conaOverview/execute 发布 v2）。
     readRoadmap: roadmapRead,
     previewRoadmapEnable: roadmapPreview,
+    // 7.1-7.3：项目分析、报告回看、来源复核与复盘。
+    loadAnalysis: analysisOverview,
+    previewAnalysis: analysisPreview,
+    startAnalysis: analysisStart,
+    sendAnalysis: analysisSend,
+    stopAnalysis: analysisStop,
+    readAnalysisReport: analysisReport,
+    analysisSessionTarget,
+    readAnalysisSource: analysisCurrentSource,
+    reviewAnalysis: analysisReviewPreview,
+    startAnalysisReview: analysisReviewStart,
     // 1.1 探针实证：fiber 注入 uiWorkspace 后 openSession(id) 落到指定 Session。
     // 宿主生成的类型不随插件分发，这里按探针实证的最小结构访问。
     openSession: (sessionId) => {

@@ -630,3 +630,15 @@ test('4.6 恢复：有 Session 的未终态记录转中断并标历史，无 Ses
   const again = await recovered.recover();
   assert.deepEqual(again, { interrupted: 0, historical: 1 });
 });
+
+test('7.2 sessionPresence：按真实宿主目录判断，目录不可读不冒充缺失', async () => {
+  const h = makeHarness();
+  assert.equal(await h.service.sessionPresence(''), 'unknown');
+  h.session.sessions = [
+    { sessionId: 'session-analysis-1', blank: false, running: false, updatedAt: 1, cwd: '/repo' },
+  ];
+  assert.equal(await h.service.sessionPresence('session-analysis-1'), 'present');
+  assert.equal(await h.service.sessionPresence('session-other'), 'missing');
+  h.session.listSessions = async () => { throw new Error('directory down'); };
+  assert.equal(await h.service.sessionPresence('session-analysis-1'), 'unknown');
+});

@@ -16,6 +16,7 @@ import {
   type InstanceAggregate,
 } from './local-state.js';
 import type { AnalysisSelection, AnalysisScopeService } from './analysis-scope.js';
+import { observationContentsOf } from './analysis-basis.js';
 import type { AnalysisExecutionPort, AnalysisSessionPort, LocalStateStorePort, PublishHooksPort } from './ports.js';
 import type { ScopeSelection } from '../domain/analysis.js';
 
@@ -123,6 +124,11 @@ export class AnalysisSessionService {
         observedAt: preview.observedAt,
         entries: preview.entries.length,
         issues: preview.issues.length,
+        // 6.1：保存起始逐条内容快照与 Git 来源附注，供报告依据回看时分类。
+        contents: observationContentsOf(preview.entries),
+        ...(preview.git.status !== 'observed' || preview.git.head === undefined
+          ? {}
+          : { git: { head: preview.git.head } }),
       };
       const prepared: AnalysisRecord = {
         analysisId: this.deps.newAnalysisId(),
@@ -426,6 +432,20 @@ export class AnalysisSessionService {
     });
   }
 
+  /**
+   * 实际宿主目录中是否仍能看到该 Session（tasks 7.2）：只用于打开历史会话前的复查。
+   * 目录不可读返回 unknown，由调用方给稳定诊断；不按项目根 cwd 过滤（分析 cwd 是仓库根）。
+   */
+  async sessionPresence(sessionId: string): Promise<'present' | 'missing' | 'unknown'> {
+    if (typeof sessionId !== 'string' || sessionId === '') return 'unknown';
+    try {
+      const sessions = await this.deps.session.listSessions();
+      return sessions.some((session) => session.sessionId === sessionId) ? 'present' : 'missing';
+    } catch {
+      return 'unknown';
+    }
+  }
+
   /** 读取单条分析记录（只读；不改变状态）。 */
   async get(analysisId: string): Promise<{ status: 'ok'; analysis: AnalysisRecord } | { status: 'rejected'; code: string; message: string }> {
     if (typeof analysisId !== 'string' || analysisId === '') {
@@ -682,6 +702,10 @@ function validateStart(request: StartAnalysisRequest): AnalysisOutcome<never> | 
   }
   if (request.expectedFingerprint !== undefined && typeof request.expectedFingerprint !== 'string') {
     return { status: 'rejected', code: 'operation-mismatch', message: 'expectedFingerprint 必须是字符串' };
+  }
+  if (request.previousAnalysisId !== undefined
+    && (typeof request.previousAnalysisId !== 'string' || request.previousAnalysisId === '')) {
+    return { status: 'rejected', code: 'operation-mismatch', message: 'previousAnalysisId 必须是非空字符串' };
   }
   return null;
 }

@@ -279,6 +279,13 @@ export const ANALYSIS_STATUSES: readonly AnalysisStatus[] = [
   'prepared', 'creating', 'created', 'sending', 'running', 'completed', 'interrupted', 'failed', 'unknown',
 ];
 
+/** 起始观察的一条内容快照（tasks 6.1）：判定依据只比较路径与内容指纹。 */
+export interface AnalysisObservationSnapshot {
+  readonly path: string;
+  readonly kind: 'file';
+  readonly hash: string | null;
+}
+
 /** 启动时冻结的代码观察摘要（完整观察在 3.x 服务中生成）。 */
 export interface AnalysisStartObservation {
   readonly fingerprint: string;
@@ -286,6 +293,10 @@ export interface AnalysisStartObservation {
   readonly observedAt: string;
   readonly entries: number;
   readonly issues: number;
+  /** 起始观察的逐条内容快照；6.1 前的旧记录缺省，只能按范围指纹核对。 */
+  readonly contents?: readonly AnalysisObservationSnapshot[];
+  /** 观察时工作副本的 Git 来源附注；只作证据，不单独判定依据。 */
+  readonly git?: { readonly head?: string };
 }
 
 /** 分析绑定状态（本机私有；不进入公开资料）。 */
@@ -400,6 +411,62 @@ export interface AnalysisReportRecord {
   readonly inferences: readonly string[];
   readonly suggestions: readonly string[];
   readonly coverage: ReportCoverage;
+  /** 保存时冻结的起始依据（tasks 6.1）；旧报告缺省，只能按记录重建。 */
+  readonly basis?: ReportBasisSnapshot;
+  /** 保存时计算的依据状态（tasks 6.2）；回看时按当前来源重算，不把它当现状。 */
+  readonly basisStatus?: ReportBasisStatus;
+}
+
+/**
+ * 报告保存的起始依据快照（tasks 6.1）：源代际、映射身份、规划基线、范围指纹、
+ * 逐条内容指纹与 Git 来源附注。报告回看只按这份快照判断「依据是否已变」，
+ * 不拿当前内容替代历史依据。
+ */
+export interface ReportBasisSnapshot {
+  readonly instanceId: string;
+  readonly repositoryId: string;
+  readonly repositoryRoot: string;
+  readonly mappingHash: string;
+  readonly sourceGeneration: number;
+  readonly planVersion: string;
+  readonly planRevision: number;
+  readonly scope: ScopeSelection;
+  readonly fingerprint: string;
+  readonly complete: boolean;
+  readonly issues: number;
+  readonly entries: readonly AnalysisObservationSnapshot[];
+  readonly git?: { readonly head?: string };
+}
+
+/** 依据状态的类别（tasks 6.2）：确认变化与无法核对分开表达。 */
+export type ReportBasisChangeKind =
+  | 'source-generation'
+  | 'mapping'
+  | 'plan'
+  | 'files-added'
+  | 'files-modified'
+  | 'files-deleted'
+  | 'verification'
+  | 'observation-fingerprint'
+  | 'basis-missing'
+  | 'observation-gap'
+  | 'plan-unavailable'
+  | 'verification-unavailable';
+
+/** 一条确认变化或核缺口；paths／recordIds 用于定位，detail 只给稳定说明。 */
+export interface ReportBasisChange {
+  readonly kind: ReportBasisChangeKind;
+  readonly paths?: readonly string[];
+  readonly recordIds?: readonly string[];
+  readonly detail?: string;
+}
+
+/** 依据状态：与运行状态独立展示。 */
+export interface ReportBasisStatus {
+  readonly state: 'current' | 'changed' | 'uncheckable';
+  readonly changes: readonly ReportBasisChange[];
+  readonly checkedAt: string;
+  readonly git?: { readonly starting?: string; readonly current?: string };
 }
 
 /** 旧聚合没有 analysisReports（5.x 前未定形）；读取时归一化。 */
@@ -445,6 +512,7 @@ export function analysisRecordsOf(value: unknown): AnalysisRecord[] {
       || typeof observation.fingerprint !== 'string'
       || typeof observation.complete !== 'boolean'
       || typeof observation.observedAt !== 'string') continue;
+    const contents = normaliseObservationContents(observation.contents);
     out.push({
       analysisId: record.analysisId,
       instanceId: record.instanceId,
@@ -461,6 +529,10 @@ export function analysisRecordsOf(value: unknown): AnalysisRecord[] {
         observedAt: observation.observedAt,
         entries: typeof observation.entries === 'number' ? observation.entries : 0,
         issues: typeof observation.issues === 'number' ? observation.issues : 0,
+        ...(contents === undefined ? {} : { contents }),
+        ...(isPlainRecord(observation.git) && typeof observation.git['head'] === 'string'
+          ? { git: { head: observation.git['head'] } }
+          : {}),
       },
       requestId: record.requestId,
       sessionId: typeof record.sessionId === 'string' && record.sessionId !== '' ? record.sessionId : null,
@@ -478,6 +550,25 @@ export function analysisRecordsOf(value: unknown): AnalysisRecord[] {
       ...(typeof record.previousAnalysisId === 'string' && record.previousAnalysisId !== ''
         ? { previousAnalysisId: record.previousAnalysisId } : {}),
     });
+  }
+  return out;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** 旧记录没有逐条快照；字段损坏时整段丢弃，不把半份快照当完整基线。 */
+function normaliseObservationContents(value: unknown): AnalysisObservationSnapshot[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: AnalysisObservationSnapshot[] = [];
+  for (const item of value) {
+    if (!isPlainRecord(item)) return undefined;
+    if (typeof item['path'] !== 'string' || item['path'] === '') return undefined;
+    if (item['kind'] !== 'file') return undefined;
+    const hash = item['hash'];
+    if (hash !== null && typeof hash !== 'string') return undefined;
+    out.push({ path: item['path'], kind: 'file', hash });
   }
   return out;
 }

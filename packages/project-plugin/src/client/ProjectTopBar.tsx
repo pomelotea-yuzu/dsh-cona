@@ -7,7 +7,7 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import type { PanelState } from './panel-controller.js';
 import type { LocaleKey } from './locales.js';
 import type { ResumeChatPointerView } from '../application/resume-chat.js';
-import { ProjectOverviewController, WORK_ACTION_OPTIONS, type OverviewRow, type OverviewState, type ResumeCardView as ResumeCardState } from './project-overview-controller.js';
+import { ProjectOverviewController, WORK_ACTION_OPTIONS, type OverviewRow, type OverviewState, type ResumeCardView as ResumeCardState, type AnalysisReportDetail, type AnalysisState } from './project-overview-controller.js';
 
 export interface ProjectTopBarInjected {
   controller: ProjectOverviewController;
@@ -144,6 +144,7 @@ export function ProjectTopBar(props: ProjectTopBarProps): JSX.Element {
           <ChatSection controller={controller} state={state} t={t} />
           <WorkSection controller={controller} state={state} t={t} />
           <RoadmapSection controller={controller} state={state} t={t} onLocate={locateNode} />
+          <AnalysisSection controller={controller} state={state} t={t} />
           <ResumeSaveSection controller={controller} state={state} t={t} />
           <MigrationSection controller={controller} state={state} t={t} />
           <RegisterSection controller={controller} state={state} t={t} />
@@ -1148,6 +1149,470 @@ function RoadmapSection(props: {
       ) : null}
       {roadmap.phase !== 'error' && notice !== null ? (
         <p data-cona-roadmap-notice={notice.code} style={{ ...rowStyle, color: '#b3261e' }}>{noticeText}</p>
+      ) : null}
+    </section>
+  );
+}
+
+
+// ---------- 7.1-7.3：项目分析与复盘 ----------
+
+const ANALYSIS_STATUS_KEY: Record<string, LocaleKey> = {
+  prepared: 'analysisStatusPrepared',
+  creating: 'analysisStatusCreating',
+  created: 'analysisStatusCreated',
+  sending: 'analysisStatusSending',
+  running: 'analysisStatusRunning',
+  completed: 'analysisStatusCompleted',
+  interrupted: 'analysisStatusInterrupted',
+  failed: 'analysisStatusFailed',
+  unknown: 'analysisStatusUnknown',
+};
+
+const ANALYSIS_ACTIVE_STATUSES = new Set(['prepared', 'creating', 'created', 'sending', 'running', 'unknown']);
+
+/** 客户端本地校验码用固定文案；宿主诊断码仍按稳定码显示并附原文。 */
+const ANALYSIS_NOTICE_KEY: Record<string, LocaleKey> = {
+  'analysis-scope-invalid': 'analysisScopeInvalid',
+  'analysis-repository-missing': 'analysisRepositoryNone',
+};
+
+
+const ANALYSIS_BASIS_KEY: Record<string, LocaleKey> = {
+  current: 'analysisBasisCurrent',
+  changed: 'analysisBasisChanged',
+  uncheckable: 'analysisBasisUncheckable',
+};
+
+const ANALYSIS_CHANGE_KEY: Record<string, LocaleKey> = {
+  'source-generation': 'analysisChangeSourceGeneration',
+  mapping: 'analysisChangeMapping',
+  plan: 'analysisChangePlan',
+  'files-added': 'analysisChangeFilesAdded',
+  'files-modified': 'analysisChangeFilesModified',
+  'files-deleted': 'analysisChangeFilesDeleted',
+  verification: 'analysisChangeVerification',
+  'observation-fingerprint': 'analysisChangeObservationFingerprint',
+  'basis-missing': 'analysisChangeBasisMissing',
+  'observation-gap': 'analysisChangeObservationGap',
+  'plan-unavailable': 'analysisChangePlanUnavailable',
+  'verification-unavailable': 'analysisChangeVerificationUnavailable',
+};
+
+const ANALYSIS_SOURCE_KEY: Record<string, LocaleKey> = {
+  current: 'analysisSourceCurrent',
+  'content-changed': 'analysisSourceContentChanged',
+  missing: 'analysisSourceMissing',
+  inaccessible: 'analysisSourceInaccessible',
+  'outside-scope': 'analysisSourceOutsideScope',
+  'mapping-changed': 'analysisSourceMappingChanged',
+};
+
+function analysisScopeKindKey(scope: { kind: 'root' | 'file' | 'directory' }): LocaleKey {
+  return scope.kind === 'root' ? 'analysisScopeRoot' : scope.kind === 'directory' ? 'analysisScopeDirectory' : 'analysisScopeFile';
+}
+
+function analysisScopeText(scope: { kind: 'root' | 'file' | 'directory'; path?: string }, t: TopTranslate): string {
+  if (scope.kind === 'root') return t(labelOf('analysisScopeRoot'));
+  return t(labelOf('analysisScopeLabel'), { kind: t(labelOf(analysisScopeKindKey(scope))), path: scope.path ?? '' });
+}
+
+function analysisSourceText(source: AnalysisReportDetail['sources'][number], t: TopTranslate): string {
+  const citation = source.citation;
+  if (citation.kind === 'file') {
+    return t(labelOf('analysisSourceFile'), {
+      path: citation.path,
+      start: String(citation.startLine),
+      end: String(citation.endLine),
+    });
+  }
+  if (citation.kind === 'verification') {
+    return t(labelOf('analysisSourceVerification'), {
+      record: citation.recordId,
+      start: String(citation.startLine),
+      end: String(citation.endLine),
+    });
+  }
+  return t(labelOf('analysisSourcePlan'), { version: citation.planVersion });
+}
+
+/** 7.1-7.3 分析区：范围预览、确认、历史列表、报告回看、来源与复盘。 */
+function AnalysisSection(props: {
+  controller: ProjectOverviewController;
+  state: OverviewState;
+  t: TopTranslate;
+}): JSX.Element | null {
+  const { controller, state, t } = props;
+  const analysis: AnalysisState = state.analysis;
+  if (state.selectedId === null) return null;
+  const available = analysis.repositories.filter((row) => row.status === 'available');
+  const preview = analysis.preview;
+  const detail = analysis.detail;
+  const review = analysis.review;
+
+  return (
+    <section
+      data-cona-analysis="1"
+      aria-label={t(labelOf('analysisTitle'))}
+      style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--dsh-border, #ddd)' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <h4 style={{ margin: '0 0 6px', fontSize: 13, flex: 1 }}>{t(labelOf('analysisTitle'))}</h4>
+        <button
+          type="button"
+          data-cona-analysis-refresh="1"
+          disabled={analysis.busy || state.selectedId === null}
+          onClick={() => {
+            if (state.selectedId === null) return;
+            void controller.loadAnalysis(state.selectedId);
+            if (detail !== null) void controller.openAnalysisReport(detail.report.reportId);
+          }}
+        >
+          {t(labelOf('analysisRefresh'))}
+        </button>
+      </div>
+      {analysis.phase === 'loading' ? <p style={{ margin: '4px 0', fontSize: 12 }}>{t(labelOf('analysisLoading'))}</p> : null}
+      {analysis.notice !== null && analysis.notice.code !== 'analysis-unavailable' ? (
+        <p data-cona-analysis-notice={analysis.notice.code} style={{ margin: '4px 0', fontSize: 12, color: '#8a6d3b' }}>
+          {ANALYSIS_NOTICE_KEY[analysis.notice.code] === undefined
+            ? analysis.notice.code
+            : t(labelOf(ANALYSIS_NOTICE_KEY[analysis.notice.code] as LocaleKey))}
+          {analysis.notice.message === '' ? '' : `: ${analysis.notice.message}`}
+        </p>
+      ) : null}
+
+      {analysis.phase === 'error' && analysis.notice?.code === 'analysis-unavailable' ? (
+        <p style={{ margin: 0, fontSize: 12 }}>{t(labelOf('analysisUnavailable'))}</p>
+      ) : null}
+
+      {analysis.phase !== 'error' || analysis.notice?.code !== 'analysis-unavailable' ? (
+        <>
+          <div style={rowStyle}>
+            <label style={{ display: 'block' }}>
+              {t(labelOf('analysisRepositories'))}
+              <select
+                data-cona-analysis-repository="1"
+                value={analysis.draft.repositoryId}
+                disabled={analysis.busy || available.length === 0}
+                onChange={(event) => controller.patchAnalysisDraft({ repositoryId: event.target.value })}
+                style={fieldStyle}
+              >
+                {analysis.repositories.map((row) => (
+                  <option key={row.repositoryId} value={row.repositoryId} disabled={row.status !== 'available'}>
+                    {row.repositoryId} · {row.absolutePath}
+                    {row.status === 'available' ? '' : ` (${row.reason ?? 'unavailable'})`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {available.length === 0 ? (
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: '#8a6d3b' }}>{t(labelOf('analysisRepositoryNone'))}</p>
+            ) : null}
+          </div>
+
+          <div style={rowStyle}>
+            <label style={{ display: 'block' }}>
+              {t(labelOf('analysisScopeKind'))}
+              <select
+                data-cona-analysis-scope-kind="1"
+                value={analysis.draft.kind}
+                disabled={analysis.busy}
+                onChange={(event) => controller.patchAnalysisDraft({ kind: event.target.value as 'root' | 'file' | 'directory' })}
+                style={fieldStyle}
+              >
+                <option value="root">{t(labelOf('analysisScopeRoot'))}</option>
+                <option value="directory">{t(labelOf('analysisScopeDirectory'))}</option>
+                <option value="file">{t(labelOf('analysisScopeFile'))}</option>
+              </select>
+            </label>
+            {analysis.draft.kind !== 'root' ? (
+              <label style={{ display: 'block', marginTop: 4 }}>
+                {t(labelOf('analysisPath'))}
+                <input
+                  data-cona-analysis-path="1"
+                  type="text"
+                  value={analysis.draft.path}
+                  placeholder={t(labelOf('analysisPathPlaceholder'))}
+                  disabled={analysis.busy}
+                  onChange={(event) => controller.patchAnalysisDraft({ path: event.target.value })}
+                  style={fieldStyle}
+                />
+              </label>
+            ) : null}
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              data-cona-analysis-preview-button="1"
+              disabled={analysis.busy || available.length === 0}
+              onClick={() => { void controller.previewAnalysis(); }}
+            >
+              {analysis.busy ? t(labelOf('analysisPreviewing')) : t(labelOf('analysisPreview'))}
+            </button>
+            {preview !== null ? (
+              <button
+                type="button"
+                data-cona-analysis-cancel-preview="1"
+                disabled={analysis.busy}
+                onClick={() => controller.cancelAnalysisPreview()}
+              >
+                {t(labelOf('analysisCancelPreview'))}
+              </button>
+            ) : null}
+          </div>
+
+          {preview !== null ? (
+            <div data-cona-analysis-preview="1" style={{ marginTop: 6, padding: 6, border: '1px dashed var(--dsh-border, #ccc)', borderRadius: 6, fontSize: 12 }}>
+              <div>{analysisScopeText(preview.scope, t)}</div>
+              <div>
+                {t(labelOf('analysisPreviewSummary'), {
+                  files: String(preview.observedFiles),
+                  excluded: String(preview.excluded),
+                  unreadable: String(preview.unreadable),
+                })}
+              </div>
+              <div>
+                {preview.truncated ? t(labelOf('analysisTruncated')) : preview.complete ? t(labelOf('analysisComplete')) : t(labelOf('analysisIncomplete'))}
+              </div>
+              <div>{t(labelOf('analysisPlanBaseline'), { version: preview.planVersion })}</div>
+              <div style={{ color: 'var(--dsh-text-muted, #666)' }}>{preview.repository.absolutePath}</div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <button
+                  type="button"
+                  data-cona-analysis-confirm="1"
+                  disabled={analysis.busy}
+                  onClick={() => { void controller.startAnalysis(); }}
+                >
+                  {analysis.busy ? t(labelOf('analysisConfirming')) : t(labelOf('analysisConfirm'))}
+                </button>
+                {analysis.startOperationId !== null ? (
+                  <button type="button" data-cona-analysis-retry="1" disabled={analysis.busy} onClick={() => { void controller.startAnalysis(); }}>
+                    {t(labelOf('analysisRetry'))}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <h5 style={{ margin: '10px 0 4px', fontSize: 12 }}>{t(labelOf('analysisRuns'))}</h5>
+          {analysis.runs.length === 0 ? (
+            <p style={{ margin: 0, fontSize: 12 }}>{t(labelOf('analysisNoRuns'))}</p>
+          ) : (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              {analysis.runs.map((run) => (
+                <li key={run.analysisId} data-cona-analysis-run={run.analysisId} style={{ ...rowStyle, borderTop: '1px solid var(--dsh-border, #eee)', paddingTop: 4 }}>
+                  <div style={{ fontSize: 12 }}>
+                    {t(labelOf('analysisRunMeta'), {
+                      status: t(labelOf(ANALYSIS_STATUS_KEY[run.status] ?? 'analysisStatusUnknown')),
+                      created: run.createdAt,
+                    })}
+                  </div>
+                  <div style={{ fontSize: 12 }}>{analysisScopeText(run.scope, t)}</div>
+                  {run.reportSummary !== null ? <div style={{ fontSize: 12 }}>{run.reportSummary}</div> : null}
+                  {run.stopRequestedAt !== undefined && ANALYSIS_ACTIVE_STATUSES.has(run.status) ? (
+                    <div data-cona-analysis-stopping={run.analysisId} style={{ fontSize: 11, color: '#8a6d3b' }}>
+                      {t(labelOf('analysisStopRequested'))}
+                    </div>
+                  ) : null}
+                  {ANALYSIS_ACTIVE_STATUSES.has(run.status) ? null : (
+                    <div data-cona-analysis-history={run.analysisId} style={{ fontSize: 11, color: 'var(--dsh-text-muted, #666)' }}>
+                      {t(labelOf('analysisHistoryHint'))}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 3 }}>
+                    <button
+                      type="button"
+                      data-cona-analysis-open-session={run.analysisId}
+                      disabled={run.sessionId === null}
+                      onClick={() => { void controller.openAnalysisSession(run.analysisId); }}
+                    >
+                      {run.sessionId === null ? t(labelOf('analysisSessionMissing')) : t(labelOf('analysisOpenSession'))}
+                    </button>
+                    {run.reportId !== null ? (
+                      <button
+                        type="button"
+                        data-cona-analysis-open-report={run.reportId}
+                        onClick={() => { void controller.openAnalysisReport(run.reportId as string); }}
+                      >
+                        {t(labelOf('analysisViewReport'))}
+                      </button>
+                    ) : null}
+                    {(run.status === 'unknown' || run.status === 'sending' || run.status === 'created') && run.sessionId !== null ? (
+                      <button
+                        type="button"
+                        data-cona-analysis-retry-send={run.analysisId}
+                        disabled={analysis.busy}
+                        onClick={() => { void controller.retryAnalysisSend(run.analysisId); }}
+                      >
+                        {t(labelOf('analysisRetrySend'))}
+                      </button>
+                    ) : null}
+                    {ANALYSIS_ACTIVE_STATUSES.has(run.status) ? (
+                      <button
+                        type="button"
+                        data-cona-analysis-stop={run.analysisId}
+                        disabled={analysis.busy}
+                        onClick={() => { void controller.stopAnalysis(run.analysisId); }}
+                      >
+                        {t(labelOf('analysisStop'))}
+                      </button>
+                    ) : null}
+                    {run.reportId !== null ? (
+                      <button
+                        type="button"
+                        data-cona-analysis-reanalyze={run.reportId}
+                        disabled={analysis.busy}
+                        onClick={() => { void controller.beginAnalysisReview(run.reportId as string); }}
+                      >
+                        {t(labelOf('analysisReanalyze'))}
+                      </button>
+                    ) : null}
+                  </div>
+                  {run.detail !== undefined ? <div style={{ fontSize: 11, color: '#8a6d3b' }}>{run.detail}</div> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {review !== null ? (
+            <div data-cona-analysis-review="1" style={{ marginTop: 8, padding: 6, border: '1px dashed var(--dsh-border, #ccc)', borderRadius: 6, fontSize: 12 }}>
+              <h5 style={{ margin: '0 0 4px', fontSize: 12 }}>{t(labelOf('analysisReviewTitle'))}</h5>
+              <p style={{ margin: '0 0 4px' }}>{t(labelOf('analysisReviewHint'))}</p>
+              <div>{analysisScopeText(review.preview.scope, t)}</div>
+              <div>
+                {t(labelOf('analysisPreviewSummary'), {
+                  files: String(review.preview.observedFiles),
+                  excluded: String(review.preview.excluded),
+                  unreadable: String(review.preview.unreadable),
+                })}
+              </div>
+              <div>{t(labelOf('analysisPlanBaseline'), { version: review.preview.planVersion })}</div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                <button type="button" data-cona-analysis-review-confirm="1" disabled={analysis.busy} onClick={() => { void controller.confirmAnalysisReview(); }}>
+                  {analysis.busy ? t(labelOf('analysisConfirming')) : t(labelOf('analysisReviewConfirm'))}
+                </button>
+                <button type="button" data-cona-analysis-review-cancel="1" disabled={analysis.busy} onClick={() => controller.cancelAnalysisReview()}>
+                  {t(labelOf('analysisReviewCancel'))}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {analysis.reportPhase === 'loading' ? <p style={{ margin: '6px 0 0', fontSize: 12 }}>{t(labelOf('analysisLoading'))}</p> : null}
+          {detail !== null ? (
+            <div data-cona-analysis-detail="1" style={{ marginTop: 8, padding: 6, border: '1px solid var(--dsh-border, #ddd)', borderRadius: 6, fontSize: 12, maxHeight: '60vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h5 style={{ margin: 0, fontSize: 12 }}>{t(labelOf('analysisReport'))}</h5>
+                <button type="button" data-cona-analysis-close-report="1" onClick={() => controller.closeAnalysisReport()}>
+                  {t(labelOf('analysisCloseReport'))}
+                </button>
+              </div>
+              <p style={{ margin: '4px 0' }}>{t(labelOf('analysisReportSummary'))}: {detail.report.summary}</p>
+              <p style={{ margin: '4px 0' }}>
+                {t(labelOf('analysisCoverage'))}: {t(labelOf('analysisCoverageLine'), {
+                  observed: String(detail.report.coverage.observedFiles),
+                  read: String(detail.report.coverage.readFiles),
+                  complete: String(detail.report.coverage.completeFiles),
+                  fragments: String(detail.report.coverage.fragments),
+                  only: String(detail.report.coverage.onlyEnumerated),
+                })}
+              </p>
+              <p style={{ margin: '4px 0' }}>
+                {t(labelOf('analysisCoverageGaps'), {
+                  unreadable: String(detail.report.coverage.unreadable),
+                  excluded: String(detail.report.coverage.excluded),
+                  verification: String(detail.report.coverage.verificationRead),
+                })}
+              </p>
+              <div data-cona-analysis-basis={detail.basis.state} style={{ margin: '4px 0' }}>
+                {t(labelOf('analysisBasis'))}: {t(labelOf(ANALYSIS_BASIS_KEY[detail.basis.state] ?? 'analysisBasisUncheckable'))}
+              </div>
+              {detail.basis.changes.length > 0 ? (
+                <div data-cona-analysis-changes="1">
+                  <div>{t(labelOf('analysisChanges'))}</div>
+                  <ul style={{ margin: '2px 0 0', paddingInlineStart: 16 }}>
+                    {detail.basis.changes.map((change) => (
+                      <li key={change.kind}>
+                        {t(labelOf(ANALYSIS_CHANGE_KEY[change.kind] ?? 'analysisChangeObservationGap'))}
+                        {change.paths === undefined ? '' : ` — ${t(labelOf('analysisChangePaths'), { paths: change.paths.join(', ') })}`}
+                        {change.recordIds === undefined ? '' : ` — ${t(labelOf('analysisChangeRecords'), { records: change.recordIds.join(', ') })}`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              <h6 style={{ margin: '6px 0 2px' }}>{t(labelOf('analysisFacts'))}</h6>
+              <ul style={{ margin: 0, paddingInlineStart: 16 }}>
+                {detail.report.facts.map((fact, index) => (
+                  <li key={`fact-${index}`}>
+                    <div>{fact.text}</div>
+                    <div style={{ color: 'var(--dsh-text-muted, #666)' }}>
+                      {fact.citations.map((citation) => citation.kind === 'file'
+                        ? t(labelOf('analysisSourceFile'), { path: citation.path, start: String(citation.startLine), end: String(citation.endLine) })
+                        : citation.kind === 'verification'
+                          ? t(labelOf('analysisSourceVerification'), { record: citation.recordId, start: String(citation.startLine), end: String(citation.endLine) })
+                          : t(labelOf('analysisSourcePlan'), { version: citation.planVersion })).join('；')}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <h6 style={{ margin: '6px 0 2px' }}>{t(labelOf('analysisInferences'))}</h6>
+              <ul style={{ margin: 0, paddingInlineStart: 16 }}>
+                {detail.report.inferences.map((item, index) => <li key={`inference-${index}`}>{item}</li>)}
+              </ul>
+              <h6 style={{ margin: '6px 0 2px' }}>{t(labelOf('analysisSuggestions'))}</h6>
+              {detail.report.suggestions.length === 0 ? <p style={{ margin: 0 }}>{t(labelOf('analysisNoSuggestions'))}</p> : (
+                <ul style={{ margin: 0, paddingInlineStart: 16 }}>
+                  {detail.report.suggestions.map((item, index) => <li key={`suggestion-${index}`}>{item}</li>)}
+                </ul>
+              )}
+
+              <h6 style={{ margin: '6px 0 2px' }}>{t(labelOf('analysisSources'))}</h6>
+              {detail.sources.length === 0 ? <p style={{ margin: 0 }}>{t(labelOf('analysisNoSources'))}</p> : (
+                <ul style={{ margin: 0, paddingInlineStart: 16 }}>
+                  {detail.sources.map((source, index) => (
+                    <li key={`source-${index}`} data-cona-analysis-source={index}>
+                      <div>{analysisSourceText(source, t)}</div>
+                      <div style={{ color: 'var(--dsh-text-muted, #666)' }}>
+                        {t(labelOf(ANALYSIS_SOURCE_KEY[source.state] ?? 'analysisSourceInaccessible'))}
+                      </div>
+                      {source.citation.kind === 'file' ? (
+                        <button
+                          type="button"
+                          data-cona-analysis-view-source={index}
+                          onClick={() => { void controller.viewAnalysisSource(index); }}
+                        >
+                          {t(labelOf('analysisViewCurrentFile'))}
+                        </button>
+                      ) : null}
+                      {analysis.currentSource !== null && analysis.currentSource.citationIndex === index ? (
+                        <div data-cona-analysis-current-source={index} style={{ marginTop: 4, padding: 4, background: 'var(--dsh-surface-alt, #f6f6f6)' }}>
+                          <div>{t(labelOf('analysisCurrentFileTitle'))}</div>
+                          <div>{t(labelOf('analysisCurrentFileSource'), { path: analysis.currentSource.path })}</div>
+                          <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', fontSize: 11, maxHeight: 160, overflowY: 'auto' }}>{analysis.currentSource.text}</pre>
+                          {analysis.currentSource.truncated ? <div>{t(labelOf('analysisCurrentFileTruncated'))}</div> : null}
+                        </div>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  data-cona-analysis-reanalyze-report={detail.report.reportId}
+                  disabled={analysis.busy}
+                  onClick={() => { void controller.beginAnalysisReview(detail.report.reportId); }}
+                >
+                  {t(labelOf('analysisReanalyze'))}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </>
       ) : null}
     </section>
   );

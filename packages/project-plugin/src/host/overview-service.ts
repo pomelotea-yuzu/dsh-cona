@@ -35,7 +35,21 @@ import type {
   MigrationPreviewResult,
   MigrationService,
 } from '../application/migration.js'
-import type { MigrationRecord } from '../application/local-state.js'
+import type {
+  AnalysisRecord,
+  AnalysisReportRecord,
+  AnalysisStatus,
+  MigrationRecord,
+  ReportBasisStatus,
+  ReportCitation,
+  ReportCoverage,
+} from '../application/local-state.js'
+import type { AnalysisPreviewResult, AnalysisRepositoryView } from '../application/analysis-scope.js'
+import type { AnalysisOutcome, StartAnalysisValue } from '../application/analysis-session.js'
+import type { ScopeSelection } from '../domain/analysis.js'
+import { ReadBudget } from '../domain/analysis.js'
+import { ANALYSIS_TERMINAL_STATUSES } from '../application/analysis-session.js'
+import { basisSnapshotOf, selectionOfBasis } from '../application/analysis-basis.js'
 import type { LocationKind } from '../application/location.js'
 import type {
   WorkAction,
@@ -351,6 +365,180 @@ export interface LocalIssueView {
   code: string;
   message: string;
   path?: string;
+}
+
+// ---------- 7.1-7.3：概览里的项目分析与复盘 ----------
+
+/** 概览可选仓库：不可用映射保留原因，不猜替代路径。 */
+export interface AnalysisRepositoryRowView {
+  repositoryId: string;
+  absolutePath: string;
+  status: 'available' | 'unavailable';
+  reason?: string;
+  message?: string;
+  head?: string;
+  updatedAt?: string;
+}
+
+/** 历史分析行：本机记录 + 唯一报告摘要；历史只读。 */
+export interface AnalysisRunView {
+  analysisId: string;
+  status: AnalysisStatus;
+  createdAt: string;
+  updatedAt: string;
+  repositoryId: string;
+  scope: ScopeSelection;
+  planVersion: string;
+  sessionId: string | null;
+  previousAnalysisId?: string;
+  endedAt?: string;
+  endReason?: string;
+  detail?: string;
+  /** 已收到 owner 停止请求；真实终态仍等待宿主 turn/end。 */
+  stopRequestedAt?: string;
+  reportId: string | null;
+  reportSummary: string | null;
+  coverage: ReportCoverage | null;
+  /** 保存时计算的依据状态；打开报告时按当前来源重算。 */
+  basisState: ReportBasisStatus['state'] | null;
+}
+
+export type AnalysisOverviewOutcome =
+  | { status: 'ok'; repositories: AnalysisRepositoryRowView[]; runs: AnalysisRunView[] }
+  | { status: 'rejected'; code: string; message: string };
+
+/** 范围预览投影：只给概览需要的计数与基线，不回传整棵文件清单。 */
+export interface AnalysisPreviewView {
+  repositoryId: string;
+  scope: ScopeSelection;
+  repository: { repositoryId: string; absolutePath: string; head?: string };
+  observedFiles: number;
+  excluded: number;
+  unreadable: number;
+  truncated: boolean;
+  complete: boolean;
+  fingerprint: string;
+  planVersion: string;
+}
+
+export type AnalysisPreviewOutcome =
+  | { status: 'ok'; value: AnalysisPreviewView }
+  | { status: 'rejected'; code: string; message: string };
+
+export type AnalysisStartOutcome =
+  | { status: 'committed'; analysisId: string; reused: boolean; recordStatus: AnalysisStatus }
+  | { status: 'rejected'; code: string; message: string }
+  | { status: 'unknown-state'; code: string; message: string; stage: string };
+
+export type AnalysisSendOutcome =
+  | { status: 'committed'; sent: boolean; recovered: boolean; reused: boolean }
+  | { status: 'rejected'; code: string; message: string };
+
+export type AnalysisStopOutcome =
+  | { status: 'committed'; requested: boolean; terminal: boolean }
+  | { status: 'rejected'; code: string; message: string }
+  | { status: 'unknown-state'; code: string; message: string; stage: string };
+
+export interface AnalysisSourceView {
+  citation: ReportCitation;
+  state: 'current' | 'content-changed' | 'missing' | 'inaccessible' | 'outside-scope' | 'mapping-changed';
+}
+
+export type AnalysisReportOutcome =
+  | {
+      status: 'ok';
+      report: AnalysisReportRecord;
+      /** 回看时按当前来源重算的依据状态（tasks 7.3）。 */
+      basis: ReportBasisStatus;
+      sources: readonly AnalysisSourceView[];
+    }
+  | { status: 'rejected'; code: string; message: string };
+
+export type AnalysisSessionTargetOutcome =
+  | { status: 'ok'; sessionId: string; historical: boolean }
+  | { status: 'rejected'; code: string; message: string };
+
+export type AnalysisCurrentSourceOutcome =
+  | { status: 'ok'; path: string; text: string; startLine: number; endLine: number; truncated: boolean }
+  | { status: 'rejected'; code: string; message: string };
+
+export type AnalysisReviewPreviewOutcome =
+  | {
+      status: 'ok';
+      reportId: string;
+      previousAnalysisId: string;
+      repositoryId: string;
+      scope: ScopeSelection;
+      preview: AnalysisPreviewView;
+    }
+  | { status: 'rejected'; code: string; message: string };
+
+export type AnalysisReviewStartOutcome =
+  | {
+      status: 'committed';
+      analysisId: string;
+      reused: boolean;
+      sourceReportId: string;
+      previousAnalysisId: string;
+      recordStatus: AnalysisStatus;
+    }
+  | { status: 'rejected'; code: string; message: string }
+  | { status: 'unknown-state'; code: string; message: string; stage: string };
+
+function mapAnalysisStart(outcome: AnalysisOutcome<StartAnalysisValue>): AnalysisStartOutcome {
+  if (outcome.status === 'committed') {
+    return {
+      status: 'committed',
+      analysisId: outcome.value.analysis.analysisId,
+      reused: outcome.value.reused,
+      recordStatus: outcome.value.analysis.status,
+    }
+  }
+  return outcome
+}
+
+function analysisPreviewView(preview: Extract<AnalysisPreviewResult, { status: 'ok' }>, planVersion: string): AnalysisPreviewView {
+  return {
+    repositoryId: preview.selection.repositoryId,
+    scope: preview.selection.scope,
+    repository: {
+      repositoryId: preview.repository.repositoryId,
+      absolutePath: preview.repository.absolutePath,
+      ...(preview.repository.head === undefined ? {} : { head: preview.repository.head }),
+    },
+    observedFiles: preview.entries.length,
+    excluded: preview.exclusions.length,
+    unreadable: preview.issues.length,
+    truncated: preview.truncated,
+    complete: preview.complete,
+    fingerprint: preview.fingerprint,
+    planVersion,
+  };
+}
+
+function analysisRepositoryRow(view: AnalysisRepositoryView): AnalysisRepositoryRowView {
+  return {
+    repositoryId: view.repositoryId,
+    absolutePath: view.absolutePath,
+    status: view.status,
+    ...(view.reason === undefined ? {} : { reason: view.reason }),
+    ...(view.message === undefined ? {} : { message: view.message }),
+    ...(view.head === undefined ? {} : { head: view.head }),
+    ...(view.updatedAt === undefined ? {} : { updatedAt: view.updatedAt }),
+  };
+}
+
+function reportBasisSummary(record: AnalysisRecord, reports: readonly {
+  reportId: string; analysisId: string; summary: string; coverage: ReportCoverage; basisState: ReportBasisStatus['state'];
+}[]): Pick<AnalysisRunView, 'reportId' | 'reportSummary' | 'coverage' | 'basisState'> {
+  const report = reports.find((item) => item.analysisId === record.analysisId);
+  if (report === undefined) return { reportId: null, reportSummary: null, coverage: null, basisState: null };
+  return {
+    reportId: report.reportId,
+    reportSummary: report.summary,
+    coverage: report.coverage,
+    basisState: report.basisState,
+  };
 }
 
 export class ConaOverviewService extends TypertRemoteService {
@@ -1344,6 +1532,378 @@ export class ConaOverviewService extends TypertRemoteService {
     const result = await this.deps.migration.listMigrations({ localDataRoot: localRoot })
     if (!result.ok) return { ok: false, issues: result.issues }
     return { ok: true, migrations: result.migrations }
+  }
+
+  // ---------- 7.1-7.3：项目分析与复盘（owner 概览入口；按实例路由） ----------
+
+  /** 分析服务的通用准入：owner、实例登记、运行时装配缺省诊断。 */
+  private async requireAnalysisRuntime(instanceId: unknown): Promise<
+    | { denied: { status: 'rejected'; code: string; message: string } }
+    | { runtime: import('./project-service.js').ConaProjectRuntime }
+  > {
+    const badId = this.requireId(instanceId)
+    if (badId !== null) return { denied: { status: 'rejected', code: badId.code, message: badId.message } }
+    const resolved = await this.resolveInstance(instanceId as string)
+    if ('denied' in resolved) return { denied: { status: 'rejected', code: resolved.denied.code, message: resolved.denied.message } }
+    if (!resolved.runtime.ok) {
+      return { denied: { status: 'rejected', code: resolved.runtime.code, message: resolved.runtime.message } }
+    }
+    const runtime = resolved.runtime.value
+    if (runtime.analysis === undefined || runtime.analysisSession === undefined || runtime.analysisReports === undefined) {
+      return { denied: { status: 'rejected', code: 'analysis-unavailable', message: '此宿主未装配分析服务' } }
+    }
+    return { runtime }
+  }
+
+  /** 分析概览：可选仓库、历史分析与唯一报告摘要；只读。 */
+  @Remote('analysisOverview')
+  async analysisOverview(request: { instanceId: string }): Promise<AnalysisOverviewOutcome> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    const analysis = await this.requireAnalysisRuntime(request?.instanceId)
+    if ('denied' in analysis) return analysis.denied
+    const runtime = analysis.runtime
+    const repositories = await runtime.analysis!.listRepositories()
+    const [records, reports] = await Promise.all([
+      runtime.analysisSession!.list(),
+      runtime.analysisReports!.list(),
+    ])
+    return {
+      status: 'ok',
+      repositories: repositories.map((row) => analysisRepositoryRow(row)),
+      runs: records.map((record) => ({
+        analysisId: record.analysisId,
+        status: record.status,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+        repositoryId: record.repositoryId,
+        scope: record.scope,
+        planVersion: record.planVersion,
+        sessionId: record.sessionId,
+        ...(record.previousAnalysisId === undefined ? {} : { previousAnalysisId: record.previousAnalysisId }),
+        ...(record.endedAt === undefined ? {} : { endedAt: record.endedAt }),
+        ...(record.endReason === undefined ? {} : { endReason: record.endReason }),
+        ...(record.detail === undefined ? {} : { detail: record.detail }),
+        ...(record.stopRequestedAt === undefined ? {} : { stopRequestedAt: record.stopRequestedAt }),
+        ...reportBasisSummary(record, reports),
+      })),
+    }
+  }
+
+  /** 预览范围：当前映射、观察计数与规划基线；不创建分析、不发送消息。 */
+  @Remote('analysisPreview')
+  async analysisPreview(request: {
+    instanceId: string;
+    repositoryId: string;
+    scope: ScopeSelection;
+  }): Promise<AnalysisPreviewOutcome> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.repositoryId !== 'string' || request.repositoryId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 repositoryId' }
+    }
+    const scopeIssue = this.requireAnalysisScope(request.scope)
+    if (scopeIssue !== null) return scopeIssue
+    const analysis = await this.requireAnalysisRuntime(request?.instanceId)
+    if ('denied' in analysis) return analysis.denied
+    const runtime = analysis.runtime
+    if (runtime.analysisPlanVersion === undefined) {
+      return { status: 'rejected', code: 'analysis-unavailable', message: '此宿主未提供规划基线读取' }
+    }
+    const preview = await runtime.analysis!.preview({ repositoryId: request.repositoryId, scope: request.scope })
+    if (preview.status === 'rejected') return preview
+    const baseline = await runtime.analysisPlanVersion()
+    if (!baseline.ok) return { status: 'rejected', code: baseline.code, message: baseline.message }
+    return { status: 'ok', value: analysisPreviewView(preview, baseline.planVersion) }
+  }
+
+  /** owner 确认后创建分析记录与真实 Session；重试沿用同一 operationId。 */
+  @Remote('analysisStart')
+  async analysisStart(request: {
+    instanceId: string;
+    operationId: string;
+    repositoryId: string;
+    scope: ScopeSelection;
+    expectedFingerprint?: string;
+    expectedPlanVersion?: string;
+  }): Promise<AnalysisStartOutcome> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.operationId !== 'string' || request.operationId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 operationId' }
+    }
+    if (typeof request.repositoryId !== 'string' || request.repositoryId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 repositoryId' }
+    }
+    const scopeIssue = this.requireAnalysisScope(request.scope)
+    if (scopeIssue !== null) return scopeIssue
+    const analysis = await this.requireAnalysisRuntime(request?.instanceId)
+    if ('denied' in analysis) return analysis.denied
+    const outcome = await analysis.runtime.analysisSession!.start({
+      operationId: request.operationId,
+      repositoryId: request.repositoryId,
+      scope: request.scope,
+      ...(request.expectedFingerprint === undefined ? {} : { expectedFingerprint: request.expectedFingerprint }),
+      ...(request.expectedPlanVersion === undefined ? {} : { expectedPlanVersion: request.expectedPlanVersion }),
+    })
+    return mapAnalysisStart(outcome)
+  }
+
+  /** 发送首条分析消息；结果未知时不自动重发，显式 retry 复用同一请求号。 */
+  @Remote('analysisSend')
+  async analysisSend(request: { instanceId: string; analysisId: string; retry?: boolean }): Promise<AnalysisSendOutcome> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.analysisId !== 'string' || request.analysisId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 analysisId' }
+    }
+    const analysis = await this.requireAnalysisRuntime(request?.instanceId)
+    if ('denied' in analysis) return analysis.denied
+    const outcome = await analysis.runtime.analysisSession!.sendFirstMessage(request.analysisId, {
+      retry: request.retry === true,
+    })
+    if (outcome.status === 'committed') {
+      return {
+        status: 'committed',
+        sent: outcome.value.sent,
+        recovered: outcome.value.recovered,
+        reused: outcome.value.reused,
+      }
+    }
+    return { status: 'rejected', code: outcome.code, message: outcome.message }
+  }
+
+  /** owner 停止请求：只记录请求并交给宿主取消；真实终态仍由 turn/end 同步。 */
+  @Remote('analysisStop')
+  async analysisStop(request: { instanceId: string; analysisId: string }): Promise<AnalysisStopOutcome> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.analysisId !== 'string' || request.analysisId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 analysisId' }
+    }
+    const analysis = await this.requireAnalysisRuntime(request?.instanceId)
+    if ('denied' in analysis) return analysis.denied
+    const outcome = await analysis.runtime.analysisSession!.stop(request.analysisId)
+    if (outcome.status === 'committed') {
+      return { status: 'committed', requested: outcome.value.requested, terminal: outcome.value.terminal }
+    }
+    if (outcome.status === 'unknown-state') {
+      return { status: 'unknown-state', code: outcome.code, message: outcome.message, stage: outcome.stage }
+    }
+    return { status: 'rejected', code: outcome.code, message: outcome.message }
+  }
+
+  /** 报告详情：回看时重算依据状态并按当前来源复核全部引用。 */
+  @Remote('analysisReport')
+  async analysisReport(request: { instanceId: string; reportId: string }): Promise<AnalysisReportOutcome> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.reportId !== 'string' || request.reportId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 reportId' }
+    }
+    const analysis = await this.requireAnalysisRuntime(request?.instanceId)
+    if ('denied' in analysis) return analysis.denied
+    const detail = await analysis.runtime.analysisReports!.get(request.reportId)
+    if (detail.status !== 'ok') return detail
+    const basis = await analysis.runtime.analysisReports!.evaluateBasis(request.reportId)
+    if (basis.status !== 'ok') return basis
+    const sources = await analysis.runtime.analysisReports!.verifySources(request.reportId)
+    if (sources.status !== 'ok') return sources
+    return { status: 'ok', report: detail.report, basis: basis.basis, sources: sources.sources };
+  }
+
+  /** 打开历史分析会话前复查：只导航到宿主可见的实际 Session，不带执行授权。 */
+  @Remote('analysisSessionTarget')
+  async analysisSessionTarget(request: { instanceId: string; analysisId: string }): Promise<AnalysisSessionTargetOutcome> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.analysisId !== 'string' || request.analysisId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 analysisId' }
+    }
+    const analysis = await this.requireAnalysisRuntime(request?.instanceId)
+    if ('denied' in analysis) return analysis.denied
+    const runtime = analysis.runtime
+    const record = await runtime.analysisSession!.get(request.analysisId)
+    if (record.status !== 'ok') return record
+    if (record.analysis.sessionId === null) {
+      return { status: 'rejected', code: 'analysis-session-missing', message: '该分析尚未登记实际 Session' }
+    }
+    // 分析会话的 cwd 是仓库根，不能用按资料根 cwd 过滤的聊天目录判断可见性。
+    const presence = await runtime.analysisSession!.sessionPresence(record.analysis.sessionId)
+    if (presence === 'unknown') {
+      return { status: 'rejected', code: 'session-directory-unavailable', message: '宿主会话目录不可读；无法定位原会话' }
+    }
+    if (presence === 'missing') {
+      return { status: 'rejected', code: 'session-unavailable', message: '原会话不在当前宿主目录中；报告与历史仍可查看' }
+    }
+    return {
+      status: 'ok',
+      sessionId: record.analysis.sessionId,
+      historical: ANALYSIS_TERMINAL_STATUSES.includes(record.analysis.status),
+    }
+  }
+
+  /** 显式查看当前文件内容：只在用户选择后读取；始终与历史凭证分开展示。 */
+  @Remote('analysisCurrentSource')
+  async analysisCurrentSource(request: {
+    instanceId: string;
+    reportId: string;
+    citationIndex: number;
+  }): Promise<AnalysisCurrentSourceOutcome> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.reportId !== 'string' || request.reportId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 reportId' }
+    }
+    if (!Number.isSafeInteger(request.citationIndex) || request.citationIndex < 0) {
+      return { status: 'rejected', code: 'operation-mismatch', message: 'citationIndex 必须是非负整数' }
+    }
+    const analysis = await this.requireAnalysisRuntime(request?.instanceId)
+    if ('denied' in analysis) return analysis.denied
+    const runtime = analysis.runtime
+    const detail = await runtime.analysisReports!.get(request.reportId)
+    if (detail.status !== 'ok') return detail
+    const citations = detail.report.facts.flatMap((fact) => [...fact.citations])
+    const citation = citations[request.citationIndex]
+    if (citation === undefined || citation.kind !== 'file') {
+      return { status: 'rejected', code: 'analysis-source-not-file', message: '该引用不是可查看的文件来源' }
+    }
+    const record = await runtime.analysisSession!.get(detail.report.analysisId)
+    if (record.status !== 'ok') return record
+    const basis = detail.report.basis ?? basisSnapshotOf(record.analysis)
+    const selection = selectionOfBasis(basis, detail.report.createdAt)
+    const verified = await runtime.analysis!.verifyCitation(selection, {
+      path: citation.path,
+      fullHash: citation.fullHash,
+      deliveredHash: citation.deliveredHash,
+      startLine: citation.startLine,
+      endLine: citation.endLine,
+      deliveredBytes: citation.deliveredBytes,
+      totalLines: citation.totalLines,
+      truncated: citation.truncated,
+    })
+    if (verified.status === 'missing') {
+      return { status: 'rejected', code: 'analysis-source-missing', message: '当前路径没有可读的现文件' }
+    }
+    if (verified.status === 'outside-scope') {
+      return { status: 'rejected', code: 'analysis-source-outside-scope', message: '当前文件已不在该分析范围内' }
+    }
+    if (verified.status === 'inaccessible') {
+      return { status: 'rejected', code: verified.code, message: verified.message }
+    }
+    if (verified.status === 'mapping-changed') {
+      return { status: 'rejected', code: 'analysis-mapping-changed', message: verified.reason }
+    }
+    const read = await runtime.analysis!.read(selection, {
+      path: citation.path,
+      budget: new ReadBudget(runtime.analysis!.limits.readBytes),
+    })
+    if (read.status === 'rejected') return read
+    return {
+      status: 'ok',
+      path: citation.path,
+      text: read.text,
+      startLine: read.credential.startLine,
+      endLine: read.credential.endLine,
+      truncated: read.truncated,
+    }
+  }
+
+  /** 复盘预览：原报告范围在当前工作副本与规划上的重新观察。 */
+  @Remote('analysisReviewPreview')
+  async analysisReviewPreview(request: {
+    instanceId: string;
+    reportId: string;
+    repositoryId?: string;
+    scope?: ScopeSelection;
+  }): Promise<AnalysisReviewPreviewOutcome> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.reportId !== 'string' || request.reportId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 reportId' }
+    }
+    const analysis = await this.requireAnalysisRuntime(request?.instanceId)
+    if ('denied' in analysis) return analysis.denied
+    const runtime = analysis.runtime
+    if (runtime.analysisReview === undefined || runtime.analysisPlanVersion === undefined) {
+      return { status: 'rejected', code: 'analysis-unavailable', message: '此宿主未装配复盘入口' }
+    }
+    const reviewed = await runtime.analysisReview.preview(request.reportId, {
+      ...(request.repositoryId === undefined ? {} : { repositoryId: request.repositoryId }),
+      ...(request.scope === undefined ? {} : { scope: request.scope }),
+    })
+    if (reviewed.status !== 'ok') return reviewed
+    const inner = reviewed.value.preview
+    if (inner.status === 'rejected') return inner
+    const baseline = await runtime.analysisPlanVersion()
+    if (!baseline.ok) return { status: 'rejected', code: baseline.code, message: baseline.message }
+    return {
+      status: 'ok',
+      reportId: reviewed.value.reportId,
+      previousAnalysisId: reviewed.value.previousAnalysisId,
+      repositoryId: reviewed.value.repositoryId,
+      scope: reviewed.value.scope,
+      preview: analysisPreviewView(inner, baseline.planVersion),
+    }
+  }
+
+  /** 从历史报告发起新一轮分析；新 analysisId 与真实 Session 由同一 start 通路建立。 */
+  @Remote('analysisReviewStart')
+  async analysisReviewStart(request: {
+    instanceId: string;
+    operationId: string;
+    reportId: string;
+    repositoryId?: string;
+    scope?: ScopeSelection;
+    expectedFingerprint?: string;
+    expectedPlanVersion?: string;
+  }): Promise<AnalysisReviewStartOutcome> {
+    const denied = this.deny()
+    if (denied !== null) return { status: 'rejected', code: denied.code, message: denied.message }
+    if (typeof request?.operationId !== 'string' || request.operationId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 operationId' }
+    }
+    if (typeof request.reportId !== 'string' || request.reportId === '') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少 reportId' }
+    }
+    const analysis = await this.requireAnalysisRuntime(request?.instanceId)
+    if ('denied' in analysis) return analysis.denied
+    const runtime = analysis.runtime
+    if (runtime.analysisReview === undefined) {
+      return { status: 'rejected', code: 'analysis-unavailable', message: '此宿主未装配复盘入口' }
+    }
+    const outcome = await runtime.analysisReview.reanalyze({
+      operationId: request.operationId,
+      reportId: request.reportId,
+      ...(request.repositoryId === undefined ? {} : { repositoryId: request.repositoryId }),
+      ...(request.scope === undefined ? {} : { scope: request.scope }),
+      ...(request.expectedFingerprint === undefined ? {} : { expectedFingerprint: request.expectedFingerprint }),
+      ...(request.expectedPlanVersion === undefined ? {} : { expectedPlanVersion: request.expectedPlanVersion }),
+    })
+    if (outcome.status === 'committed') {
+      return {
+        status: 'committed',
+        analysisId: outcome.value.analysis.analysisId,
+        reused: outcome.value.reused,
+        sourceReportId: outcome.value.sourceReportId,
+        previousAnalysisId: outcome.value.previousAnalysisId,
+        recordStatus: outcome.value.analysis.status,
+      }
+    }
+    return outcome
+  }
+
+  private requireAnalysisScope(scope: ScopeSelection | undefined): { status: 'rejected'; code: string; message: string } | null {
+    if (scope === null || typeof scope !== 'object') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '缺少分析范围' }
+    }
+    if (scope.kind !== 'root' && scope.kind !== 'file' && scope.kind !== 'directory') {
+      return { status: 'rejected', code: 'operation-mismatch', message: '分析范围必须是仓库根、文件或目录' }
+    }
+    if (scope.kind !== 'root' && (typeof scope.path !== 'string' || scope.path === '')) {
+      return { status: 'rejected', code: 'operation-mismatch', message: '文件／目录范围需要非空路径' }
+    }
+    return null
   }
 
   /** 按实例执行命令（owner 保存接续用）；实例身份由 envelope 与路由双重核对。 */

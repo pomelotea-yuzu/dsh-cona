@@ -18,8 +18,22 @@ import type {
   MigrationOpResult,
   MigrationPreviewOpResult,
   MigrationListOpResult,
+  AnalysisOverviewOutcome,
+  AnalysisRunView,
+  AnalysisRepositoryRowView,
+  AnalysisPreviewView,
+  AnalysisPreviewOutcome,
+  AnalysisStartOutcome,
+  AnalysisSendOutcome,
+  AnalysisStopOutcome,
+  AnalysisReportOutcome,
+  AnalysisSessionTargetOutcome,
+  AnalysisCurrentSourceOutcome,
+  AnalysisReviewPreviewOutcome,
+  AnalysisReviewStartOutcome,
 } from '../host/overview-service.js';
 import type { LocationKind } from '../application/location.js';
+import type { ScopeSelection } from '../domain/analysis.js';
 
 /** client 侧视图：OwnerDenial 的 null 已在传输层归一为 rejected，不再出现在控制器输入。 */
 export type RegisterPreviewView = Exclude<RegisterPreviewResult, null>;
@@ -222,6 +236,79 @@ const EMPTY_ROADMAP: RoadmapState = {
   busy: false,
 };
 
+// ---------- 7.1-7.3：项目分析与复盘（概览区） ----------
+
+/** 报告详情成功结果；含回看时重算的依据状态与逐条来源复核。 */
+export type AnalysisReportDetail = Extract<AnalysisReportOutcome, { status: 'ok' }>;
+
+/** 范围草稿；根目录不需要路径。 */
+export interface AnalysisDraft {
+  repositoryId: string;
+  kind: 'root' | 'file' | 'directory';
+  path: string;
+}
+
+/** 复盘预览：确认时复用同一 operationId 与预览基线。 */
+export interface AnalysisReviewDraft {
+  reportId: string;
+  previousAnalysisId: string;
+  preview: AnalysisPreviewView;
+  operationId: string;
+}
+
+/** 用户显式选择后读到的当前文件片段；与历史凭证分开显示。 */
+export interface AnalysisCurrentSourceView {
+  citationIndex: number;
+  path: string;
+  text: string;
+  startLine: number;
+  endLine: number;
+  truncated: boolean;
+}
+
+export interface AnalysisState {
+  phase: 'idle' | 'loading' | 'ready' | 'error';
+  repositories: AnalysisRepositoryRowView[];
+  runs: AnalysisRunView[];
+  draft: AnalysisDraft;
+  /** 已预览的范围与基线；确认后清空。 */
+  preview: AnalysisPreviewView | null;
+  /** 本次确认的启动操作号；结果未知时保留并在重试中复用。 */
+  startOperationId: string | null;
+  busy: boolean;
+  notice: { code: string; message: string } | null;
+  /** 报告详情区：选中报告、读取阶段与回看结果。 */
+  reportId: string | null;
+  reportPhase: 'idle' | 'loading' | 'ready' | 'error';
+  detail: AnalysisReportDetail | null;
+  /** 复盘草稿：确认前保留预览与 operationId。 */
+  review: AnalysisReviewDraft | null;
+  /** 显式查看的当前文件片段。 */
+  currentSource: AnalysisCurrentSourceView | null;
+}
+
+const EMPTY_ANALYSIS: AnalysisState = {
+  phase: 'idle',
+  repositories: [],
+  runs: [],
+  draft: { repositoryId: '', kind: 'root', path: '' },
+  preview: null,
+  startOperationId: null,
+  busy: false,
+  notice: null,
+  reportId: null,
+  reportPhase: 'idle',
+  detail: null,
+  review: null,
+  currentSource: null,
+};
+
+function scopeOfAnalysisDraft(draft: AnalysisDraft): ScopeSelection | null {
+  if (draft.kind === 'root') return { kind: 'root' };
+  const path = draft.path.trim();
+  return path === '' ? null : { kind: draft.kind, path };
+}
+
 /** 聊天写入结果（与 ConversationOutcome 同形，client 只读投影）。 */
 export type ChatMutationView<S> =
   | { status: 'committed'; value: S; stateRevision: number }
@@ -398,6 +485,32 @@ export interface OverviewControllerDeps {
   previewRoadmapEnable?: (instanceId: string) => Promise<
     { status: 'available'; impact: RoadmapEnableImpact } | { status: 'rejected'; code: string; message: string }
   >;
+  /** 7.1：可选仓库与历史分析列表（conaOverview/analysisOverview）。 */
+  loadAnalysis?: (instanceId: string) => Promise<AnalysisOverviewOutcome>;
+  /** 7.1：范围预览（conaOverview/analysisPreview；只读）。 */
+  previewAnalysis?: (instanceId: string, request: { repositoryId: string; scope: ScopeSelection }) => Promise<AnalysisPreviewOutcome>;
+  /** 7.1：确认开始分析（conaOverview/analysisStart；同一 operationId 可重试）。 */
+  startAnalysis?: (instanceId: string, request: {
+    operationId: string; repositoryId: string; scope: ScopeSelection;
+    expectedFingerprint?: string; expectedPlanVersion?: string;
+  }) => Promise<AnalysisStartOutcome>;
+  /** 7.1：发送首条分析消息（conaOverview/analysisSend；未知时不自动重发）。 */
+  sendAnalysis?: (instanceId: string, request: { analysisId: string; retry?: boolean }) => Promise<AnalysisSendOutcome>;
+  /** 7.1：停止分析（conaOverview/analysisStop；真实终态仍由宿主同步）。 */
+  stopAnalysis?: (instanceId: string, request: { analysisId: string }) => Promise<AnalysisStopOutcome>;
+  /** 7.2：报告详情、依据状态与来源复核（conaOverview/analysisReport）。 */
+  readAnalysisReport?: (instanceId: string, reportId: string) => Promise<AnalysisReportOutcome>;
+  /** 7.2：打开历史分析会话前复查（conaOverview/analysisSessionTarget）。 */
+  analysisSessionTarget?: (instanceId: string, analysisId: string) => Promise<AnalysisSessionTargetOutcome>;
+  /** 7.2：显式查看当前文件片段（conaOverview/analysisCurrentSource）。 */
+  readAnalysisSource?: (instanceId: string, request: { reportId: string; citationIndex: number }) => Promise<AnalysisCurrentSourceOutcome>;
+  /** 7.3：复盘预览（conaOverview/analysisReviewPreview）。 */
+  reviewAnalysis?: (instanceId: string, reportId: string) => Promise<AnalysisReviewPreviewOutcome>;
+  /** 7.3：从原报告发起新一轮分析（conaOverview/analysisReviewStart）。 */
+  startAnalysisReview?: (instanceId: string, request: {
+    operationId: string; reportId: string; repositoryId: string; scope: ScopeSelection;
+    expectedFingerprint?: string; expectedPlanVersion?: string;
+  }) => Promise<AnalysisReviewStartOutcome>;
 }
 
 export interface OverviewState {
@@ -432,6 +545,8 @@ export interface OverviewState {
   migration: MigrationState;
   /** 1.1：接入登记状态（预览与显式登记）。 */
   register: RegisterState;
+  /** 7.1-7.3：项目分析、报告回看与复盘。 */
+  analysis: AnalysisState;
 }
 
 const EMPTY: OverviewState = {
@@ -453,6 +568,7 @@ const EMPTY: OverviewState = {
   roadmap: EMPTY_ROADMAP,
   migration: EMPTY_MIGRATION,
   register: EMPTY_REGISTER,
+  analysis: EMPTY_ANALYSIS,
 };
 
 export class ProjectOverviewController {
@@ -504,10 +620,12 @@ export class ProjectOverviewController {
     if (selected !== null && !stillPresent) {
       void this.loadResumeCard(selected);
       void this.loadRoadmap(selected);
+      void this.loadAnalysis(selected);
       // 树面板的加载由委托控制器在首次绑定（且面板已订阅）时触发 open()，
       // 概览自身加载不读快照：预览/打开聊天等流程对快照读取次数有硬性契约。
     }
     if (selected !== null) void this.loadChats(selected);
+    if (selected === null) this.patch({ analysis: EMPTY_ANALYSIS });
   }
 
   /** 顶部按钮：展开/收起。首次展开时读取列表。 */
@@ -541,10 +659,12 @@ export class ProjectOverviewController {
       roadmap: EMPTY_ROADMAP,
       migration: EMPTY_MIGRATION,
       register: EMPTY_REGISTER,
+      analysis: EMPTY_ANALYSIS,
     });
     void this.loadResumeCard(instanceId);
     void this.loadChats(instanceId);
     void this.loadRoadmap(instanceId);
+    void this.loadAnalysis(instanceId);
     return true;
   }
 
@@ -580,6 +700,447 @@ export class ProjectOverviewController {
         },
       });
     }
+  }
+
+  // ---------- 7.1-7.3：项目分析与复盘 ----------
+
+  private patchAnalysis(instanceId: string, change: Partial<AnalysisState>): void {
+    if (this.state.selectedId !== instanceId) return;
+    this.patch({ analysis: { ...this.state.analysis, ...change } });
+  }
+
+  /** 读取可选仓库与历史分析；不可用只影响本区，不阻断概览其他入口。 */
+  async loadAnalysis(instanceId: string): Promise<void> {
+    if (this.state.selectedId !== instanceId) return;
+    if (this.deps.loadAnalysis === undefined) {
+      this.patchAnalysis(instanceId, {
+        phase: 'error',
+        notice: { code: 'analysis-unavailable', message: '' },
+      });
+      return;
+    }
+    this.patchAnalysis(instanceId, { phase: 'loading', notice: null });
+    let result: AnalysisOverviewOutcome;
+    try {
+      result = await this.deps.loadAnalysis(instanceId);
+    } catch (error) {
+      this.patchAnalysis(instanceId, {
+        phase: 'error',
+        notice: { code: 'transport-failed', message: (error as Error).message },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status !== 'ok') {
+      this.patchAnalysis(instanceId, { phase: 'error', notice: { code: result.code, message: result.message } });
+      return;
+    }
+    const available = result.repositories.filter((row) => row.status === 'available');
+    const current = this.state.analysis.draft.repositoryId;
+    const repositoryId = available.some((row) => row.repositoryId === current)
+      ? current
+      : available[0]?.repositoryId ?? '';
+    this.patchAnalysis(instanceId, {
+      phase: 'ready',
+      repositories: [...result.repositories],
+      runs: [...result.runs],
+      notice: null,
+      draft: { ...this.state.analysis.draft, repositoryId },
+    });
+  }
+
+  /** 只刷新仓库与历史行，不清除当前提示或报告详情（发送未知后保持诊断）。 */
+  private async refreshAnalysisRuns(instanceId: string): Promise<void> {
+    if (this.deps.loadAnalysis === undefined) return;
+    let result: AnalysisOverviewOutcome;
+    try {
+      result = await this.deps.loadAnalysis(instanceId);
+    } catch {
+      return;
+    }
+    if (this.state.selectedId !== instanceId || result.status !== 'ok') return;
+    this.patchAnalysis(instanceId, {
+      phase: 'ready',
+      repositories: [...result.repositories],
+      runs: [...result.runs],
+    });
+  }
+
+  /** 修改范围草稿：旧预览与启动操作号作废（必须重新预览确认）。 */
+  patchAnalysisDraft(change: Partial<AnalysisDraft>): void {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null) return;
+    this.patchAnalysis(instanceId, {
+      draft: { ...this.state.analysis.draft, ...change },
+      preview: null,
+      startOperationId: null,
+      notice: null,
+      currentSource: null,
+    });
+  }
+
+  /** 只读预览：不创建分析、不发送消息；取消只清本地草稿。 */
+  async previewAnalysis(): Promise<void> {
+    const instanceId = this.state.selectedId;
+    const analysis = this.state.analysis;
+    if (instanceId === null || analysis.busy) return;
+    if (this.deps.previewAnalysis === undefined) {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-unavailable', message: '' } });
+      return;
+    }
+    if (analysis.draft.repositoryId === '') {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-repository-missing', message: '' } });
+      return;
+    }
+    const scope = scopeOfAnalysisDraft(analysis.draft);
+    if (scope === null) {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-scope-invalid', message: '' } });
+      return;
+    }
+    this.patchAnalysis(instanceId, { busy: true, notice: null });
+    let result: AnalysisPreviewOutcome;
+    try {
+      result = await this.deps.previewAnalysis(instanceId, {
+        repositoryId: analysis.draft.repositoryId,
+        scope,
+      });
+    } catch (error) {
+      this.patchAnalysis(instanceId, {
+        busy: false,
+        notice: { code: 'transport-failed', message: (error as Error).message },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status !== 'ok') {
+      this.patchAnalysis(instanceId, { busy: false, preview: null, notice: { code: result.code, message: result.message } });
+      return;
+    }
+    this.patchAnalysis(instanceId, {
+      busy: false,
+      preview: result.value,
+      startOperationId: null,
+      notice: null,
+    });
+  }
+
+  /** 取消预览：不产生任何分析记录；重新预览会得到新的确认基线。 */
+  cancelAnalysisPreview(): void {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null) return;
+    this.patchAnalysis(instanceId, { preview: null, startOperationId: null, notice: null, currentSource: null });
+  }
+
+  /**
+   * 确认开始分析：同一 operationId 只建一条记录；成功后立即发送首条消息。
+   * 结果未知保留操作号与预览，供显式重试；明确拒绝则要求重新预览。
+   */
+  async startAnalysis(): Promise<void> {
+    const instanceId = this.state.selectedId;
+    const analysis = this.state.analysis;
+    const preview = analysis.preview;
+    if (instanceId === null || preview === null || analysis.busy) return;
+    if (this.deps.startAnalysis === undefined) {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-unavailable', message: '' } });
+      return;
+    }
+    const operationId = analysis.startOperationId ?? this.deps.newOperationId();
+    this.patchAnalysis(instanceId, { busy: true, startOperationId: operationId, notice: null });
+    let result: AnalysisStartOutcome;
+    try {
+      result = await this.deps.startAnalysis(instanceId, {
+        operationId,
+        repositoryId: preview.repositoryId,
+        scope: preview.scope,
+        expectedFingerprint: preview.fingerprint,
+        expectedPlanVersion: preview.planVersion,
+      });
+    } catch (error) {
+      this.patchAnalysis(instanceId, {
+        busy: false,
+        notice: { code: 'transport-failed', message: (error as Error).message },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status === 'committed') {
+      this.patchAnalysis(instanceId, { busy: false, preview: null, startOperationId: null, notice: null });
+      await this.loadAnalysis(instanceId);
+      await this.sendAnalysisMessage(result.analysisId, false);
+      return;
+    }
+    const keep = result.status === 'unknown-state' || /unknown|unconfirmed|association/.test(result.code);
+    this.patchAnalysis(instanceId, {
+      busy: false,
+      notice: { code: result.code, message: result.message },
+      ...(keep ? {} : { preview: null, startOperationId: null }),
+    });
+  }
+
+  /** 发送首条分析消息；retry=true 只在核对未到达后由用户显式触发。 */
+  async sendAnalysisMessage(analysisId: string, retry: boolean): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null) return;
+    if (this.deps.sendAnalysis === undefined) {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-unavailable', message: '' } });
+      return;
+    }
+    this.patchAnalysis(instanceId, { busy: true, notice: null });
+    let result: AnalysisSendOutcome;
+    try {
+      result = await this.deps.sendAnalysis(instanceId, { analysisId, retry });
+    } catch (error) {
+      this.patchAnalysis(instanceId, {
+        busy: false,
+        notice: { code: 'transport-failed', message: (error as Error).message },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status === 'committed') {
+      this.patchAnalysis(instanceId, { busy: false, notice: null });
+      await this.loadAnalysis(instanceId);
+      return;
+    }
+    this.patchAnalysis(instanceId, { busy: false, notice: { code: result.code, message: result.message } });
+    await this.refreshAnalysisRuns(instanceId);
+  }
+
+  async retryAnalysisSend(analysisId: string): Promise<void> {
+    await this.sendAnalysisMessage(analysisId, true);
+  }
+
+  /** 停止请求：只记录请求并交给宿主；终态由真实 turn/end 同步。 */
+  async stopAnalysis(analysisId: string): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || this.state.analysis.busy) return;
+    if (this.deps.stopAnalysis === undefined) {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-unavailable', message: '' } });
+      return;
+    }
+    this.patchAnalysis(instanceId, { busy: true, notice: null });
+    let result: AnalysisStopOutcome;
+    try {
+      result = await this.deps.stopAnalysis(instanceId, { analysisId });
+    } catch (error) {
+      this.patchAnalysis(instanceId, {
+        busy: false,
+        notice: { code: 'transport-failed', message: (error as Error).message },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status === 'committed') {
+      this.patchAnalysis(instanceId, { busy: false, notice: null });
+      await this.loadAnalysis(instanceId);
+      return;
+    }
+    this.patchAnalysis(instanceId, { busy: false, notice: { code: result.code, message: result.message } });
+  }
+
+  /** 打开报告详情：Host 在回看时重算依据状态并复核逐条来源。 */
+  async openAnalysisReport(reportId: string): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null) return;
+    if (this.deps.readAnalysisReport === undefined) {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-unavailable', message: '' } });
+      return;
+    }
+    this.patchAnalysis(instanceId, {
+      reportId,
+      reportPhase: 'loading',
+      detail: null,
+      currentSource: null,
+      notice: null,
+    });
+    let result: AnalysisReportOutcome;
+    try {
+      result = await this.deps.readAnalysisReport(instanceId, reportId);
+    } catch (error) {
+      this.patchAnalysis(instanceId, {
+        reportPhase: 'error',
+        notice: { code: 'transport-failed', message: (error as Error).message },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status !== 'ok') {
+      this.patchAnalysis(instanceId, {
+        reportPhase: 'error',
+        notice: { code: result.code, message: result.message },
+      });
+      return;
+    }
+    this.patchAnalysis(instanceId, {
+      reportPhase: 'ready',
+      detail: result,
+      currentSource: null,
+      notice: null,
+    });
+  }
+
+  /** 收起报告详情；不改变历史记录。 */
+  closeAnalysisReport(): void {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null) return;
+    this.patchAnalysis(instanceId, {
+      reportId: null,
+      reportPhase: 'idle',
+      detail: null,
+      currentSource: null,
+    });
+  }
+
+  /** 打开历史分析会话：只导航；旧会话的新输入仍由宿主 pre-step 拒绝。 */
+  async openAnalysisSession(analysisId: string): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null) return;
+    if (this.deps.analysisSessionTarget === undefined) {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-unavailable', message: '' } });
+      return;
+    }
+    let result: AnalysisSessionTargetOutcome;
+    try {
+      result = await this.deps.analysisSessionTarget(instanceId, analysisId);
+    } catch (error) {
+      this.patchAnalysis(instanceId, {
+        notice: { code: 'transport-failed', message: (error as Error).message },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status !== 'ok') {
+      this.patchAnalysis(instanceId, { notice: { code: result.code, message: result.message } });
+      return;
+    }
+    this.patchAnalysis(instanceId, { notice: null });
+    this.deps.openSession(result.sessionId);
+  }
+
+  /** 显式查看当前文件：只在用户点击后读取，内容与历史凭证分开展示。 */
+  async viewAnalysisSource(citationIndex: number): Promise<void> {
+    const instanceId = this.state.selectedId;
+    const detail = this.state.analysis.detail;
+    if (instanceId === null || detail === null) return;
+    if (this.deps.readAnalysisSource === undefined) {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-unavailable', message: '' } });
+      return;
+    }
+    let result: AnalysisCurrentSourceOutcome;
+    try {
+      result = await this.deps.readAnalysisSource(instanceId, { reportId: detail.report.reportId, citationIndex });
+    } catch (error) {
+      this.patchAnalysis(instanceId, {
+        notice: { code: 'transport-failed', message: (error as Error).message },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status !== 'ok') {
+      this.patchAnalysis(instanceId, { notice: { code: result.code, message: result.message } });
+      return;
+    }
+    this.patchAnalysis(instanceId, {
+      currentSource: {
+        citationIndex,
+        path: result.path,
+        text: result.text,
+        startLine: result.startLine,
+        endLine: result.endLine,
+        truncated: result.truncated,
+      },
+      notice: null,
+    });
+  }
+
+  closeAnalysisSource(): void {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null) return;
+    this.patchAnalysis(instanceId, { currentSource: null });
+  }
+
+  /** 复盘预览：拿当前代码与规划基线重新观察原范围；确认前不创建分析。 */
+  async beginAnalysisReview(reportId: string): Promise<void> {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null || this.state.analysis.busy) return;
+    if (this.deps.reviewAnalysis === undefined) {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-unavailable', message: '' } });
+      return;
+    }
+    this.patchAnalysis(instanceId, { busy: true, notice: null });
+    let result: AnalysisReviewPreviewOutcome;
+    try {
+      result = await this.deps.reviewAnalysis(instanceId, reportId);
+    } catch (error) {
+      this.patchAnalysis(instanceId, {
+        busy: false,
+        notice: { code: 'transport-failed', message: (error as Error).message },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status !== 'ok') {
+      this.patchAnalysis(instanceId, { busy: false, review: null, notice: { code: result.code, message: result.message } });
+      return;
+    }
+    this.patchAnalysis(instanceId, {
+      busy: false,
+      notice: null,
+      review: {
+        reportId: result.reportId,
+        previousAnalysisId: result.previousAnalysisId,
+        preview: result.preview,
+        operationId: this.deps.newOperationId(),
+      },
+    });
+  }
+
+  /** 确认复盘：新 analysisId 与真实 Session 由同一 start 通路建立。 */
+  async confirmAnalysisReview(): Promise<void> {
+    const instanceId = this.state.selectedId;
+    const review = this.state.analysis.review;
+    if (instanceId === null || review === null || this.state.analysis.busy) return;
+    if (this.deps.startAnalysisReview === undefined) {
+      this.patchAnalysis(instanceId, { notice: { code: 'analysis-unavailable', message: '' } });
+      return;
+    }
+    this.patchAnalysis(instanceId, { busy: true, notice: null });
+    let result: AnalysisReviewStartOutcome;
+    try {
+      result = await this.deps.startAnalysisReview(instanceId, {
+        operationId: review.operationId,
+        reportId: review.reportId,
+        repositoryId: review.preview.repositoryId,
+        scope: review.preview.scope,
+        expectedFingerprint: review.preview.fingerprint,
+        expectedPlanVersion: review.preview.planVersion,
+      });
+    } catch (error) {
+      this.patchAnalysis(instanceId, {
+        busy: false,
+        notice: { code: 'transport-failed', message: (error as Error).message },
+      });
+      return;
+    }
+    if (this.state.selectedId !== instanceId) return;
+    if (result.status === 'committed') {
+      this.patchAnalysis(instanceId, { busy: false, review: null, notice: null });
+      await this.loadAnalysis(instanceId);
+      await this.sendAnalysisMessage(result.analysisId, false);
+      return;
+    }
+    const keep = result.status === 'unknown-state' || /unknown|unconfirmed|association/.test(result.code);
+    this.patchAnalysis(instanceId, {
+      busy: false,
+      notice: { code: result.code, message: result.message },
+      ...(keep ? {} : { review: null }),
+    });
+  }
+
+  cancelAnalysisReview(): void {
+    const instanceId = this.state.selectedId;
+    if (instanceId === null) return;
+    this.patchAnalysis(instanceId, { review: null, notice: null });
   }
 
   /** 4.2：启用扩展规划预览（只读）；成功后持有确认摘要与原 operationId。 */

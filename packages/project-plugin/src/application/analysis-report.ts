@@ -2,8 +2,9 @@
 // 按当前范围观察计算覆盖与依据状态；报告只存本机聚合，一个分析至多一个终稿。
 
 import { InstanceCommandQueue } from './command-queue.js';
-import { analysisRecordsOf, analysisReportsOf, type AnalysisRecord, type AnalysisReportRecord, type InstanceAggregate, type ReportCitation, type ReportCoverage, type ReportFact, type ReportFileCitation, type ReportVerificationCitation } from './local-state.js';
+import { analysisRecordsOf, analysisReportsOf, type AnalysisRecord, type AnalysisReportRecord, type InstanceAggregate, type ReportBasisStatus, type ReportCitation, type ReportCoverage, type ReportFact, type ReportFileCitation, type ReportVerificationCitation } from './local-state.js';
 import { analysisSelectionOf } from './analysis-session.js';
+import { AnalysisBasisService, basisSnapshotOf } from './analysis-basis.js';
 import type { AnalysisScopeService, FileReadCredential } from './analysis-scope.js';
 import type { AnalysisVerificationService, VerificationIndexEntry, VerificationReadCredential } from './analysis-verification.js';
 import type { LocalStateStorePort, PublishHooksPort } from './ports.js';
@@ -56,6 +57,8 @@ export interface ReportSummary {
   readonly summary: string;
   readonly planVersion: string;
   readonly coverage: ReportCoverage;
+  /** 保存时计算的依据状态；回看时用 evaluateBasis 重算（tasks 6.2）。 */
+  readonly basisState: ReportBasisStatus['state'];
 }
 
 export interface AnalysisReportServiceDeps {
@@ -79,7 +82,16 @@ const MAX_ITEMS = 200;
 const MAX_TEXT = 20000;
 
 export class AnalysisReportService {
-  constructor(private readonly deps: AnalysisReportServiceDeps) {}
+  private readonly basis: AnalysisBasisService;
+
+  constructor(private readonly deps: AnalysisReportServiceDeps) {
+    this.basis = new AnalysisBasisService({
+      scope: deps.scope,
+      verification: deps.verification,
+      baseline: deps.baseline,
+      clock: deps.clock,
+    });
+  }
 
   /** 保存终稿：校验分析状态、载荷、引用凭证与覆盖；同号同载荷幂等，异载荷冲突。 */
   async save(input: SaveReportInput): Promise<SaveReportOutcome> {
@@ -117,7 +129,15 @@ export class AnalysisReportService {
       }
       const citations = this.resolveCitations(input, record.planVersion);
       if ('code' in citations) return { status: 'rejected', code: citations.code, message: citations.message };
-      const coverage = this.coverage(record, current, input.evidence);
+      // 6.1-6.2：冻结起始依据（源代际、映射身份、规划、范围指纹、逐条内容与 Git），
+      // 并在保存当刻按当前来源计算依据状态；覆盖与依据状态共用同一次观察。
+      const basis = basisSnapshotOf(record);
+      const basisStatus = await this.basis.evaluate({
+        basis,
+        citations: citations.facts.flatMap((fact) => [...fact.citations]),
+        observed: current,
+      });
+      const coverage = this.coverage(current, input.evidence, basisStatus.state);
       const report: AnalysisReportRecord = {
         reportId: this.deps.newReportId(),
         analysisId: record.analysisId,
@@ -134,6 +154,8 @@ export class AnalysisReportService {
         inferences: [...input.inferences],
         suggestions: [...input.suggestions],
         coverage,
+        basis,
+        basisStatus,
       };
       const saved = await this.persist(read.aggregate, [...reports, report]);
       if (saved.status === 'unknown-state') return saved;
@@ -157,7 +179,25 @@ export class AnalysisReportService {
         summary: report.summary,
         planVersion: report.planVersion,
         coverage: report.coverage,
+        basisState: storedBasisState(report.basisStatus),
       }));
+  }
+
+  /**
+   * 回看时重算依据状态（tasks 6.2）：按报告冻结的起始依据与当前来源判断，
+   * 不改变报告，也不发送新请求。旧报告缺少快照时从分析记录重建。
+   */
+  async evaluateBasis(reportId: string): Promise<
+    | { readonly status: 'ok'; readonly report: AnalysisReportRecord; readonly basis: ReportBasisStatus }
+    | { readonly status: 'rejected'; readonly code: string; readonly message: string }
+  > {
+    const detail = await this.get(reportId);
+    if (detail.status !== 'ok') return detail;
+    const read = await this.readAggregate();
+    if ('outcome' in read) return { status: 'rejected', code: read.outcome.code, message: read.outcome.message };
+    const record = analysisRecordsOf(read.aggregate.analyses).find((item) => item.analysisId === detail.report.analysisId);
+    const basis = await this.basis.evaluateReport(detail.report, record);
+    return { status: 'ok', report: detail.report, basis };
   }
 
   /** 报告详情；另一实例的 reportId 取不到。 */
@@ -261,9 +301,9 @@ export class AnalysisReportService {
   }
 
   private coverage(
-    record: AnalysisRecord,
     current: { entries: readonly { path: string }[]; issues: readonly unknown[]; exclusions: readonly unknown[]; truncated: boolean; complete: boolean; fingerprint: string },
     evidence: SaveReportInput['evidence'],
+    basisState: ReportBasisStatus['state'],
   ): ReportCoverage {
     const readPaths = new Set(evidence.files.map((item) => item.path));
     let completeFiles = 0;
@@ -277,7 +317,6 @@ export class AnalysisReportService {
       }
     }
     const onlyEnumerated = current.entries.filter((entry) => !readPaths.has(entry.path)).length;
-    const basis = current.fingerprint === record.observation.fingerprint ? 'current' as const : 'changed' as const;
     return {
       observedFiles: current.entries.length,
       readFiles: readPaths.size,
@@ -291,7 +330,7 @@ export class AnalysisReportService {
         || evidence.files.some((item) => item.truncated)
         || evidence.verifications.some((item) => item.truncated),
       observationComplete: current.complete,
-      basis,
+      basis: basisState,
       fingerprint: current.fingerprint,
     };
   }
@@ -348,6 +387,14 @@ export class AnalysisReportService {
     });
     return { status: 'unknown-state', code: 'unknown-state', message: `本机聚合写入结果未知（阶段 ${result.stage}）；实例已隔离`, stage: result.stage };
   }
+}
+
+function storedBasisState(value: unknown): ReportBasisStatus['state'] {
+  if (value !== null && typeof value === 'object') {
+    const state = (value as { state?: unknown }).state;
+    if (state === 'current' || state === 'changed' || state === 'uncheckable') return state;
+  }
+  return 'uncheckable';
 }
 
 function validateDraft(input: SaveReportInput): string | null {

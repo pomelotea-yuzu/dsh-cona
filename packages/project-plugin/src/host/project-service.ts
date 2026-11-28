@@ -166,6 +166,13 @@ export interface ConaProjectRuntime {
   analysisSession?: import('../application/analysis-session.js').AnalysisSessionService;
   /** 每实例分析报告服务（5.2-5.4）：保存、列表/详情与来源复核。 */
   analysisReports?: import('../application/analysis-report.js').AnalysisReportService;
+  /** 从历史报告复盘（6.3）：重新预览同一范围并经同一发起通路新建分析。 */
+  analysisReview?: import('../application/analysis-review.js').AnalysisReviewService;
+  /** 当前规划版本（7.1）：仅用于预览后确认的基线核对，不写资料。 */
+  analysisPlanVersion?: () => Promise<
+    { readonly ok: true; readonly planVersion: string }
+    | { readonly ok: false; readonly code: string; readonly message: string }
+  >;
 }
 
 export type RuntimeResult =
