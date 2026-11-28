@@ -1,4 +1,21 @@
-# dsh-cona-project 组合包层（tasks 2.2）：插件行按包名引用，Node 模块解析找到已安装代码。
+# dsh-cona-project 组合包层（tasks 2.2 / add-project-analysis 2.1）：
+# 插件行按包名引用，Node 模块解析找到已安装代码。
+# 分析 preset 单独一个 insert 块，避免其声明解析失败时连带 cona-project 主插件；
+# 宿主 agentPresets 注册表加载声明，分析 Session 以
+# agentPreset=cona-project-analysis 选择原生执行器 + 分析作用域守卫。
 - insert:
     - id: cona-project
       name: dsh-cona-project
+
+- insert:
+    - id: cona-project-analysis-preset
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: cona-project-analysis
+        name: Cona 项目分析
+        description: 只读项目分析：原生执行器 + 范围守卫 + 首消息准入。
+        plugins:
+          - id: cona-project-analysis-native-executor
+            name: '@deepseek-ai/dsh-tool-executor-native'
+          - id: cona-project-analysis-scope
+            name: 'dsh-cona-project/analysis-scope'

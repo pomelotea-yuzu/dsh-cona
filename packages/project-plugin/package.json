@@ -23,6 +23,7 @@
   },
   "exports": {
     ".": "./lib/host/index.js",
+    "./analysis-scope": "./lib/host/analysis-scope.js",
     "./client": "./lib/client/index.js",
     "./cli/validate": "./lib/cli/validate.js",
     "./cli/source": "./lib/cli/source.js",
