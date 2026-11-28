@@ -19,6 +19,7 @@ import { ProjectCommandService } from '../application/command-service.js'
 import { InstanceCommandQueue } from '../application/command-queue.js'
 import { ConversationService } from '../application/conversations.js'
 import { AnalysisScopeService, type AnalysisRepositoryMapping } from '../application/analysis-scope.js'
+import { AnalysisSessionService } from '../application/analysis-session.js'
 import { ResumeChatService } from '../application/resume-chat.js'
 import { WorkService } from '../application/work.js'
 import { InMemoryChangeStream, notificationForCommit, notificationForRefresh } from '../application/change-stream.js'
@@ -42,6 +43,7 @@ import { attachWorkEventObservers } from './work-events.js'
 import { OWNER_CONTEXT } from './owner-admission.js'
 import { ProjectToolAdapter, defineProjectTools, type ConaToolDefinition, type ConaToolExec, type ConaToolsRegistry } from './project-tools.js'
 import { planNodeView, sessionDirectory, unavailableSessionDirectory } from './session-directory.js'
+import { analysisSessionPort, unavailableAnalysisSessionPort } from './analysis-session.js'
 
 export const name = 'dsh-cona-project'
 
@@ -392,7 +394,27 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
       sha256,
       clock,
     })
-    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, resumeChats, recordReader, observeWorkCopy: observeWorkCopyFor(instance), analysis }
+    const sessionPort = analysisSessionPort(ctx)
+    const analysisSession = new AnalysisSessionService({
+      localRoot: instance.localRoot,
+      instanceId: instance.instanceId,
+      store,
+      queue,
+      scope: analysis,
+      planBaseline: async () => {
+        const result = await readSourceBaseline(files, instance.sourceRoot, sha256, clock)
+        if (!result.ok) {
+          const first = result.issues[0]
+          return { ok: false as const, code: first?.code ?? 'invalid-project', message: first?.message ?? '资料不可读' }
+        }
+        return { ok: true as const, planVersion: result.baseline.planVersion }
+      },
+      session: sessionPort.ok ? sessionPort.port : unavailableAnalysisSessionPort(sessionPort.message),
+      clock,
+      newAnalysisId: () => randomUUID(),
+      agentPreset: 'cona-project-analysis',
+    })
+    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, resumeChats, recordReader, observeWorkCopy: observeWorkCopyFor(instance), analysis, analysisSession }
     return { ok: true, value }
   }
 

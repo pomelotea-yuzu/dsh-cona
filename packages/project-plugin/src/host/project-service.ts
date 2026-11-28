@@ -162,6 +162,8 @@ export interface ConaProjectRuntime {
   observeWorkCopy?: (instanceId: string) => import('../adapters/fs/work-copy.js').WorkCopyObservation | null;
   /** 每实例分析范围服务（3.1-3.5）：仓库映射、预览、观察、读取与引用复核。 */
   analysis?: import('../application/analysis-scope.js').AnalysisScopeService;
+  /** 每实例分析 Session 生命周期（4.1-4.2）：本机记录、专用 preset 新建与关联登记。 */
+  analysisSession?: import('../application/analysis-session.js').AnalysisSessionService;
 }
 
 export type RuntimeResult =

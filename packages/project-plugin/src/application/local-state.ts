@@ -7,6 +7,7 @@ import type { LocationKind } from './location.js';
 import type { LocalIssue, LocalStateStorePort, LocalRootResolverPort, GitPrivateRootPort } from './ports.js';
 import type { Sha256Fn } from '../domain/types.js';
 import type { PlanInverse } from '../domain/inverse.js';
+import type { ScopeSelection } from '../domain/analysis.js';
 
 /** DSH 数据目录下本机运行数据的相对分段（design §2）；显式 localDataRoot 时不再追加。 */
 export const LOCAL_DATA_SEGMENTS: readonly string[] = ['data', 'dsh-cona', 'local'];
@@ -256,6 +257,142 @@ export interface InstanceAggregate {
   lastObservation: ObservationBaseline | null;
   /** 本机仓库映射（1.1）；旧聚合归一化为空数组。 */
   repositoryMaps?: RepositoryMap[];
+  /** 本机分析记录（4.1）；旧聚合归一化为空数组；不进入公开资料。 */
+  analyses?: AnalysisRecord[];
+}
+
+/** 本机分析状态（tasks 4.1）：从 owner 确认到终态的稳定阶段。 */
+export type AnalysisStatus =
+  | 'prepared'
+  | 'creating'
+  | 'created'
+  | 'sending'
+  | 'running'
+  | 'completed'
+  | 'interrupted'
+  | 'failed'
+  | 'unknown';
+
+export const ANALYSIS_STATUSES: readonly AnalysisStatus[] = [
+  'prepared', 'creating', 'created', 'sending', 'running', 'completed', 'interrupted', 'failed', 'unknown',
+];
+
+/** 启动时冻结的代码观察摘要（完整观察在 3.x 服务中生成）。 */
+export interface AnalysisStartObservation {
+  readonly fingerprint: string;
+  readonly complete: boolean;
+  readonly observedAt: string;
+  readonly entries: number;
+  readonly issues: number;
+}
+
+/** 分析绑定状态（本机私有；不进入公开资料）。 */
+export interface AnalysisBindingState {
+  readonly persisted: boolean;
+  readonly protected: boolean;
+  readonly terminal: boolean;
+  readonly version: number;
+}
+
+/** 一轮分析的完整本机记录（tasks 4.1）。 */
+export interface AnalysisRecord {
+  readonly analysisId: string;
+  readonly instanceId: string;
+  readonly repositoryId: string;
+  /** 冻结时的映射 realpath。 */
+  readonly repositoryRoot: string;
+  readonly mappingHash: string;
+  readonly sourceGeneration: number;
+  readonly scope: ScopeSelection;
+  readonly planVersion: string;
+  readonly planRevision: number;
+  readonly observation: AnalysisStartObservation;
+  /** owner 确认的启动请求标识，同时作为首条消息的 rpcId。 */
+  readonly requestId: string;
+  readonly sessionId: string | null;
+  readonly agentPreset: string;
+  readonly status: AnalysisStatus;
+  readonly binding: AnalysisBindingState | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly sentAt?: string;
+  readonly endedAt?: string;
+  readonly endReason?: 'completed' | 'aborted' | 'error' | 'stopped';
+  readonly detail?: string;
+  readonly previousAnalysisId?: string;
+}
+
+/** 旧聚合没有 analyses（4.1 前未定形）；读取时归一化，不静默改写磁盘。 */
+export function analysisRecordsOf(value: unknown): AnalysisRecord[] {
+  if (!Array.isArray(value)) return [];
+  const out: AnalysisRecord[] = [];
+  for (const item of value) {
+    if (item === null || typeof item !== 'object') continue;
+    const record = item as Partial<AnalysisRecord>;
+    if (typeof record.analysisId !== 'string' || record.analysisId === '') continue;
+    if (typeof record.instanceId !== 'string' || record.instanceId === '') continue;
+    if (typeof record.repositoryId !== 'string' || record.repositoryId === '') continue;
+    if (typeof record.repositoryRoot !== 'string' || record.repositoryRoot === '') continue;
+    if (typeof record.mappingHash !== 'string' || record.mappingHash === '') continue;
+    if (typeof record.requestId !== 'string' || record.requestId === '') continue;
+    if (typeof record.agentPreset !== 'string' || record.agentPreset === '') continue;
+    if (!ANALYSIS_STATUSES.includes(record.status as AnalysisStatus)) continue;
+    const scope = record.scope;
+    if (scope === null || typeof scope !== 'object') continue;
+    if (scope.kind !== 'root' && scope.kind !== 'file' && scope.kind !== 'directory') continue;
+    if (scope.kind !== 'root' && (typeof scope.path !== 'string' || scope.path === '')) continue;
+    const observation = record.observation;
+    if (observation === null || typeof observation !== 'object'
+      || typeof observation.fingerprint !== 'string'
+      || typeof observation.complete !== 'boolean'
+      || typeof observation.observedAt !== 'string') continue;
+    out.push({
+      analysisId: record.analysisId,
+      instanceId: record.instanceId,
+      repositoryId: record.repositoryId,
+      repositoryRoot: record.repositoryRoot,
+      mappingHash: record.mappingHash,
+      sourceGeneration: typeof record.sourceGeneration === 'number' ? record.sourceGeneration : 0,
+      scope,
+      planVersion: typeof record.planVersion === 'string' ? record.planVersion : '',
+      planRevision: typeof record.planRevision === 'number' ? record.planRevision : 0,
+      observation: {
+        fingerprint: observation.fingerprint,
+        complete: observation.complete,
+        observedAt: observation.observedAt,
+        entries: typeof observation.entries === 'number' ? observation.entries : 0,
+        issues: typeof observation.issues === 'number' ? observation.issues : 0,
+      },
+      requestId: record.requestId,
+      sessionId: typeof record.sessionId === 'string' && record.sessionId !== '' ? record.sessionId : null,
+      agentPreset: record.agentPreset,
+      status: record.status as AnalysisStatus,
+      binding: normaliseAnalysisBinding(record.binding),
+      createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
+      updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
+      ...(typeof record.sentAt === 'string' ? { sentAt: record.sentAt } : {}),
+      ...(typeof record.endedAt === 'string' ? { endedAt: record.endedAt } : {}),
+      ...(record.endReason === 'completed' || record.endReason === 'aborted'
+        || record.endReason === 'error' || record.endReason === 'stopped' ? { endReason: record.endReason } : {}),
+      ...(typeof record.detail === 'string' ? { detail: record.detail } : {}),
+      ...(typeof record.previousAnalysisId === 'string' && record.previousAnalysisId !== ''
+        ? { previousAnalysisId: record.previousAnalysisId } : {}),
+    });
+  }
+  return out;
+}
+
+function normaliseAnalysisBinding(value: unknown): AnalysisBindingState | null {
+  if (value === null || typeof value !== 'object') return null;
+  const binding = value as Partial<AnalysisBindingState>;
+  if (typeof binding.persisted !== 'boolean' || typeof binding.protected !== 'boolean'
+    || typeof binding.terminal !== 'boolean' || typeof binding.version !== 'number') return null;
+  return {
+    persisted: binding.persisted,
+    protected: binding.protected,
+    terminal: binding.terminal,
+    version: binding.version,
+  };
 }
 
 /** 本机聊天关联（tasks 6.1）：多对多，链接只表达背景关系，不构成写授权。 */

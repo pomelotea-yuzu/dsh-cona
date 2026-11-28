@@ -107,6 +107,20 @@ export interface SessionDirectoryPort {
   listSessions(): Promise<readonly DirectorySession[]>;
 }
 
+/** 宿主分析 Session 端口（tasks 4.2-4.3）：专用 preset 新建、首消息与列表核对。 */
+export interface AnalysisSessionPort {
+  /**
+   * 用专用 preset 新建 Session：不传 sessionId，因此不会复用同 cwd 的空白普通会话。
+   * cwd 为该轮冻结的仓库根；返回宿主实际身份与（若宿主声明）实际 preset。
+   */
+  createAnalysisSession(input: {
+    readonly cwd: string;
+    readonly agentPreset: string;
+  }): Promise<{ readonly sessionId: string; readonly agentPreset?: string }>;
+  /** 只读列举宿主可见会话；用于启动结果未知时的显式核对，不 resume。 */
+  listSessions(): Promise<readonly DirectorySession[]>;
+}
+
 /** 目标节点的有来源摘要（6.4 运行上下文）：只取请求的节点，不注入整棵树。 */
 export interface PlanNodeDetail {
   id: string;
