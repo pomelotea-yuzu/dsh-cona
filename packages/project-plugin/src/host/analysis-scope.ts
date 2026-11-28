@@ -38,6 +38,8 @@ interface PreStepPayload {
   readonly messages?: readonly {
     readonly source?: { readonly kind?: unknown; readonly rpcId?: unknown };
   }[];
+  /** 回合内的步骤序号（1 起）。续步只带工具结果，不是新用户输入。 */
+  readonly step?: unknown;
 }
 
 /** 绑定提供者：按实际调用主体的 SessionId 取绑定；无绑定时给 undefined。 */
@@ -118,6 +120,15 @@ export function installAnalysisScope(ctx: Context, bindingOf: BindingProvider): 
         return upstream;
       }
       const claim: AnalysisMessageClaim = { sessionId: (payload.agent?.id) as string | undefined, requestId: requestIdOf(payload) ?? undefined };
+      if (binding.terminal) {
+        // 终态之后任何步骤（含迟到续步）都不再进入模型。
+        return preStepDecision(decideAnalysisStepEntry(binding, claim));
+      }
+      // 同一回合的续步（step>1）只携带工具结果/系统提醒，没有新的用户请求标识；
+      // 它们必须放行，否则一次工具调用就会把回合拦成 blocked（真宿主实测暴露）。
+      // 新用户输入总在新的第一步出现，仍按绑定请求标识认领。
+      const step = payload.step;
+      if (typeof step === 'number' && step > 1) return upstream;
       const decision = decideAnalysisStepEntry(binding, claim);
       return decision.kind === 'allow' ? upstream : preStepDecision(decision);
     }));

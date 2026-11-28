@@ -21,6 +21,7 @@ type Guard = (execution: AnalysisInvocation) => string | undefined;
 type StepListener = (payload: {
   agent?: { id?: unknown } | null;
   messages?: readonly { source?: { kind?: unknown; rpcId?: unknown } }[];
+  step?: unknown;
 }, next: () => Promise<{ kind: 'reject' } | { kind: 'enter'; messages: unknown[] }>) => Promise<{ kind: 'reject' } | { kind: 'enter'; messages: unknown[] }>;
 
 interface Harness {
@@ -113,6 +114,31 @@ test('2.x-p 上游依赖缺失或安装失败时 ready=false，不留下半装�
   const guardFail = harness({ guardThrows: true });
   assert.equal(installAnalysisScope(guardFail.ctx, () => undefined).ready, false);
   assert.equal(guardFail.guards.length, 0);
+});
+
+test('2.x-s 回合续步（step>1）放行；新回合第一步仍按请求标识认领；终态含续步都拒绝', async () => {
+  const h = harness();
+  const current = { value: binding() };
+  installAnalysisScope(h.ctx, (sid) => (sid === 'sess-1' ? current.value : undefined));
+  const step = h.steps[0]!;
+  const next = async () => ({ kind: 'enter' as const, messages: [] });
+
+  // 工具续步没有新的用户 rpcId，必须放行（否则一次工具调用就把回合拦死）。
+  const continuation = await step({ agent: { id: 'sess-1' }, step: 2, messages: [{ source: { kind: 'model' } }] }, next);
+  assert.equal(continuation.kind, 'enter');
+
+  // 新回合第一步：错误请求标识仍拒绝。
+  const wrong = await step({ agent: { id: 'sess-1' }, step: 1, messages: [{ source: { kind: 'user', rpcId: 'rpc-2' } }] }, next);
+  assert.equal(wrong.kind, 'reject');
+  const ok = await step({ agent: { id: 'sess-1' }, step: 1, messages: [{ source: { kind: 'user', rpcId: 'rpc-1' } }] }, next);
+  assert.equal(ok.kind, 'enter');
+
+  // 终态：第一步和迟到续步都拒绝。
+  current.value = binding({ terminal: true });
+  const terminalFirst = await step({ agent: { id: 'sess-1' }, step: 1, messages: [{ source: { kind: 'user', rpcId: 'rpc-1' } }] }, next);
+  assert.equal(terminalFirst.kind, 'reject');
+  const terminalContinuation = await step({ agent: { id: 'sess-1' }, step: 2, messages: [{ source: { kind: 'model' } }] }, next);
+  assert.equal(terminalContinuation.kind, 'reject');
 });
 
 test('2.x-r apply 按 cordis effect 语义安装：保护保持到卸载，不立即释放', () => {
