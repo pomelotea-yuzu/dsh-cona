@@ -2,13 +2,13 @@
 
 ## 审 1 · DSH · 2026-11-25
 
-审阅者身份：change 未记录作者姓名；[proposal](proposal.md#L3) 只写“作者稿”，[AGENTS.md](../../../AGENTS.md) 记“2026-11-25 编写”。本会话为独立 DSH 上下文，未参与该 change 的编写。若作者为 DSH 会话，本节即[工作流](../../../docs/development/workflow.md)所称“同模型独立上下文”，不是作者自查；若作者为其他 Agent，本节为独立审 1。只读审阅，未修改 change 工件；本次只新增本文件。
+审阅者身份：change 未记录作者姓名；[proposal](proposal.md#L3) 只写“作者稿”，[AGENTS.md](../../../../AGENTS.md) 记“2026-11-25 编写”。本会话为独立 DSH 上下文，未参与该 change 的编写。若作者为 DSH 会话，本节即[工作流](../../../../docs/development/workflow.md)所称“同模型独立上下文”，不是作者自查；若作者为其他 Agent，本节为独立审 1。只读审阅，未修改 change 工件；本次只新增本文件。
 
 ### 范围与方法
 
 - 通读 [proposal](proposal.md)、[design](design.md)、[增量 spec](specs/project-analysis/spec.md)、[tasks](tasks.md) 与 [validation-matrix](validation-matrix.md)。
-- 对照主 specs：[portable-project-data](../../specs/portable-project-data/spec.md)、[project-overview-resume](../../specs/project-overview-resume/spec.md)、[project-conversation-context](../../specs/project-conversation-context/spec.md)、[project-tree-editing](../../specs/project-tree-editing/spec.md)、[plugin-localization](../../specs/plugin-localization/spec.md)。
-- 对照文档：[决策](../../../docs/knowledge/decisions.md)、[产品设计](../../../docs/product/2026-11-11-project-management-design.md#接入已有项目与再次分析)、[路线图](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#r3项目分析与自主规划)、[总体架构](../../../docs/architecture/2026-11-11-project-development-architecture.md)、[资料可移植](../../../docs/architecture/2026-11-12-project-data-portability.md)、[工作流](../../../docs/development/workflow.md)。
+- 对照主 specs：[portable-project-data](../../../specs/portable-project-data/spec.md)、[project-overview-resume](../../../specs/project-overview-resume/spec.md)、[project-conversation-context](../../../specs/project-conversation-context/spec.md)、[project-tree-editing](../../../specs/project-tree-editing/spec.md)、[plugin-localization](../../../specs/plugin-localization/spec.md)。
+- 对照文档：[决策](../../../../docs/knowledge/decisions.md)、[产品设计](../../../../docs/product/2026-11-11-project-management-design.md#接入已有项目与再次分析)、[路线图](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#r3项目分析与自主规划)、[总体架构](../../../../docs/architecture/2026-11-11-project-development-architecture.md)、[资料可移植](../../../../docs/architecture/2026-11-12-project-data-portability.md)、[工作流](../../../../docs/development/workflow.md)。
 - 对照源码：`packages/project-plugin/test/refresh-acceptance.test.ts`、`src/host/session-directory.ts`、`src/host/project-tools.ts`、`src/application/local-state.ts`、`.github/workflows/ci.yml`、`.workflow/ci.yml`。
 - 对照固定宿主 DSH `0.2.2-rc.2` 源码快照：`packages/core/tools/src/index.ts` 的 `restrict()`／`guard()`、`pipeline.ts` 的分派顺序、`packages/core/tool-executor-ptc/src/index.ts`、`packages/ptc-runtime/ptc-runtime-node/` 与 `packages/sandbox/sandbox-policy/README.zh.md`。
 - 未启动真实 DSH 宿主；17 个产品场景与 3 条 CI 验收均保持 `untested`。本审阅只做静态核对、源码取证和本地自动测试，不产生产品通过、远程门禁或真实 Agent 结论。
@@ -31,7 +31,7 @@
 ### 确认通过项
 
 1. **工件齐备、计数一致。** proposal／design／5 个 Requirement 的增量 spec／tasks／validation-matrix 齐全；17 个产品 Scenario 与 CI01–CI03 共 20 条矩阵行逐一对应；8 组 32 项任务全部未勾选、矩阵全部 `untested`；没有预填 review、预勾选或把计划写成已完成。
-2. **CI 根因与测试事实可复现。** `setupGit()` 用 `git init --quiet` 继承运行器默认分支，冲突用例却固定切回 `main`（[test](../../../packages/project-plugin/test/refresh-acceptance.test.ts#L120)、[test](../../../packages/project-plugin/test/refresh-acceptance.test.ts#L405)）；本地以 `master` 复现同一 `pathspec` 失败、以 `main` 通过，529 项测试总数也与日志一致。修复方向（显式初始分支并保留真实未合并索引）正确。
+2. **CI 根因与测试事实可复现。** `setupGit()` 用 `git init --quiet` 继承运行器默认分支，冲突用例却固定切回 `main`（[test](../../../../packages/project-plugin/test/refresh-acceptance.test.ts#L120)、[test](../../../../packages/project-plugin/test/refresh-acceptance.test.ts#L405)）；本地以 `master` 复现同一 `pathspec` 失败、以 `main` 通过，529 项测试总数也与日志一致。修复方向（显式初始分支并保留真实未合并索引）正确。
 3. **方向与已定边界一致。** 分析入口对应 N07 的专门聊天，固定 DSH `0.2.2-rc.2` 对应 N11，首版中英资源对应 N13，报告只留本机、可移植摘要和规划应用留给后续 change，符合 N14／N15 与资料可移植设计；R3 明确写为“首切片”，未把规划应用或 R3 整体完成当作本 change 交付。
 4. **固定宿主接点的静态理解基本准确。** `restrict()` 要求 agent 作用域、`guard()` 在 pre-execute 策略与审批后执行、全局守卫对每个 agent 调用求值、PTC 嵌套调用走同一 pipeline，均与 rc.2 源码相符；A04／A05 用普通 Session 对照和真实调用拒绝来验收，方向正确。
 5. **验证设计分层诚实。** 矩阵按自动、真实文件、固定宿主、真实 Agent 标注环境；A10 的实例隔离、A11–A14 的依据状态、A15 的来源回看、A16 的复盘独立 ID 都有对应任务；没有用文档校验或本地测试冒充产品验收。
@@ -66,7 +66,7 @@
 
 #### A4（应改）· 项目记录／验证记录的读取与引用凭证未写清
 
-- **事实。** [产品设计](../../../docs/product/2026-11-11-project-management-design.md#接入已有项目与再次分析) 要求分析代码、文档、已有 spec／change、当前规划和实际验证记录；[design](design.md#L40) 允许读取“规划背景和允许引用的已有验证记录”，[design](design.md#L72) 允许用“有效项目记录”支撑事实。但四类分析能力（[design](design.md#L54)）只列项目背景、文件索引、文件正文和报告提交；读取凭证表（[design](design.md#L71)）只描述文件路径、行范围与摘要，没有记录正文的交付与校验规则；[tasks 5.1](tasks.md#L38) 只写“可核对项目记录”。
+- **事实。** [产品设计](../../../../docs/product/2026-11-11-project-management-design.md#接入已有项目与再次分析) 要求分析代码、文档、已有 spec／change、当前规划和实际验证记录；[design](design.md#L40) 允许读取“规划背景和允许引用的已有验证记录”，[design](design.md#L72) 允许用“有效项目记录”支撑事实。但四类分析能力（[design](design.md#L54)）只列项目背景、文件索引、文件正文和报告提交；读取凭证表（[design](design.md#L71)）只描述文件路径、行范围与摘要，没有记录正文的交付与校验规则；[tasks 5.1](tasks.md#L38) 只写“可核对项目记录”。
 - **影响。** 实现者可以只把规划当“项目背景”，不交付验证记录正文；或者让 Agent 引用记录 ID 而不核对 `contentHash`／`subjectVersion`，使 A09 的“无效引用”和“历史验证状态”无法稳定验收。产品要求的“实际验证记录”可能实际落空。
 - **建议。** 明确项目记录（至少 `verification`）是否属于“项目背景”能力、如何交付正文、如何以记录 ID＋`contentHash`＋`subjectVersion` 校验引用、如何计入报告覆盖；补 5.1／5.2 与 A09 的证据。若首切片不读取验证记录，应在 proposal 的 Impact 和 spec 中明说，而不是保留一个无法验收的“允许引用”。
 
@@ -85,7 +85,7 @@
 
 ### 结论
 
-**有条件放行。** 方向、R3 首切片边界、CI 根因与 20 条验收矩阵整体成立；OpenSpec 11/11、仓库门禁 0/0、CI 失败根因与 529 项测试均已独立复现。A1 是提交与实施前必须解决的安全边界，A2–A4 应在提交前补齐设计与验收，A5 为建议。请作者按[工作流](../../../docs/development/workflow.md)在 `review-response.md` 逐条记录处理与位置，修订后重跑 OpenSpec 严格校验和仓库门禁，再由审 1 复核；双审齐备或用户裁决前不提交。17 个产品场景与 3 条 CI 验收仍全部 `untested`，本审阅不产生任何产品通过或远程门禁结论。
+**有条件放行。** 方向、R3 首切片边界、CI 根因与 20 条验收矩阵整体成立；OpenSpec 11/11、仓库门禁 0/0、CI 失败根因与 529 项测试均已独立复现。A1 是提交与实施前必须解决的安全边界，A2–A4 应在提交前补齐设计与验收，A5 为建议。请作者按[工作流](../../../../docs/development/workflow.md)在 `review-response.md` 逐条记录处理与位置，修订后重跑 OpenSpec 严格校验和仓库门禁，再由审 1 复核；双审齐备或用户裁决前不提交。17 个产品场景与 3 条 CI 验收仍全部 `untested`，本审阅不产生任何产品通过或远程门禁结论。
 
 ## 审 2 · GLM · 2026-11-25
 
@@ -94,7 +94,7 @@
 ### 范围与方法
 
 - 通读 [proposal](proposal.md)、[design](design.md)、[增量 spec](specs/project-analysis/spec.md)、[tasks](tasks.md) 与 [validation-matrix](validation-matrix.md)，核对 17 条 Scenario、32 项任务与 20 条矩阵行的对应关系。
-- 对照主 specs 与文档：[project-overview-resume](../../specs/project-overview-resume/spec.md)、[project-conversation-context](../../specs/project-conversation-context/spec.md)、[决策](../../../docs/knowledge/decisions.md)（N07／N11／N13–N15）、[工作流](../../../docs/development/workflow.md)。
+- 对照主 specs 与文档：[project-overview-resume](../../../specs/project-overview-resume/spec.md)、[project-conversation-context](../../../specs/project-conversation-context/spec.md)、[决策](../../../../docs/knowledge/decisions.md)（N07／N11／N13–N15）、[工作流](../../../../docs/development/workflow.md)。
 - 对照本仓源码：`packages/project-plugin/test/refresh-acceptance.test.ts`、`src/adapters/fs/path-scope.ts`、`src/domain/relative-path.ts`。
 - 对照本机 DSH `0.2.2-rc.2` 源码快照（`~/Developer/tools/deepseek-harness`）：`packages/core/tools/src/index.ts`、`packages/ptc-runtime/ptc-runtime-node/README.zh.md`、`packages/sandbox/sandbox-policy/README.zh.md`。
 - 未启动真实 DSH 宿主；17 个产品场景与 3 条 CI 验收保持 `untested`。本审阅只做静态核对、源码取证与本地测试复跑，不产生产品通过、远程门禁或真实 Agent 结论。
@@ -108,8 +108,8 @@
 | `env … init.defaultBranch=master node --test --test-name-pattern=git-unmerged lib-test/test/refresh-acceptance.test.js` | 复现两份日志的失败：`error: pathspec 'main' did not match any file(s) known to git`，用例失败退出 |
 | 同上，`init.defaultBranch=main` | `tests 1 / pass 1 / fail 0` |
 | `node --test lib-test/test/*.test.js` | `tests 529 / pass 529 / fail 0`，与两份 CI 日志的 529 项总数一致 |
-| 夹具源码核对 | `setupGit()` 在 [test](../../../packages/project-plugin/test/refresh-acceptance.test.ts#L120) 用 `git init --quiet`；`1.3 git-unmerged` 在 [test](../../../packages/project-plugin/test/refresh-acceptance.test.ts#L405) 写死 `checkout --quiet main` |
-| `validateRelativePath`／`resolveInScope` | 均存在并被既有读路径复用（[path-scope.ts](../../../packages/project-plugin/src/adapters/fs/path-scope.ts#L44)），design 的复用声明属实 |
+| 夹具源码核对 | `setupGit()` 在 [test](../../../../packages/project-plugin/test/refresh-acceptance.test.ts#L120) 用 `git init --quiet`；`1.3 git-unmerged` 在 [test](../../../../packages/project-plugin/test/refresh-acceptance.test.ts#L405) 写死 `checkout --quiet main` |
+| `validateRelativePath`／`resolveInScope` | 均存在并被既有读路径复用（[path-scope.ts](../../../../packages/project-plugin/src/adapters/fs/path-scope.ts#L44)），design 的复用声明属实 |
 
 ### 确认通过项
 
@@ -167,7 +167,7 @@ B1 的越界读在 `read-only` 文件沙箱下不受进程级拦截，是主要�
 
 ### 结论
 
-**有条件放行。** 与审 1 结论一致但基于本会话独立取证：CI 夹具根因在两种 `init.defaultBranch` 配置下分别复现失败与通过，全量 529 项测试通过，`restrict()`／PTC 运行时／文件沙箱的语义在 rc.2 源码中逐条核实，B1 必改成立。作者须先解决 B1，并在提交前补齐 B2–B4 的设计与验收；B5–B7 为建议。请按[工作流](../../../docs/development/workflow.md)在 `review-response.md` 逐条记录处理与位置，修订后重跑 OpenSpec 严格校验与仓库门禁；双审已齐，经确认或用户裁决后再提交。17 个产品场景与 3 条 CI 验收仍全部 `untested`，本审阅不产生任何产品通过或远程门禁结论。
+**有条件放行。** 与审 1 结论一致但基于本会话独立取证：CI 夹具根因在两种 `init.defaultBranch` 配置下分别复现失败与通过，全量 529 项测试通过，`restrict()`／PTC 运行时／文件沙箱的语义在 rc.2 源码中逐条核实，B1 必改成立。作者须先解决 B1，并在提交前补齐 B2–B4 的设计与验收；B5–B7 为建议。请按[工作流](../../../../docs/development/workflow.md)在 `review-response.md` 逐条记录处理与位置，修订后重跑 OpenSpec 严格校验与仓库门禁；双审已齐，经确认或用户裁决后再提交。17 个产品场景与 3 条 CI 验收仍全部 `untested`，本审阅不产生任何产品通过或远程门禁结论。
 
 ### 审 2 复核 · GLM · 2026-11-25
 
@@ -188,7 +188,7 @@ B1 的越界读在 `read-only` 文件沙箱下不受进程级拦截，是主要�
 
 残留（微小修，不阻塞）：proposal L3 “`[作者回应](review-response.md)所属里程碑`”缺一个分隔符（空格或句号），提交前顺手修即可；本 review 首轮两节引用的 design 行号锚点因修订漂移，属时点记录不改。
 
-**复核通过。** B1 必改与 B2–B4 应改均已按承诺落实且技术事实独立核实成立，B5–B7 采纳到位。作者修订稿已重跑 OpenSpec 11/11 与仓库门禁 0/0（以 review-response 记录为准，提交前如再有改动须重跑）。按[工作流](../../../docs/development/workflow.md)待审 1 亦复核后即可提交；执行器与历史会话拒绝目前只有静态取证，实施阶段须以任务 2.2／2.3／8.1 的隔离实测兑现。17 个产品场景与 3 条 CI 验收保持 `untested`，本复核不产生产品或远程门禁结论。
+**复核通过。** B1 必改与 B2–B4 应改均已按承诺落实且技术事实独立核实成立，B5–B7 采纳到位。作者修订稿已重跑 OpenSpec 11/11 与仓库门禁 0/0（以 review-response 记录为准，提交前如再有改动须重跑）。按[工作流](../../../../docs/development/workflow.md)待审 1 亦复核后即可提交；执行器与历史会话拒绝目前只有静态取证，实施阶段须以任务 2.2／2.3／8.1 的隔离实测兑现。17 个产品场景与 3 条 CI 验收保持 `untested`，本复核不产生产品或远程门禁结论。
 
 ## 审 1 复核（第 2 轮） · DSH · 2026-11-25
 

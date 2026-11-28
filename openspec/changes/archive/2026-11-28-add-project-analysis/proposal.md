@@ -6,7 +6,7 @@
 
 ## Why
 
-接入已有代码项目和开发中复盘需要同一个分析入口。用户需要知道 Agent 实际看了什么、结论依据是什么，以及工作副本或规划改变后哪些建议需要重新核对。R2 已提供项目概览和实例聊天，可在这两个入口上完成首次分析到复盘的闭环。 [产品设计](../../../docs/product/2026-11-11-project-management-design.md#接入已有项目与再次分析) · [R3 路线图](../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#r3项目分析与自主规划)
+接入已有代码项目和开发中复盘需要同一个分析入口。用户需要知道 Agent 实际看了什么、结论依据是什么，以及工作副本或规划改变后哪些建议需要重新核对。R2 已提供项目概览和实例聊天，可在这两个入口上完成首次分析到复盘的闭环。 [产品设计](../../../../docs/product/2026-11-11-project-management-design.md#接入已有项目与再次分析) · [R3 路线图](../../../../docs/engineering/2026-11-12-plugin-development-roadmap.md#r3项目分析与自主规划)
 
 2026-11-24，GitHub Actions #19 和 Gitee Go 都在 `pnpm check:ci` 的同一条真实 Git 合并冲突测试失败。测试初始化临时库时继承默认分支名，随后写死 `checkout main`，导致两边均在进入冲突断言前退出。本 change 先修复夹具，再分别核对两个远程门禁。 [日志与复现](design.md#先修复双远程-ci)
 
