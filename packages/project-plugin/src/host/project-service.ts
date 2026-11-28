@@ -160,6 +160,8 @@ export interface ConaProjectRuntime {
   recordReader?: RecordBodyReader;
   /** 每实例只读工作副本观察（3.2）；未配置该实例映射时返回 null。 */
   observeWorkCopy?: (instanceId: string) => import('../adapters/fs/work-copy.js').WorkCopyObservation | null;
+  /** 每实例分析范围服务（3.1-3.5）：仓库映射、预览、观察、读取与引用复核。 */
+  analysis?: import('../application/analysis-scope.js').AnalysisScopeService;
 }
 
 export type RuntimeResult =

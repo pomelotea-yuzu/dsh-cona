@@ -18,11 +18,13 @@ import { z } from 'zod'
 import { ProjectCommandService } from '../application/command-service.js'
 import { InstanceCommandQueue } from '../application/command-queue.js'
 import { ConversationService } from '../application/conversations.js'
+import { AnalysisScopeService, type AnalysisRepositoryMapping } from '../application/analysis-scope.js'
 import { ResumeChatService } from '../application/resume-chat.js'
 import { WorkService } from '../application/work.js'
 import { InMemoryChangeStream, notificationForCommit, notificationForRefresh } from '../application/change-stream.js'
 import { ProjectSnapshotService } from '../application/snapshot.js'
 import { createSourceFiles } from '../adapters/fs/source-files.js'
+import { createAnalysisFiles } from '../adapters/fs/analysis-files.js'
 import { LocalStateStore } from '../adapters/fs/local-state.js'
 import { resolveLocalRoot, rootRelation } from '../adapters/fs/local-root.js'
 import { inspectPrivateRoot } from '../adapters/fs/git-guard.js'
@@ -375,7 +377,22 @@ function mountProjectServices(ctx: Context, config: HostConfigInput): ProjectToo
         return { ok: true as const, body: new TextDecoder().decode(bytes) }
       },
     }
-    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, resumeChats, recordReader, observeWorkCopy: observeWorkCopyFor(instance) }
+    const analysis = new AnalysisScopeService({
+      instanceId: instance.instanceId,
+      sourceGeneration: instance.sourceEpoch,
+      // 每次请求重读本机聚合：登记映射可能在本机状态更新，不用启动时的快照。
+      repositories: async (): Promise<readonly AnalysisRepositoryMapping[]> => {
+        const localRoot = config.localDataRoot ?? await defaultLocalRootDir()
+        if (localRoot === undefined) return instance.repositoryMaps
+        const shown = await localState.show({ localDataRoot: localRoot, instanceId: instance.instanceId })
+        if (!shown.ok || shown.aggregate === null) return instance.repositoryMaps
+        return shown.aggregate.repositoryMaps ?? []
+      },
+      files: createAnalysisFiles({ sha256 }),
+      sha256,
+      clock,
+    })
+    const value: ConaProjectRuntime = { instance, snapshot, command, chats, work, resumeChats, recordReader, observeWorkCopy: observeWorkCopyFor(instance), analysis }
     return { ok: true, value }
   }
 

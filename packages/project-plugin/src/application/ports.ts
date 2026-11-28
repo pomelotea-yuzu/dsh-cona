@@ -3,6 +3,7 @@
 // 3.1 落地资料位置与基础接入所需端口；注册表、本机聚合与命令封套分别在 3.2／3.4 补。
 
 import type { ProjectDocument, Sha256Fn, ValidationIssue } from '../domain/types.js';
+import type { AnalysisLimits, ObservationEntry, ObservationExclusion, ObservationIssue, ScopeSelection } from '../domain/analysis.js';
 import type { LocationIssue, LocationKind, LocationPlan, LocationRequest } from './location.js';
 import type {
   InstanceAggregate,
@@ -32,6 +33,59 @@ export interface LocalStatePort {
 export interface ConversationPort {
   link(link: unknown): Promise<unknown>;
   open(conversationId: string): Promise<unknown>;
+}
+
+/** 分析仓库检查结果：root 为 realpath；非 Git 目录也可选，git 为 null。 */
+export type AnalysisRepositoryInspection =
+  | { readonly ok: true; readonly root: string; readonly git: { readonly head?: string } | null }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
+/** 一次范围枚举的原始结果（应用层据此计算指纹与完整性）。 */
+export interface AnalysisEnumeration {
+  readonly entries: ObservationEntry[];
+  readonly exclusions: ObservationExclusion[];
+  readonly issues: ObservationIssue[];
+  readonly truncated: boolean;
+  readonly git: { readonly status: 'observed'; readonly head?: string } | { readonly status: 'unavailable'; readonly reason: string };
+}
+
+export type AnalysisEnumerationResult =
+  | { readonly ok: true; readonly value: AnalysisEnumeration }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
+/** 稳定读取的完整文件字节与整份哈希。 */
+export interface AnalysisFileBytes {
+  readonly bytes: Uint8Array;
+  readonly absolutePath: string;
+  readonly fullHash: string;
+}
+
+export type AnalysisFileBytesResult =
+  | { readonly ok: true; readonly value: AnalysisFileBytes }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
+export type AnalysisTextResult =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly code: 'analysis-file-non-text'; readonly message: string };
+
+/** 分析范围的文件系统端口：检查仓库、枚举范围、稳定读取。 */
+export interface AnalysisFilesPort {
+  /** 检查配置映射指向的本机工作副本；只读。 */
+  inspectRepository(absolutePath: string): Promise<AnalysisRepositoryInspection>;
+  /** 枚举一个仓库根/目录/文件，按稳定顺序返回观察条目与排除项；不读取正文交付。 */
+  enumerate(root: string, scope: ScopeSelection, limits: AnalysisLimits): Promise<AnalysisEnumerationResult>;
+  /**
+   * 读取范围内常规文件的完整字节并取得整份哈希；读取前后内容或路径变化时拒绝。
+   * options.readBytes 供测试注入故障读取，产品默认使用 node:fs。
+   */
+  readBytes(
+    root: string,
+    relativePath: string,
+    limits: AnalysisLimits,
+    options?: { readonly readBytes?: (absolutePath: string) => Promise<Uint8Array> },
+  ): Promise<AnalysisFileBytesResult>;
+  /** 文本判定：合法 UTF-8 且不是二进制；由适配器使用宿主运行时解码。 */
+  decodeText(bytes: Uint8Array): AnalysisTextResult;
 }
 
 /** 宿主会话目录视图（tasks 6.1，design §7）：插件经此读取／创建真实 Session，不假设 id。 */
